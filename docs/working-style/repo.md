@@ -8,6 +8,7 @@ Layout, the task runner, pinned versions, CI, config and docs.
 conduit/
   CLAUDE.md            agent entry point; short, points into docs/
   CLAUDE.local.md      gitignored; local-only agent notes
+  .vscode/             shared editor settings and recommended extensions
   justfile             the one entry point; `just` lists every recipe
   server/              Go module: API + execution engine (go.md)
   web/                 React app (web.md)
@@ -74,6 +75,16 @@ lint fails only in CI, on code that's clean everywhere else.
 - Coverage floors only ratchet up.
 - Generated code is committed. CI runs `just gen` and fails on
   `git diff --exit-code`.
+
+## Editor
+
+- `.vscode/settings.json` formats on save only with the formatters
+  `just check` runs (gofumpt, Prettier), so the editor and CI can't
+  disagree. Generated code opens read-only.
+- `.vscode/extensions.json` lists the recommended extensions; VS Code
+  offers them on first open.
+- Personal preferences go in your user settings, not here. `.gitignore`
+  keeps the rest of `.vscode/` out, using GitHub's standard template.
 
 ## Config and env
 

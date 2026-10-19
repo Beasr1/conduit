@@ -14,3 +14,14 @@ coverage/
 
 # os
 .DS_Store
+
+# editor: share project settings and recommendations, nothing personal
+# (github/gitignore's VisualStudioCode template)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+!*.code-workspace
+*.vsix

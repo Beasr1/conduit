@@ -11,8 +11,11 @@ CI, and both use the same command.
 ## Steps
 
 Repo
-- [ ] `git init` with `main`. `.gitignore` is already in place, including
-      `CLAUDE.local.md`; extend it as tools land.
+- [x] `git init` with `main`, and `origin` on GitHub. `.gitignore` is in
+      place, including `CLAUDE.local.md`; extend it as tools land.
+- [x] `.vscode/settings.json` and `extensions.json`: format on save with the
+      same formatters `just check` runs, recommended extensions, and
+      generated code opened read-only.
 - [ ] `justfile` with `setup`, `dev`, `check`, `fmt`, `test`, `gen`,
       `db-migrate`, `db-reset` and `hooks-install`, plus the pipefail shell.
 - [ ] `.env.example` for the server and for web, in sections; `just setup`

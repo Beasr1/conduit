@@ -1,0 +1,48 @@
+{
+  // Format on save only with the formatters `just check` also runs:
+  // gofumpt for Go, Prettier for web/. The editor and CI can't disagree.
+  "[go]": {
+    "editor.defaultFormatter": "golang.go",
+    "editor.formatOnSave": true
+  },
+  "gopls": {
+    "formatting.gofumpt": true
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[css]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+
+  // ESLint runs from web/, where its config and node_modules live.
+  "eslint.workingDirectories": ["web"],
+
+  // Use the TypeScript pinned in web/ (6.0), not the one VS Code bundles.
+  "typescript.tsdk": "web/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // Generated code is never edited by hand: change schema/ and run `just gen`.
+  "files.readonlyInclude": {
+    "server/internal/httpapi/gen/**": true,
+    "web/src/gen/**": true
+  },
+
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/coverage": true
+  }
+}
