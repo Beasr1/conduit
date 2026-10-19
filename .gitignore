@@ -1,0 +1,16 @@
+# local only
+CLAUDE.local.md
+
+# env
+.env
+.env.*
+!.env.example
+
+# build output
+node_modules/
+dist/
+coverage/
+*.out
+
+# os
+.DS_Store
