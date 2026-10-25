@@ -1,0 +1,114 @@
+# The workflow definition: the document an editor saves and the engine runs.
+# Go types in server/internal/workflow are generated from this file with
+# `just gen`; generated code is never edited by hand. The engine's validation
+# enforces the limits written here and reports every problem at once.
+openapi: 3.1.0
+info:
+  title: Conduit workflow definition
+  version: 0.1.0
+paths: {}
+
+components:
+  schemas:
+    Definition:
+      description: A workflow. A node runs once its parents have finished and at least one edge into it was taken.
+      type: object
+      required: [nodes]
+      additionalProperties: false
+      properties:
+        nodes:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/Node"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/Edge"
+        output:
+          type: string
+          description: JSONata over the finished run. Its value is the run's result.
+
+    Node:
+      type: object
+      required: [id, kind]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,63}$"
+          description: Unique in the workflow. Expressions read the node's result as nodes.<id>.
+        kind:
+          $ref: "#/components/schemas/NodeKind"
+        request:
+          $ref: "#/components/schemas/HTTPRequest"
+          description: The call an http node makes.
+          x-go-type-skip-optional-pointer: false
+        expr:
+          type: string
+          description: A transform node's JSONata. Its value becomes the node's body.
+
+    NodeKind:
+      type: string
+      enum: [http, transform]
+
+    HTTPRequest:
+      type: object
+      required: [method, url]
+      additionalProperties: false
+      properties:
+        method:
+          type: string
+          enum: [GET, HEAD, POST, PUT, PATCH, DELETE]
+        url:
+          type: string
+          description: An absolute http or https URL. {{ jsonata }} placeholders may appear in its path and query only.
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Header values are templates, text with {{ jsonata }} placeholders.
+        query:
+          type: object
+          additionalProperties:
+            type: string
+          description: Query parameters added to the URL. Values are templates.
+        body:
+          type: string
+          description: JSONata whose value is sent as the JSON request body.
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 300000
+          description: Timeout for each attempt, in milliseconds. Default 30000.
+        retry:
+          $ref: "#/components/schemas/Retry"
+          x-go-type-skip-optional-pointer: false
+
+    Retry:
+      description: Retries transport errors, timeouts, 429 and 5xx responses, with backoff and Retry-After honoured.
+      type: object
+      required: [attempts]
+      additionalProperties: false
+      properties:
+        attempts:
+          type: integer
+          minimum: 2
+          maximum: 5
+          description: Total attempts, the first included.
+        idempotent:
+          type: boolean
+          description: The upstream treats repeats of this request as one, so a POST or PATCH may be retried too. They're then sent with an Idempotency-Key header.
+
+    Edge:
+      type: object
+      required: [from, to]
+      additionalProperties: false
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        when:
+          type: string
+          description: A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source succeeded and this is true. Absent means true.

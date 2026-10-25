@@ -1,0 +1,16 @@
+# Generates the workflow definition types from schema/workflow.yaml into the
+# workflow package. Models only: nothing serves this file. Run `just gen`.
+package: workflow
+output: internal/workflow/definition.gen.go
+generate:
+  models: true
+compatibility:
+  # NodeKindHTTP rather than a bare Http constant in the package.
+  always-prefix-enum-values: true
+output-options:
+  # Nothing references these schemas yet, and pruning would drop them all.
+  skip-prune: true
+  # Optional strings, slices and maps become plain values, not pointers.
+  # request and retry opt back in, because nil is how "absent" shows.
+  prefer-skip-optional-pointer: true
+  name-normalizer: ToCamelCaseWithInitialisms

@@ -9,7 +9,11 @@ export PATH := justfile_directory() / ".tools/bin" + ":" + env("PATH")
 # corepack fetches the pnpm pinned in web/package.json without asking
 export COREPACK_ENABLE_DOWNLOAD_PROMPT := "0"
 
-generated := "server/internal/httpapi/gen web/src/gen"
+generated := "server/internal/httpapi/gen server/internal/workflow/definition.gen.go web/src/gen"
+
+# Test coverage floors, in percent, for the engine's packages. Raise one when
+# its coverage rises; never lower one to make check pass.
+coverage_floors := "workflow=88 transform=84 upstream=91 engine=96"
 
 default:
     @just --list
@@ -27,11 +31,11 @@ dev-server:
 dev-web:
     cd web && corepack pnpm dev
 
-# the gate: format, lint, tests, typecheck, build, stale generated code. CI runs the same
+# the gate: format, lint, tests and coverage floors, typecheck, build, stale generated code. CI runs the same
 check: _require-tools
-    @out=$(cd server && golangci-lint fmt --diff); if [ -n "$out" ]; then echo "$out"; echo "Go code isn't formatted: run just fmt"; exit 1; fi
+    @cd server && golangci-lint fmt --diff || { echo "Go code isn't formatted: run just fmt"; exit 1; }
     cd server && golangci-lint run ./...
-    cd server && go test -race ./...
+    just _coverage
     cd web && corepack pnpm format:check
     cd web && corepack pnpm lint
     cd web && corepack pnpm typecheck
@@ -51,9 +55,10 @@ test *args:
     cd server && go test -race {{args}} ./...
     cd web && corepack pnpm test
 
-# regenerate code from schema/openapi.yaml, for the server and for web
+# regenerate code from schema/: the server's HTTP layer and workflow types, and web's types
 gen:
     cd server && go tool oapi-codegen -config oapi-codegen.yaml ../schema/openapi.yaml
+    cd server && go tool oapi-codegen -config oapi-codegen.workflow.yaml ../schema/workflow.yaml
     cd web && corepack pnpm gen
 
 # install a git pre-push hook that runs `just check`
@@ -71,3 +76,19 @@ down:
 [private]
 _require-tools:
     @golangci-lint version 2>/dev/null | grep -q "version {{golangci_version}} " || { echo "golangci-lint {{golangci_version}} is missing: run just setup"; exit 1; }
+
+# Go tests with the race detector, failing if a package is under its floor.
+# go test prints one tab-separated line per package; the 4th field holds
+# "coverage: N% of statements".
+[private]
+_coverage:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd server
+    out=$(go test -race -cover ./... 2>&1) || { echo "$out"; exit 1; }
+    echo "$out"
+    echo "$out" | awk -F'\t' -v floors="{{coverage_floors}}" '
+      BEGIN { n = split(floors, f, " "); for (i = 1; i <= n; i++) { split(f[i], kv, "="); floor[kv[1]] = kv[2] } }
+      { pkg = $2; sub(/.*\//, "", pkg); pct = $4; sub(/^coverage: /, "", pct); sub(/%.*/, "", pct) }
+      pkg in floor { seen[pkg] = 1; if (pct + 0 < floor[pkg] + 0) { printf "coverage of %s is %s%%, under its floor of %s%%\n", pkg, pct, floor[pkg]; bad = 1 } }
+      END { for (p in floor) if (!(p in seen)) { print "no coverage reported for " p; bad = 1 }; exit bad }'

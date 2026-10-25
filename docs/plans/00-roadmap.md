@@ -113,7 +113,10 @@ server (one Go binary)
 One process serves the API and runs workflows on goroutines. Postgres is the
 only state.
 
-## Workflow definition (sketch; plan 02 finalises it)
+## Workflow definition (sketch)
+
+Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
+`output_schema` and `ui` aren't in it yet; they arrive with 03 and 04.
 
 ```json
 {
@@ -316,7 +319,7 @@ can do.
 |---|---|
 | gnata is young (created 2026-03, pre-1.0, ported with AI) | pin exact; keep it behind `transform`; golden tests for every example expression; the jsonata-js suite already passes |
 | SSRF through user-configured URLs | dialer-level IP check after DNS; tests for each blocked range and for redirects; the dev override is explicit |
-| JSONata is user-written code | guardrails always on; tests that a runaway expression times out. Guardrails don't bound memory (a 1,000,000 sequence limit peaked at 5.5 GB, measured), so keep the limit low, cap the document size, and set a process memory limit |
+| JSONata is user-written code | guardrails always on; tests that runaway expressions stop. Guardrails don't bound memory: measured in 02, the sequence limit fires only after a cross product is built, and a doubling string reached 5 GB inside the 500 ms timeout. So the document a node sees is capped (16 MiB), and the process needs a memory limit (06) |
 | Large payloads | caps on the response body, the stored copy and the JSONata sequence size |
 | Large graphs in React Flow | target ≤ 200 nodes in v1; follow React Flow's performance guide |
 | Agent-built workflows with side effects (08) | agents only write drafts; drafts run in dry-run; a person publishes |

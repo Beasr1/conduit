@@ -35,7 +35,7 @@ when a second consumer of shared TypeScript code does.
   |---|---|
   | `setup` | install the pinned golangci-lint into `.tools/bin`, and the web dependencies |
   | `dev-server`, `dev-web` | the server, and Vite with `/api` proxied to it |
-  | `check` | format, lint, race tests, typecheck, build, generated-code drift. **The gate.** CI runs exactly this |
+  | `check` | format, lint, race tests, coverage floors, typecheck, build, generated-code drift. **The gate.** CI runs exactly this |
   | `fmt` | apply formatting |
   | `test *args` | Go and web tests; args pass through to `go test` |
   | `gen` | regenerate code from `schema/` |
@@ -79,7 +79,9 @@ lint fails only in CI, on code that's clean everywhere else.
   missing in fresh clones, and never run for merges made in the web UI.
 - A gate has to be able to fail. A check that isn't a gate yet says so in
   its name.
-- Coverage floors only ratchet up.
+- Coverage floors only ratchet up. They're the `coverage_floors` variable
+  in the justfile, checked by the private `_coverage` recipe that `check`
+  runs.
 - Generated code is committed. CI runs `just gen` and fails on
   `git diff --exit-code`.
 

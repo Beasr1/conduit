@@ -34,7 +34,7 @@
 
   // Generated code is never edited by hand: change schema/ and run `just gen`.
   "files.readonlyInclude": {
-    "server/internal/httpapi/gen/**": true,
+    "server/**/*.gen.go": true,
     "web/src/gen/**": true
   },
 

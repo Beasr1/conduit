@@ -8,6 +8,17 @@ updates:
       interval: weekly
     cooldown:
       default-days: 3
+    ignore:
+      # Each of these lines is chosen on purpose and moves by hand: nginx's
+      # stable branch (even minor; odd is mainline), Node's LTS line, and the
+      # Go minor that server/go.mod's toolchain line names. Patch releases and
+      # digest refreshes still come through.
+      - dependency-name: nginxinc/nginx-unprivileged
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      - dependency-name: golang
+        update-types: ["version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -29,3 +40,7 @@ updates:
       interval: weekly
     cooldown:
       default-days: 3
+    ignore:
+      # The types track the Node version we run (24, web/.node-version).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]

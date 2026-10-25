@@ -20,7 +20,7 @@ server/
   cmd/conduit/main.go   subcommands (serve, migrate); wiring only
   internal/
     config/      Load() from env + Validate(); the only package reading env
-    workflow/    definition types, Validate(), topological order; pure, no I/O
+    workflow/    definition types (generated from schema/workflow.yaml), Validate(); pure, no I/O
     engine/      runs a validated workflow: scheduler, node execution, events
     transform/   JSONata (gnata) behind a small interface, guardrails always on
     upstream/    the only outbound HTTP: SSRF-safe transport, retries, error kinds
@@ -67,7 +67,8 @@ server/
 - Use `errors.Join` for several errors, not `%v` of a slice.
 - Handle an error once. Handlers log; everything below returns.
 - Upstream call errors carry a `Kind` (transport, timeout, status, decode,
-  blocked). Query strings are stripped and the body excerpt is capped.
+  blocked, too_large). Their messages leave out the query string, which
+  may hold secrets.
 
 ## Concurrency
 
@@ -114,8 +115,19 @@ server/
   redirects to internal hosts fail at dial time. It also sets `Proxy: nil`,
   allows only http/https, caps redirects, and caps response bodies with
   `io.LimitReader`.
-- Private networks are allowed only when `CONDUIT_ALLOW_PRIVATE_NETWORKS=true`
-  (local dev). Tests build the guard with an explicit allow.
+- Private networks are allowed only with
+  `upstream.Options.AllowPrivateNetworks`, which
+  `CONDUIT_ALLOW_PRIVATE_NETWORKS=true` will set from 03 (local dev only).
+  Tests build the guard with loopback allowed, and one proves the default
+  refuses it.
+- A placeholder's value can't change a URL's shape.
+  - In the path it must be one segment even after a server decodes it.
+    `""`, `.`, `..` and any value holding `/` or `\` are refused.
+  - Escaping alone isn't enough. Behind nginx proxying to a URI,
+    `..%2Fadmin` reached the backend as `/admin`: nginx decoded the `%2F`,
+    then resolved the `..` (plan 02).
+  - Everything else but unreserved characters is escaped.
+  - In the query, a value is escaped as one value.
 - `net.IP.IsGlobalUnicast` is true for private ranges (RFC 1918, ULA), so
   it isn't a "public address" test. Use the guard's own check.
 - code.dny.dev/ssrf allows only ports 80 and 443 by default. Upstreams on
@@ -133,10 +145,18 @@ server/
 
 - JSONata runs only through `internal/transform`, with all three gnata
   guardrails set: `WithTimeout`, `WithStack`, `WithSequence`.
-- The guardrails bound time and depth, not memory. Measured: a sequence
-  limit of 1,000,000 fired only after the process peaked at 5.5 GB. Keep
-  the limit far lower (size it by measuring in plan 02), cap the data
-  document's size, and give the process a memory limit.
+- The guardrails bound time and depth, not memory. Set: timeout 500 ms,
+  stack 100, sequence 100,000. Measured in plan 02, the sequence limit fires
+  only after a cross product is built, and repeatedly doubling a string
+  stays inside all three limits while reaching gigabytes. So the sequence
+  limit is sized to what real mappings need (a 10 MiB body holds about
+  100,000 items; 10,000 broke them), the data document is capped at 16 MiB,
+  and the process needs a memory limit (06).
+- A condition (an edge's `when`) is cast the way `$boolean()` casts, and a
+  placeholder the way `$string()` does, so both follow JSONata's own rules.
+- An expression that gives nothing (JSONata's undefined) where a value is
+  needed is an error, not a silent `null`. So is a function value, which
+  would otherwise marshal as a dump of its closure.
 - Evaluate over raw JSON bytes (gnata's `EvalBytes`), so 64-bit IDs keep
   their digits instead of being rounded through float64.
 - Regexes are RE2: linear time, but no lookaround and no backreferences.
@@ -169,10 +189,13 @@ server/
 - Store tests run against the compose Postgres, with a fresh database per
   test package. No pgxmock.
 - `go test -race ./...`, always.
+- Build test requests with `httptest.NewRequestWithContext(t.Context(), …)`.
+  The `noctx` linter rejects `httptest.NewRequest`, tests included, and
+  that's what failed the first CI run.
 - Name tests after behaviour: `TestScheduler_FanInWaitsForAllParents`.
 - Use `slog.New(slog.DiscardHandler)` in tests; no hand-rolled nop logger.
-- Coverage floors for `workflow`, `engine`, `transform` and `upstream` only.
-  Floors ratchet up, never down.
+- Coverage floors for `workflow`, `engine`, `transform` and `upstream` only,
+  in the justfile. Floors ratchet up, never down.
 
 ## Dependencies
 

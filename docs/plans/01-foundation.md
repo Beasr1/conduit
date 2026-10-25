@@ -1,9 +1,8 @@
 # 01 — Foundation
 
-Status: nearly done (2026-10-25). Every gate is written and wired into
-`just check` and CI. Waiting on one thing: golangci-lint has to be installed
-(`just setup`) before the Go lint and format gates can be seen passing and
-failing on this machine.
+Status: done locally (2026-10-25). `just check` passes on this machine,
+golangci-lint included, and every gate has been seen failing. Left: seeing CI
+green on the next push, and turning on Dependabot alerts in GitHub.
 
 Scope change, 2026-10-25: the database pieces moved to 03 and the UI
 foundations to 04, because nothing uses them before then. Plan 01 is about
@@ -38,8 +37,14 @@ Server
       gosec, nilerr and noctx; gofumpt and goimports as formatters.
       golangci-lint 2.15.0 is installed by `just setup` (binary, into
       `.tools/bin`) and by the official action in CI. `go vet` runs inside it.
-- [ ] **See** `golangci-lint run` and the format gate pass, and fail once on
-      an unformatted file. Blocked until `just setup` installs the binary.
+- [x] **See** `golangci-lint run` and the format gate pass, and fail once on
+      an unformatted file.
+      - Lint failed once, on gosec G101 against a test's deliberate URL
+        credentials, which now carry a `//nolint` with the reason.
+      - The format gate failed on gofumpt's table-entry layout.
+      - It first failed *silently*: `golangci-lint fmt --diff` exits 1 when
+        it finds a diff, so the old `out=$(…)` stopped under `bash -e`
+        before printing anything. The gate now prints the diff.
 
 Schema
 - [x] `schema/openapi.yaml` (3.1): `/healthz`, plus the RFC 9457 problem
@@ -70,12 +75,16 @@ Infra and CI
       pinned. See repo.md.
 - [x] GitHub Actions (`.github/workflows/ci.yml`): actions pinned to commit
       SHAs; Go from `go.mod`'s toolchain line, Node from `.node-version`, the
-      pinned just and golangci-lint; then `just setup` and `just check`. Not
-      yet seen running: it runs on the first push.
+      pinned just and golangci-lint; then `just setup` and `just check`. Its
+      first run (2026-10-25) failed on two `noctx` findings in
+      `router_test.go`; that's fixed. The format check passed, and nothing
+      else was flagged.
 - [x] `just hooks-install`: a pre-push hook that runs `just check`.
 - [x] Dependabot (`.github/dependabot.yml`): weekly bumps for Docker digests,
       actions, Go modules and npm, with a 3-day cooldown matching pnpm's
-      release-age guard.
+      release-age guard. Its first PRs proposed nginx mainline (1.31) and
+      `@types/node` 26. Ignore rules now keep it on the lines we chose:
+      nginx stable, Node 24 LTS, and the Go minor in `go.mod`.
 - [x] CLAUDE.md's commands match the justfile.
 - [ ] Turn on Dependabot alerts and security updates in the GitHub repo's
       settings (Settings → Advanced Security). It's a click on GitHub, not
@@ -99,10 +108,10 @@ Moved out
   03.)
 - `just check` is green locally and in CI, and has been seen failing on each
   gate:
-  - an unformatted Go file: seen with gofmt; to re-see with gofumpt;
+  - an unformatted Go file: seen, with gofumpt;
   - an unformatted TS file: seen;
-  - a lint finding: seen in web; Go is pending;
-  - a failing test: seen in web; Go is covered by `go test`;
+  - a lint finding: seen in web and in Go (gosec);
+  - a failing test: seen in web, and in Go through the coverage gate;
   - stale generated code: to see once the generated files are committed.
 - CLAUDE.md's commands match the justfile.
 

@@ -7,8 +7,8 @@ lives as a row in 00-roadmap.md.
 | # | Plan | Goal | Status |
 |---|---|---|---|
 | 00 | 00-roadmap.md | scope, architecture, execution semantics, decisions, milestones | proposed; only D1 open |
-| 01 | 01-foundation.md | monorepo skeleton; every gate runs locally and in CI | not started |
-| 02 | engine | workflow model, validation, scheduler, upstream caller, JSONata | not started |
+| 01 | 01-foundation.md | monorepo skeleton; every gate runs locally and in CI | done locally; CI green to see on the next push |
+| 02 | 02-engine.md | workflow model, validation, scheduler, upstream caller, JSONata | built; `just check` green locally |
 | 03 | api | persistence, REST, live run events, serving published workflows | not started |
 | 04 | graph-editor | build, save and run workflows in graph mode | not started |
 | 05 | page-mode | step-by-step builder over the same definition | not started |

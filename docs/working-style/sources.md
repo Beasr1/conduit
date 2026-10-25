@@ -96,6 +96,10 @@ resolve, but their claims weren't re-read.
     15.
   - The README's case counts (1,778 and 1,704) don't match the portable
     suite's 1,686 cases.
+- Measured in plan 02: the sequence limit is checked after a mapping step
+  has built its result, so it can't bound a cross product's memory, and a
+  limit of 10,000 broke real mappings over a 100,000-item response. The
+  limit is 100,000.
 
 ## Versions on 2026-10-19 ✓
 
