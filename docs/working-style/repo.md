@@ -55,7 +55,7 @@ when a second consumer of shared TypeScript code does.
 | Go | `server/go.mod` `toolchain` line |
 | Node | `web/.node-version` |
 | pnpm | `web/package.json` `packageManager` (corepack) |
-| JS dependencies | exact versions, `save-exact=true` |
+| JS dependencies | exact versions, via `saveExact: true` in `web/pnpm-workspace.yaml`; nothing younger than pnpm's release-age cutoff |
 | golangci-lint | justfile variable, used by `setup` and CI |
 | Docker base images | tag + digest |
 
@@ -96,11 +96,37 @@ lint fails only in CI, on code that's clean everywhere else.
 
 ## Docker
 
-- `docker/compose.yaml` runs Postgres from a pinned tag, with a healthcheck,
-  a named volume, and its port bound to `127.0.0.1`.
-- `docker/Dockerfile.server` (distroless) and `docker/Dockerfile.web`
-  (static files behind nginx). The build context is the repo root, with
-  `.dockerignore` next to it.
+- **Base images are pinned by tag and digest.** The tag is for people; the
+  digest is what gets pulled, so a republished tag can't change a build.
+  The catch: a digest never picks up patches by itself, so a bot
+  (Dependabot or Renovate) has to bump them.
+- **Images.** `docker/Dockerfile.server` is distroless and non-root.
+  `docker/Dockerfile.web` puts the build behind NGINX's non-root image. The
+  build context is the repo root, with `.dockerignore` next to it.
+- **`docker/compose.yaml`.**
+  - Only nginx is published, on `127.0.0.1`.
+  - Every container runs read-only, with no capabilities,
+    `no-new-privileges` and rotated logs.
+  - Postgres joins when the database lands: pinned tag, healthcheck, named
+    volume, port bound to `127.0.0.1`.
+- **`docker/nginx/`, one file per topic.**
+  - `conf.d/` loads inside nginx's `http {}` block in file-name order. The
+    numbered files define things: `00-logging` (log format),
+    `10-security` (CSP map), `20-limits` (rate-limit zones) and
+    `30-compression`. `default.conf` is the server, and it uses them.
+  - `snippets/` holds pieces a location includes: `security-headers.conf`
+    and `proxy.conf`.
+  - A new topic gets its own numbered file rather than growing
+    `default.conf`.
+- **What the nginx config does.**
+  - The access log is JSON on stdout, with a request id and no credentials
+    or query strings.
+  - Security headers go on every response, with the CSP chosen by content
+    type. `add_header_inherit merge` stops a location's own headers from
+    dropping them.
+  - `/api` is rate-limited and body-capped.
+  - The server is found through Docker's DNS on every request, so
+    recreating it doesn't strand nginx on an old IP.
 
 ## Docs
 

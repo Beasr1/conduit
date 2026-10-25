@@ -1,0 +1,11 @@
+# The build context is the repo root. Send only what the Dockerfiles copy.
+.git
+.vscode
+docs
+**/node_modules
+**/dist
+.env
+.env.*
+CLAUDE.md
+CLAUDE.local.md
+README.md

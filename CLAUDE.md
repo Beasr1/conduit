@@ -4,8 +4,9 @@ No-code API orchestration. Users compose upstream API calls into a DAG,
 using a graph editor or a page-by-page builder, and map data between steps
 with JSONata. A Go engine runs it, fanning out in parallel.
 
-**Status: planning.** There's no code yet. Start at docs/plans/README.md.
-The commands below arrive with plan 01.
+**Status: scaffold (plan 01 in progress).** A server with a health route, a
+web shell, nginx and Docker. What's left is in docs/plans/01-foundation.md;
+the bigger picture is docs/plans/README.md.
 
 ## Read before working
 
@@ -18,9 +19,9 @@ The commands below arrive with plan 01.
 
 - Question my decisions at every level: chat, these docs, my habits. When
   best practice disagrees, say so before acting, with a source. I decide.
-- Never `git commit` or `git push` unless I ask for that specific commit.
-  Leave changes uncommitted and suggest a one-line conventional commit
-  message. No Co-Authored-By trailer.
+- Never `git commit` or `git push`. I commit. When I ask, stage the changes
+  and suggest a one-line conventional commit message, with no
+  Co-Authored-By trailer.
 - Stage by file name only. Never `git add -A`, `-u` or `.`.
 - Never say a check passed unless it ran in this session. Say what ran.
 - Ambiguous spec: use AskUserQuestion with 2–4 options, recommended first.
@@ -37,23 +38,25 @@ The commands below arrive with plan 01.
 ## Layout
 
 - `server/`: Go module. `cmd/conduit`, plus `internal/` packages `config`,
-  `workflow`, `engine`, `transform`, `upstream`, `store` and `httpapi`.
+  `workflow`, `engine`, `transform`, `upstream`, `store` and `httpapi`. Only
+  `config` and `httpapi` exist so far.
 - `web/`: React app.
 - `schema/openapi.yaml`: source of truth for API and workflow-definition
   types on both sides.
 - `docker/`: compose files and Dockerfiles.
 - `docs/`: plans and working style.
 
-## Commands (from plan 01)
+## Commands
 
 ```
 just              list recipes
-just setup        install pinned tools, create .env files
-just dev          postgres + server + web, with reload
-just check        fmt check, lint, typecheck, tests, codegen diff; CI runs the same
-just fmt          apply formatting
-just gen          regenerate code from schema/
-just db-migrate   apply migrations
+just setup        install web dependencies (pnpm, through corepack)
+just dev-server   API server on http://127.0.0.1:8080
+just dev-web      web app on http://127.0.0.1:5173; /api is proxied to the server
+just check        gofmt check, vet, race tests, typecheck, build: the gate
+just fmt          apply Go formatting
+just test         Go tests; extra arguments pass through
+just up / down    everything in Docker behind nginx on http://127.0.0.1:8088
 ```
 
 ## Gotchas

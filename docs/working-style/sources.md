@@ -14,7 +14,7 @@ resolve, but their claims weren't re-read.
 | Precedence | chat > docs > habits > best practice | no ranking; anything can be questioned, with a source | best practice is a reason to push back, not a tiebreaker |
 | Go layout | hexagonal, interfaces in central `port/` packages | domain packages, interfaces at the consumer | go.dev: "interfaces generally belong in the package that uses values of the interface type" ✓ [1][2] |
 | Router | gin | `net/http` ServeMux (D2) | stdlib has method + path patterns since Go 1.22 [3]; no dependency; gin's `c` used as a context ignores request cancellation by default (measured) |
-| Logging | zap behind a shared logger without `With()` | `log/slog` | stdlib, structured, has `With()` [4] |
+| Logging | zap behind a shared logger without `With()` | `log/slog` | stdlib, structured, has `With()` [4]. The Go team: "It was never a goal to replace existing third-party logging packages" ✓. zap can run underneath slog through `go.uber.org/zap/exp/zapslog` if profiling ever says logging is hot ✓ |
 | Config | kelseyhightower/envconfig | ~50 lines in `internal/config` | envconfig's last release was May 2019 ✓; stdlib is the default |
 | Error→HTTP | `map[error]APIError` | ordered slice | map iteration is random, so an error matching two sentinels maps unpredictably |
 | Responses | `{success, data, message, errors, meta}` envelope | the resource itself; errors as RFC 9457 problem details | the HTTP status already says success; 9457 is the standard error format, and its `errors[].pointer` example is what the editor and agents need ✓ [28] |
@@ -32,6 +32,15 @@ resolve, but their claims weren't re-read.
 | CLAUDE.md | long, everything inline | short; points to these docs | "target under 200 lines per CLAUDE.md file" ✓ [15] |
 | Hard rules | prose only, and broken by agents again and again | also deny rules in `.claude/settings.json` for `git commit` / `git push` (recommended, not added) | rules that must always hold belong in settings or hooks [15][16] |
 | shadcn primitives | Radix | shadcn's default | "Base UI as the Default", June 2026 ✓ [17] |
+| Exact JS versions | `save-exact=true` in `.npmrc` | `saveExact: true` in `web/pnpm-workspace.yaml` | pnpm 12 doesn't read the `.npmrc` line: `pnpm config get save-exact` said `undefined`, and with the YAML setting a real `pnpm add` wrote `7.0.0` (checked 2026-10-20) |
+| Base images | tag only | tag + digest, bumped by a bot | Docker: "pin the image version to a specific digest… even if a publisher replaces the tag" ✓ [30] |
+| nginx image | official image (master process runs as root) | NGINX's non-root variant on 8080 | its README: "runs NGINX as a non root, unprivileged user" ✓ [31] |
+| nginx security headers | headers copied from an older config, including `X-XSS-Protection` | nosniff, Referrer-Policy, Permissions-Policy, COOP, and a CSP chosen by content type with `frame-ancestors`; no `X-XSS-Protection` | OWASP: "Do not set this header or explicitly turn it off"; `frame-ancestors` "obsoletes X-Frame-Options" ✓ [32] |
+| nginx header inheritance | `add_header` in locations | `add_header_inherit merge` | a location with its own `add_header` drops every server-level one; `add_header_inherit` arrived in 1.29.3 ✓ [33] |
+| nginx access log | JSON including `Authorization` and the query string | JSON with a request id; path only, no credentials | a token in a log is a leaked token (measured: the query string stays out) |
+| nginx error log | default level | rate-limit refusals below the logged level | error lines quote the whole request line, query string included (measured 2026-10-25) |
+| nginx → server address | `proxy_pass` with a fixed host | Docker's DNS, resolved per request | measured: the server moved from .2 to .4 and requests still reached it |
+| New releases | install whatever is latest | nothing younger than about a day | pnpm 12 refused `@tanstack/react-query` 5.104.5, published the day before, with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` (checked 2026-10-20) |
 
 ## Kept, and backed
 
@@ -124,6 +133,10 @@ openapi-fetch 0.17.0 · shadcn 4.22.1
 27. https://arxiv.org/abs/2602.11988
 28. https://www.rfc-editor.org/rfc/rfc9457.html
 29. https://github.com/jsonata-js/jsonata/security/advisories
+30. https://docs.docker.com/build/building/best-practices/
+31. https://github.com/nginx/docker-nginx-unprivileged
+32. https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html
+33. https://nginx.org/en/docs/http/ngx_http_headers_module.html
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

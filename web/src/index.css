@@ -1,0 +1,62 @@
+/* Theme tokens. Components use these, never raw colours. Tailwind replaces
+   this file later in plan 01. */
+:root {
+  --color-bg: #ffffff;
+  --color-fg: #111827;
+  --color-muted: #6b7280;
+  --color-up: #15803d;
+  --color-down: #b91c1c;
+  --radius-pill: 999px;
+
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  color: var(--color-fg);
+  background: var(--color-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0b0d12;
+    --color-fg: #e5e7eb;
+    --color-muted: #9ca3af;
+    --color-up: #4ade80;
+    --color-down: #f87171;
+  }
+}
+
+body {
+  margin: 0;
+}
+
+.shell {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+.badge {
+  font-size: 0.875rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  color: var(--color-muted);
+}
+
+.badge-up {
+  color: var(--color-up);
+}
+
+.badge-down {
+  color: var(--color-down);
+}

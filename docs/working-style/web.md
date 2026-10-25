@@ -7,7 +7,9 @@ them (sources.md).
 
 ## Stack
 
-Pin exact versions (`save-exact=true` in `web/.npmrc`).
+Pin exact versions (`saveExact: true` in `web/pnpm-workspace.yaml`; pnpm 12
+ignores `save-exact` in `.npmrc`). pnpm also refuses releases younger than
+about a day. Keep that guard on: pick a slightly older version instead.
 
 | Concern | Choice |
 |---|---|

@@ -15,9 +15,8 @@ outside sources that back or challenge each one.
 
 ## Never
 
-- **Never commit or push on your own.** Make the change, leave it
-  uncommitted, suggest the message. Approval for one commit does not carry
-  over to the next. Staging on request is fine.
+- **Never commit or push. I commit.** Make the change; when I ask, stage it
+  and suggest the message.
 - **Never claim what you didn't check.** If tests weren't run, say "not run".
   Run the check instead of reasoning from plausibility.
 - **Never guess at an ambiguous spec.** Ask.
