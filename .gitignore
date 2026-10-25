@@ -25,3 +25,6 @@ coverage/
 !.vscode/*.code-snippets
 !*.code-workspace
 *.vsix
+
+# installed tools (just setup)
+.tools/

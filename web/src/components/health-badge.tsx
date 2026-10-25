@@ -10,6 +10,7 @@ export function HealthBadge() {
   });
 
   if (isPending) return <span className="badge">checking…</span>;
-  if (isError) return <span className="badge badge-down">server unreachable</span>;
+  if (isError)
+    return <span className="badge badge-down">server unreachable</span>;
   return <span className="badge badge-up">server {data.status}</span>;
 }

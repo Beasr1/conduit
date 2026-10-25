@@ -302,8 +302,8 @@ can do.
 |---|---|---|
 | 01 foundation | skeleton on both sides, `just`, CI, gates | `just check` green locally and in CI; `just dev` serves a page showing a green health badge |
 | 02 engine | definition types, validation, scheduler, upstream caller, transform | the spec example runs end to end in a test against `httptest` upstreams; `-race` clean; SSRF and guardrail tests pass |
-| 03 api | persistence, REST, SSE, serving | through the API: create and version a workflow, start a run, stream its events, inspect node runs. A published workflow answers at its own endpoint, with 400, 502 and 504 as problem details |
-| 04 graph-editor | build, edit, save and run in graph mode | the spec example built and run from the browser, statuses updating live |
+| 03 api | persistence, REST, SSE, serving. Also, moved from 01: Postgres in compose, pgx, goose, `migrate`, `/readyz`, `.env.example`, `just dev`, openapi-fetch | through the API: create and version a workflow, start a run, stream its events, inspect node runs. A published workflow answers at its own endpoint, with 400, 502 and 504 as problem details |
+| 04 graph-editor | build, edit, save and run in graph mode. Also, moved from 01: Tailwind 4 and shadcn, React Router, `env.ts`, lucide, sonner | the spec example built and run from the browser, statuses updating live |
 | 05 page-mode | step builder over the same definition | the same example built in page mode; switching modes keeps the definition intact |
 | 06 hardening | credentials, limits, images, observability | credentials encrypted at rest and redacted everywhere; distroless image; traces on runs |
 | 07 tests-and-catalogue | dry-run; test cases; import upstreams from OpenAPI; per-workflow caller keys | a workflow's tests pass in dry-run without calling anything external; each served workflow has its own caller key |

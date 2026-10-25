@@ -174,6 +174,17 @@ server/
 - Coverage floors for `workflow`, `engine`, `transform` and `upstream` only.
   Floors ratchet up, never down.
 
+## Dependencies
+
+- When a scanner flags a module, first check whether it's actually
+  compiled. `go list -deps ./cmd/conduit` lists the server's modules;
+  `go list -m all` lists the whole graph, including modules that are never
+  built.
+- Fix a vulnerable transitive module by raising its requirement with
+  `go get module@fixed`, never with a version-less `replace`. Then check
+  that `just gen` output is unchanged and the tests pass.
+- Prefer a version a few days old over one released yesterday, as with npm.
+
 ## Lint and format
 
 - golangci-lint v2, pinned binary. `.golangci.yml` has `version: "2"`,

@@ -23,7 +23,7 @@ about a day. Keep that guard on: pick a slightly older version instead.
 | Forms | react-hook-form + Zod 4 |
 | Components | shadcn/ui (its default primitives), Tailwind 4, lucide icons |
 | Toasts | sonner |
-| API client | openapi-fetch, typed by openapi-typescript from `schema/openapi.yaml` |
+| API client | one `lib/api.ts` (fetch, timeouts, error kinds), typed by openapi-typescript output from `schema/openapi.yaml`. openapi-fetch joins in 03, once there's more than one endpoint |
 | Tests | Vitest, Testing Library, MSW; Playwright for the editor's happy path |
 | Lint and format | ESLint flat config + typescript-eslint + react-hooks; Prettier + tailwind plugin |
 | Package manager | pnpm, pinned via `packageManager` |
@@ -122,5 +122,8 @@ web/src/
 - Component tests render with providers and MSW handlers. They assert what
   a user sees (roles, text), not the implementation.
 - MSW handlers are typed from `src/gen`.
+- Start the MSW server with `onUnhandledFrame: "error"`, so a request with no
+  handler fails the test. MSW 3 renamed it from `onUnhandledRequest`, and
+  the old name is silently ignored at run time.
 - Playwright covers one flow against the real server and Postgres: create a
   workflow, connect two upstreams, run it, see the results.

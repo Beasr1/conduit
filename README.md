@@ -16,8 +16,9 @@ first use. corepack runs the pnpm version that `web/package.json` pins.
 
 | Command | What it does |
 |---|---|
-| `just setup` | installs the web dependencies |
+| `just setup` | installs the pinned golangci-lint and the web dependencies |
 | `just dev-server` | API server on http://127.0.0.1:8080 |
 | `just dev-web` | web app on http://127.0.0.1:5173, with `/api` proxied to the server |
 | `just up` / `just down` | both in Docker behind nginx, on http://127.0.0.1:8088 |
-| `just check` | format check, vet, race tests, typecheck and build |
+| `just check` | the gate CI runs: format, lint, race tests, typecheck, build and generated-code drift |
+| `just gen` | regenerates server and web code from `schema/openapi.yaml` |

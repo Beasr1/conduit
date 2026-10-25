@@ -33,14 +33,15 @@ when a second consumer of shared TypeScript code does.
 
   | Recipe | Does |
   |---|---|
-  | `setup` | install pinned tools, copy missing `.env` files from `.env.example` (`cp -n`) |
-  | `dev` | Postgres up, migrate, server with reload, Vite |
-  | `check` | format check, lint, typecheck, tests, generated-code diff. **The gate.** CI runs exactly this |
+  | `setup` | install the pinned golangci-lint into `.tools/bin`, and the web dependencies |
+  | `dev-server`, `dev-web` | the server, and Vite with `/api` proxied to it |
+  | `check` | format, lint, race tests, typecheck, build, generated-code drift. **The gate.** CI runs exactly this |
   | `fmt` | apply formatting |
-  | `test *args` | tests, args passed through |
+  | `test *args` | Go and web tests; args pass through to `go test` |
   | `gen` | regenerate code from `schema/` |
-  | `db-migrate`, `db-reset` | migrations |
   | `hooks-install` | pre-push hook that runs `just check` |
+  | `up`, `down` | the Docker stack |
+  | `dev`, `db-migrate`, `db-reset` | arrive with the database in 03 |
 
 - Start with one justfile. Once it passes ~15 recipes, split into
   `mod name 'just/name.just'` modules. Each module sets
@@ -65,8 +66,14 @@ lint fails only in CI, on code that's clean everywhere else.
 
 ## CI
 
-- One GitHub Actions pipeline: install the pinned tools, run `just check`,
-  then build images on `main`.
+- One GitHub Actions workflow, `.github/workflows/ci.yml`:
+  - Actions are pinned to full commit SHAs, with the release in a comment.
+    GitHub's hardening guide recommends this, because a tag can be moved.
+  - It installs the pinned tools, then runs `just setup` and `just check`.
+  - Building and publishing images comes later.
+- Dependabot (`.github/dependabot.yml`) bumps Docker digests, actions, Go
+  modules and npm packages weekly, with a 3-day cooldown matching pnpm's
+  release-age guard.
 - CI and local run the same command, so they can't drift. The pre-push hook
   is a convenience, not a gate. Hooks can be skipped with `--no-verify`, are
   missing in fresh clones, and never run for merges made in the web UI.

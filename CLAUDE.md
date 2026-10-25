@@ -49,15 +49,19 @@ the bigger picture is docs/plans/README.md.
 ## Commands
 
 ```
-just              list recipes
-just setup        install web dependencies (pnpm, through corepack)
-just dev-server   API server on http://127.0.0.1:8080
-just dev-web      web app on http://127.0.0.1:5173; /api is proxied to the server
-just check        gofmt check, vet, race tests, typecheck, build: the gate
-just fmt          apply Go formatting
-just test         Go tests; extra arguments pass through
-just up / down    everything in Docker behind nginx on http://127.0.0.1:8088
+just                list recipes
+just setup          install the pinned golangci-lint (.tools/bin) and web dependencies
+just dev-server     API server on http://127.0.0.1:8080
+just dev-web        web app on http://127.0.0.1:5173; /api is proxied to the server
+just check          the gate: format, lint, race tests, typecheck, build, stale generated code
+just fmt            apply formatting: gofumpt + goimports, Prettier
+just test           Go and web tests
+just gen            regenerate server/internal/httpapi/gen and web/src/gen from schema/
+just hooks-install  pre-push hook that runs just check
+just up / down      everything in Docker behind nginx on http://127.0.0.1:8088
 ```
+
+CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`.
 
 ## Gotchas
 
@@ -70,3 +74,5 @@ just up / down    everything in Docker behind nginx on http://127.0.0.1:8088
 - Everything the UI does goes through `schema/openapi.yaml`; no UI-only
   logic. Future agents (plan 08) use the same API.
 - TypeScript stays on 6.0.x until typescript-eslint supports 7.
+- npm packages younger than about a day are refused (pnpm's release-age
+  guard). Pick a slightly older version; don't turn the guard off.

@@ -40,6 +40,12 @@ resolve, but their claims weren't re-read.
 | nginx access log | JSON including `Authorization` and the query string | JSON with a request id; path only, no credentials | a token in a log is a leaked token (measured: the query string stays out) |
 | nginx error log | default level | rate-limit refusals below the logged level | error lines quote the whole request line, query string included (measured 2026-10-25) |
 | nginx → server address | `proxy_pass` with a fixed host | Docker's DNS, resolved per request | measured: the server moved from .2 to .4 and requests still reached it |
+| CI actions | `uses: owner/action@v7` | pinned to a full commit SHA, release in a comment | GitHub: pinning to a full-length commit SHA mitigates "a bad actor adding a backdoor to the action's repository" ✓ [34] |
+| Installing golangci-lint | `go install` or a `tool` line | the release binary: `just setup` locally, the official action in CI | its docs: `go install`/`tool` installs "aren't guaranteed to work"; they recommend binaries, and their action for CI ✓ [35] |
+| Dependency bumps | by hand | Dependabot with a 3-day cooldown | `cooldown` delays version updates by a set number of days ✓ [36] |
+| MSW 3 strict mode | `onUnhandledRequest: "error"` | `onUnhandledFrame: "error"` | MSW 3 renamed it; the old option still compiles in plain JS and is ignored at run time (checked in its types and with a probe test, 2026-10-25) |
+| openapi-typescript on TS 6 | (its peer range is `typescript: ^5.x`) | used with TypeScript 6.0.3 | generated `src/gen/schema.d.ts` correctly; pnpm reports the unmet peer (checked 2026-10-25) |
+| Vulnerable tool dependencies | (none raised before) | raise the requirement directly | kin-openapi v0.142.0 had nine advisories, fixed in v0.143.0–v0.149.0. oapi-codegen v2.8.1 still requires v0.142.0, so we raised it to v0.152.0 ourselves, and `x/mod`/`x/text` to their fixed releases. Generated output is identical; OSV finds 0 vulnerabilities in compiled modules, and the server binary has no third-party modules at all (checked 2026-10-25) |
 | New releases | install whatever is latest | nothing younger than about a day | pnpm 12 refused `@tanstack/react-query` 5.104.5, published the day before, with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` (checked 2026-10-20) |
 
 ## Kept, and backed
@@ -137,6 +143,9 @@ openapi-fetch 0.17.0 · shadcn 4.22.1
 31. https://github.com/nginx/docker-nginx-unprivileged
 32. https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html
 33. https://nginx.org/en/docs/http/ngx_http_headers_module.html
+34. https://docs.github.com/en/actions/reference/security/secure-use
+35. https://github.com/golangci/golangci-lint/tree/main/docs/content/docs/welcome/install
+36. https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

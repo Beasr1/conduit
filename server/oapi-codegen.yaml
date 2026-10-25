@@ -1,0 +1,8 @@
+# Generates the HTTP layer from schema/openapi.yaml: types, plus a strict
+# net/http server interface with one method per operation. Run `just gen`.
+package: gen
+output: internal/httpapi/gen/api.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true

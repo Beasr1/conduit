@@ -1,0 +1,65 @@
+# The API contract. Server and web code are generated from this file with
+# `just gen`; generated code is never edited by hand.
+openapi: 3.1.0
+info:
+  title: Conduit API
+  version: 0.1.0
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Report that the process is up
+      description: Checks no dependencies, so a slow dependency can't make the process look dead.
+      responses:
+        "200":
+          description: The process is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+
+    # RFC 9457 problem details: the shape of every error response.
+    Problem:
+      type: object
+      properties:
+        type:
+          type: string
+          description: A URI identifying the kind of problem.
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+          description: Our stable error code.
+        errors:
+          type: array
+          description: Every validation problem at once.
+          items:
+            $ref: "#/components/schemas/ProblemError"
+
+    ProblemError:
+      type: object
+      required: [pointer, code, detail]
+      properties:
+        pointer:
+          type: string
+          description: A JSON Pointer (RFC 6901, plain form) into the submitted document.
+        code:
+          type: string
+        detail:
+          type: string

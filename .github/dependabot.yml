@@ -1,0 +1,31 @@
+# Weekly version bumps, including the digest-pinned base images. The 3-day
+# cooldown matches pnpm's release-age guard: nothing brand new gets proposed.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+
+  - package-ecosystem: gomod
+    directory: /server
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
