@@ -124,7 +124,7 @@ func (v *validator) checkRequest(p string, r *HTTPRequest) {
 	}
 	for _, name := range slices.Sorted(maps.Keys(r.Headers)) {
 		if !validHeaderName(name) {
-			v.add(p+"/headers/"+escapeToken(name), "invalid_header_name", "%q isn't a valid header name", name)
+			v.add(p+"/headers/"+PointerToken(name), "invalid_header_name", "%q isn't a valid header name", name)
 		}
 	}
 	if r.TimeoutMs < 0 || r.TimeoutMs > maxTimeoutMS {
@@ -195,8 +195,9 @@ func validHeaderName(s string) bool {
 	return true
 }
 
-// escapeToken makes s one JSON Pointer reference token (RFC 6901 §3).
-func escapeToken(s string) string {
+// PointerToken makes s one JSON Pointer reference token (RFC 6901 §3): ~
+// becomes ~0 and / becomes ~1, in that order.
+func PointerToken(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "~", "~0"), "/", "~1")
 }
 

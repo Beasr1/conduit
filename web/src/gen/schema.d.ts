@@ -24,12 +24,219 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report that the server can reach its database */
+        get: operations["getReadyz"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List workflows, newest first */
+        get: operations["listWorkflows"];
+        put?: never;
+        /**
+         * Create a workflow; its definition becomes revision 1
+         * @description The definition is saved even if it has problems; they're listed in the response. Publishing needs a revision without any.
+         */
+        post: operations["createWorkflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        /** Get a workflow and its latest revision */
+        get: operations["getWorkflow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save the next revision
+         * @description If-Match must name the latest revision, so a save can't silently undo someone else's. The definition is saved even if it has problems.
+         */
+        put: operations["saveDraft"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        /** List a workflow's revisions, newest first */
+        get: operations["listRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/revisions/{revision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+                revision: number;
+            };
+            cookie?: never;
+        };
+        /** Get one revision, with its problems */
+        get: operations["getRevision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make a revision the one served */
+        post: operations["publishWorkflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check a definition without saving it */
+        post: operations["validateDefinition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         Health: {
             status: string;
+        };
+        Workflow: {
+            id: string;
+            /** @description Lowercase letters, digits and hyphens. The served endpoint is /serve/{slug}. */
+            slug: string;
+            name: string;
+            latest_revision: number;
+            /** @description Absent until a revision is published. */
+            published_revision?: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        WorkflowList: {
+            workflows: components["schemas"]["Workflow"][];
+            /** @description Pass as `before` for the next page. Absent on the last page. */
+            next?: string;
+        };
+        CreateWorkflow: {
+            slug: string;
+            name: string;
+            definition: components["schemas"]["Definition"];
+        };
+        Publish: {
+            revision: number;
+        };
+        Provenance: {
+            /** @description Who saved it. In v1 always "token". */
+            actor: string;
+            /** @description What it was saved with, from the User-Agent header. */
+            client?: string;
+        };
+        Revision: {
+            workflow_id: string;
+            revision: number;
+            definition: components["schemas"]["Definition"];
+            /** @description Everything wrong with the definition. Empty when it can be published. */
+            problems: components["schemas"]["ProblemError"][];
+            provenance: components["schemas"]["Provenance"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        RevisionSummary: {
+            revision: number;
+            provenance: components["schemas"]["Provenance"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        RevisionList: {
+            revisions: components["schemas"]["RevisionSummary"][];
+        };
+        WorkflowRevision: {
+            workflow: components["schemas"]["Workflow"];
+            revision: components["schemas"]["Revision"];
         };
         Problem: {
             /** @description A URI identifying the kind of problem. */
@@ -49,11 +256,84 @@ export interface components {
             code: string;
             detail: string;
         };
+        /** @enum {string} */
+        NodeKind: "http" | "transform";
+        /** @description Retries transport errors, timeouts, 429 and 5xx responses, with backoff and Retry-After honoured. */
+        Retry: {
+            /** @description Total attempts, the first included. */
+            attempts: number;
+            /** @description The upstream treats repeats of this request as one, so a POST or PATCH may be retried too. They're then sent with an Idempotency-Key header. */
+            idempotent?: boolean;
+        };
+        HTTPRequest: {
+            /** @enum {string} */
+            method: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+            /** @description An absolute http or https URL. {{ jsonata }} placeholders may appear in its path and query only. */
+            url: string;
+            /** @description Header values are templates, text with {{ jsonata }} placeholders. */
+            headers?: {
+                [key: string]: string;
+            };
+            /** @description Query parameters added to the URL. Values are templates. */
+            query?: {
+                [key: string]: string;
+            };
+            /** @description JSONata whose value is sent as the JSON request body. */
+            body?: string;
+            /** @description Timeout for each attempt, in milliseconds. Default 30000. */
+            timeout_ms?: number;
+            retry?: components["schemas"]["Retry"];
+        };
+        Node: {
+            /** @description Unique in the workflow. Expressions read the node's result as nodes.<id>. */
+            id: string;
+            kind: components["schemas"]["NodeKind"];
+            /** @description The call an http node makes. */
+            request?: components["schemas"]["HTTPRequest"];
+            /** @description A transform node's JSONata. Its value becomes the node's body. */
+            expr?: string;
+        };
+        Edge: {
+            from: string;
+            to: string;
+            /** @description A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source succeeded and this is true. Absent means true. */
+            when?: string;
+        };
+        /** @description A workflow. A node runs once its parents have finished and at least one edge into it was taken. */
+        Definition: {
+            nodes: components["schemas"]["Node"][];
+            edges?: components["schemas"]["Edge"][];
+            /** @description JSONata over the finished run. Its value is the run's result. */
+            output?: string;
+            /** @description A JSON Schema (2020-12) that run input must match. A served workflow answers input that doesn't with 400. Its $refs can only point inside it. */
+            input_schema?: {
+                [key: string]: unknown;
+            };
+            /** @description A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet. */
+            output_schema?: {
+                [key: string]: unknown;
+            };
+        };
     };
-    responses: never;
-    parameters: never;
+    responses: {
+        /** @description RFC 9457 problem details. `code` says what went wrong; `errors` lists every problem with a JSON Pointer. */
+        Problem: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+    };
+    parameters: {
+        WorkflowID: string;
+    };
     requestBodies: never;
-    headers: never;
+    headers: {
+        /** @description The revision, quoted, such as "3". */
+        ETag: string;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
@@ -76,6 +356,243 @@ export interface operations {
                     "application/json": components["schemas"]["Health"];
                 };
             };
+        };
+    };
+    getReadyz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ready for traffic. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Health"];
+                };
+            };
+            503: components["responses"]["Problem"];
+        };
+    };
+    listWorkflows: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description Return workflows older than this id, for the next page. */
+                before?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of workflows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+        };
+    };
+    createWorkflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkflow"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowRevision"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    getWorkflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workflow. Send its ETag as If-Match when saving the next revision. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowRevision"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    saveDraft: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The latest revision's ETag, such as "3". Without it the save is refused with 428. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Definition"];
+            };
+        };
+        responses: {
+            /** @description Saved. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Revision"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+        };
+    };
+    listRevisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every revision, without definitions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    getRevision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+                revision: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The revision. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Revision"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    publishWorkflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Publish"];
+            };
+        };
+        responses: {
+            /** @description Published. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workflow"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    validateDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Definition"];
+            };
+        };
+        responses: {
+            /** @description The definition has no problems. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
         };
     };
 }

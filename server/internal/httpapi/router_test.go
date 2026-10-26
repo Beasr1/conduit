@@ -1,34 +1,120 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
+
+	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
+	"github.com/Beasr1/conduit/server/internal/store"
+	"github.com/Beasr1/conduit/server/internal/store/storetest"
 )
 
-func TestHealthz_ReportsOK(t *testing.T) {
-	rec := httptest.NewRecorder()
-	NewRouter().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
+const testToken = "test-token-0123456789abcdef0123456789abcdef"
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+var router http.Handler
+
+func TestMain(m *testing.M) {
+	os.Exit(storetest.Run(m, func(s *store.Store, _ string) {
+		router = NewRouter(Deps{Store: s, Token: testToken, Log: slog.New(slog.DiscardHandler)})
+	}))
+}
+
+// reply is what came back. A struct of its own rather than *http.Response,
+// whose Body would need closing at every call site.
+type reply struct {
+	status int
+	header http.Header
+	body   []byte
+}
+
+// call sends a request through the router, with the token unless headers
+// set Authorization themselves. headers alternate name, value.
+func call(t *testing.T, method, path, body string, headers ...string) reply {
+	t.Helper()
+	req := httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
 	}
-	if got := rec.Header().Get("Content-Type"); got != "application/json" {
-		t.Errorf("Content-Type = %q, want application/json", got)
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
 	}
-	if got, want := rec.Body.String(), "{\"status\":\"ok\"}\n"; got != want {
-		t.Errorf("body = %q, want %q", got, want)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	b, err := io.ReadAll(rec.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reply{status: rec.Code, header: rec.Header(), body: b}
+}
+
+// problemOf decodes a problem-details body, failing on anything else.
+func problemOf(t *testing.T, r reply) gen.Problem {
+	t.Helper()
+	if ct := r.header.Get("Content-Type"); ct != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json; body %s", ct, r.body)
+	}
+	var p gen.Problem
+	if err := json.Unmarshal(r.body, &p); err != nil {
+		t.Fatalf("decode problem: %v; body %s", err, r.body)
+	}
+	return p
+}
+
+func TestHealthz(t *testing.T) {
+	t.Parallel()
+	r := call(t, http.MethodGet, "/healthz", "", "Authorization", "")
+	if r.status != http.StatusOK || string(r.body) != `{"status":"ok"}`+"\n" {
+		t.Errorf("GET /healthz = %d %s", r.status, r.body)
 	}
 }
 
-func TestHealthz_RejectsOtherMethods(t *testing.T) {
-	rec := httptest.NewRecorder()
-	NewRouter().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/healthz", nil))
-
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+func TestHealthz_WrongMethodIs405(t *testing.T) {
+	t.Parallel()
+	r := call(t, http.MethodPost, "/healthz", "")
+	if r.status != http.StatusMethodNotAllowed || r.header.Get("Allow") != "GET, HEAD" {
+		t.Errorf("POST /healthz = %d, Allow %q", r.status, r.header.Get("Allow"))
 	}
-	if got := rec.Header().Get("Allow"); got != "GET, HEAD" {
-		t.Errorf("Allow = %q, want %q", got, "GET, HEAD")
+}
+
+func TestReadyz_NeedsNoToken(t *testing.T) {
+	t.Parallel()
+	r := call(t, http.MethodGet, "/readyz", "", "Authorization", "")
+	if r.status != http.StatusOK {
+		t.Errorf("GET /readyz = %d %s", r.status, r.body)
+	}
+}
+
+func TestToken(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, auth string
+		want       int
+	}{
+		{"missing", "", http.StatusUnauthorized},
+		{"wrong", "Bearer nope", http.StatusUnauthorized},
+		{"right token, wrong scheme", "Basic " + testToken, http.StatusUnauthorized},
+		{"right", "Bearer " + testToken, http.StatusOK},
+		{"the scheme is case-insensitive", "bearer " + testToken, http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := call(t, http.MethodGet, "/v1/workflows", "", "Authorization", tt.auth)
+			if r.status != tt.want {
+				t.Fatalf("status = %d, want %d; body %s", r.status, tt.want, r.body)
+			}
+			if tt.want == http.StatusUnauthorized {
+				if p := problemOf(t, r); p.Code != "unauthorized" || r.header.Get("WWW-Authenticate") == "" {
+					t.Errorf("problem %+v, WWW-Authenticate %q", p, r.header.Get("WWW-Authenticate"))
+				}
+			}
+		})
 	}
 }

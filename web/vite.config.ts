@@ -13,7 +13,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      // Same shape as nginx (docker/nginx/conf.d/default.conf): /api/*
+      // Same shape as nginx (docker/web/nginx/conf.d/default.conf): /api/*
       // reaches the server with the prefix stripped.
       "/api": {
         target: "http://127.0.0.1:8080",

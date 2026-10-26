@@ -1,9 +1,7 @@
 # 00 — Roadmap
 
-Status: proposed. D2 (the standard library), D18 (JSON over HTTP only,
-other step types parked in 09) and D19 (serving workflows as APIs in v1)
-are decided. Only D1 (the flat layout) is still proposed. Updated
-2026-10-19.
+Status: proposed. Each decision's own status is in the table below; D2,
+D3, D4–D9, D12, D15, D16, D18 and D19 are decided. Updated 2026-10-26.
 
 ## Goal
 
@@ -218,12 +216,12 @@ Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
 | D1 | Repo shape | flat: `server/`, `web/`, `schema/` | two deployables | `apps/` + `packages/` | proposed |
 | D2 | Go router | `net/http` ServeMux | `http.Handler` everywhere, no dependency; keep it simple | gin (familiar), chi | accepted |
 | D3 | API contract | OpenAPI 3.1 in `schema/`; oapi-codegen for Go, openapi-typescript for TS | one source, both sides typed, CI fails on drift; agents read it too (08) | hand-written types on both sides | accepted |
-| D4 | DB access | pgx v5, raw SQL, `CollectRows` | familiar; no generator | sqlc | proposed |
-| D5 | Migrations | goose, embedded | familiar | golang-migrate | proposed |
+| D4 | DB access | pgx v5, raw SQL, `CollectRows` | familiar; no generator | sqlc | accepted (2026-10-26, plan 03) |
+| D5 | Migrations | goose, embedded | familiar | golang-migrate | accepted (2026-10-26, plan 03) |
 | D6 | JSONata | gnata, pinned exact, behind `transform`; preview runs on the server | only maintained JSONata 2.x in Go; no preview/engine mismatch | jsonata-js in goja; CEL for conditions | accepted |
 | D7 | Redis | not in v1 | one process; Postgres holds the state | the spec's execution cache | accepted (diverges from spec) |
-| D8 | Run durability | in-process; interrupted runs marked failed | simple and honest | DBOS Transact Go, Temporal | proposed |
-| D9 | Live updates | SSE | one-way, plain HTTP, `EventSource` built in | WebSocket | proposed |
+| D8 | Run durability | in-process; interrupted runs marked failed | simple and honest | DBOS Transact Go, Temporal | accepted (2026-10-26, plan 03) |
+| D9 | Live updates | SSE | one-way, plain HTTP. `EventSource` can't send a bearer token, so the web app reads the stream with `fetch()` | WebSocket | accepted (2026-10-26, plan 03) |
 | D10 | Editor state | Zustand | what React Flow uses internally | Jotai | proposed |
 | D11 | Web router | React Router 8, data mode | familiar | TanStack Router | proposed |
 | D12 | v1 auth | one bearer token from env; listen on localhost by default | an open server that calls arbitrary URLs is an open proxy | user accounts | accepted |

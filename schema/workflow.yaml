@@ -28,6 +28,14 @@ components:
         output:
           type: string
           description: JSONata over the finished run. Its value is the run's result.
+        input_schema:
+          type: object
+          additionalProperties: true
+          description: A JSON Schema (2020-12) that run input must match. A served workflow answers input that doesn't with 400. Its $refs can only point inside it.
+        output_schema:
+          type: object
+          additionalProperties: true
+          description: A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet.
 
     Node:
       type: object

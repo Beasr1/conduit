@@ -12,8 +12,9 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 	"time"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/Beasr1/conduit/server/internal/transform"
 	"github.com/Beasr1/conduit/server/internal/workflow"
@@ -97,6 +98,12 @@ func Compile(d *workflow.Definition) (*Program, error) {
 	if d.Output != "" {
 		p.output = c.expr("/output", d.Output)
 	}
+	if len(d.InputSchema) > 0 {
+		c.jsonSchema("/input_schema", d.InputSchema)
+	}
+	if len(d.OutputSchema) > 0 {
+		c.jsonSchema("/output_schema", d.OutputSchema)
+	}
 	if len(c.problems) > 0 {
 		return nil, c.problems
 	}
@@ -165,12 +172,26 @@ func (c *compiler) template(pointer, src string) *transform.Template {
 func (c *compiler) params(pointer string, m map[string]string) []param {
 	var out []param
 	for _, name := range slices.Sorted(maps.Keys(m)) {
-		out = append(out, param{name: name, value: c.template(pointer+"/"+escapeToken(name), m[name])})
+		out = append(out, param{name: name, value: c.template(pointer+"/"+workflow.PointerToken(name), m[name])})
 	}
 	return out
 }
 
-// escapeToken makes s one JSON Pointer reference token (RFC 6901 §3).
-func escapeToken(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "~", "~0"), "/", "~1")
+// jsonSchema checks that doc compiles as JSON Schema 2020-12. Its $refs can
+// only point inside it. The library's default loader reads local files, and
+// a schema someone typed mustn't make the server read anything.
+func (c *compiler) jsonSchema(pointer string, doc map[string]any) {
+	jc := jsonschema.NewCompiler()
+	jc.UseLoader(nil)
+	jc.DefaultDraft(jsonschema.Draft2020)
+	// A made-up absolute base, so messages carry no local path and a relative
+	// $ref resolves to a URL nothing will load.
+	const loc = "https://conduit.invalid/schema.json"
+	err := jc.AddResource(loc, doc)
+	if err == nil {
+		_, err = jc.Compile(loc)
+	}
+	if err != nil {
+		c.problems = append(c.problems, workflow.Problem{Pointer: pointer, Code: "invalid_schema", Detail: err.Error()})
+	}
 }

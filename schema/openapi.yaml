@@ -1,9 +1,14 @@
 # The API contract. Server and web code are generated from this file with
-# `just gen`; generated code is never edited by hand.
+# `just gen`; generated code is never edited by hand. The workflow
+# definition itself lives in workflow.yaml.
 openapi: 3.1.0
 info:
   title: Conduit API
   version: 0.1.0
+
+# Every operation needs the bearer token unless it says otherwise.
+security:
+  - bearer: []
 
 paths:
   /healthz:
@@ -11,6 +16,7 @@ paths:
       operationId: getHealthz
       summary: Report that the process is up
       description: Checks no dependencies, so a slow dependency can't make the process look dead.
+      security: []
       responses:
         "200":
           description: The process is up.
@@ -19,7 +25,253 @@ paths:
               schema:
                 $ref: "#/components/schemas/Health"
 
+  /readyz:
+    get:
+      operationId: getReadyz
+      summary: Report that the server can reach its database
+      security: []
+      responses:
+        "200":
+          description: Ready for traffic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          $ref: "#/components/responses/Problem"
+
+  /v1/workflows:
+    get:
+      operationId: listWorkflows
+      summary: List workflows, newest first
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: before
+          in: query
+          description: Return workflows older than this id, for the next page.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of workflows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowList"
+        "401":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createWorkflow
+      summary: Create a workflow; its definition becomes revision 1
+      description: The definition is saved even if it has problems; they're listed in the response. Publishing needs a revision without any.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkflow"
+      responses:
+        "201":
+          description: Created.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowRevision"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+
+  /v1/workflows/{id}:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    get:
+      operationId: getWorkflow
+      summary: Get a workflow and its latest revision
+      responses:
+        "200":
+          description: The workflow. Send its ETag as If-Match when saving the next revision.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowRevision"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
+  /v1/workflows/{id}/draft:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    put:
+      operationId: saveDraft
+      summary: Save the next revision
+      description: If-Match must name the latest revision, so a save can't silently undo someone else's. The definition is saved even if it has problems.
+      parameters:
+        - name: If-Match
+          in: header
+          description: The latest revision's ETag, such as "3". Without it the save is refused with 428.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./workflow.yaml#/components/schemas/Definition"
+      responses:
+        "200":
+          description: Saved.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revision"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+
+  /v1/workflows/{id}/revisions:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    get:
+      operationId: listRevisions
+      summary: List a workflow's revisions, newest first
+      responses:
+        "200":
+          description: Every revision, without definitions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
+  /v1/workflows/{id}/revisions/{revision}:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: getRevision
+      summary: Get one revision, with its problems
+      responses:
+        "200":
+          description: The revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revision"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
+  /v1/workflows/{id}/publish:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    post:
+      operationId: publishWorkflow
+      summary: Make a revision the one served
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Publish"
+      responses:
+        "200":
+          description: Published.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workflow"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+
+  /v1/validate:
+    post:
+      operationId: validateDefinition
+      summary: Check a definition without saving it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./workflow.yaml#/components/schemas/Definition"
+      responses:
+        "204":
+          description: The definition has no problems.
+        "401":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+
 components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: The server's one API token (CONDUIT_API_TOKEN).
+
+  parameters:
+    WorkflowID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  headers:
+    ETag:
+      description: The revision, quoted, such as "3".
+      schema:
+        type: string
+
+  responses:
+    Problem:
+      description: RFC 9457 problem details. `code` says what went wrong; `errors` lists every problem with a JSON Pointer.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
   schemas:
     Health:
       type: object
@@ -27,6 +279,124 @@ components:
       properties:
         status:
           type: string
+
+    Workflow:
+      type: object
+      required: [id, slug, name, latest_revision, created_at]
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+          description: Lowercase letters, digits and hyphens. The served endpoint is /serve/{slug}.
+        name:
+          type: string
+        latest_revision:
+          type: integer
+        published_revision:
+          type: integer
+          description: Absent until a revision is published.
+        created_at:
+          type: string
+          format: date-time
+
+    WorkflowList:
+      type: object
+      required: [workflows]
+      properties:
+        workflows:
+          type: array
+          items:
+            $ref: "#/components/schemas/Workflow"
+        next:
+          type: string
+          description: Pass as `before` for the next page. Absent on the last page.
+
+    CreateWorkflow:
+      type: object
+      required: [slug, name, definition]
+      additionalProperties: false
+      properties:
+        slug:
+          type: string
+          pattern: "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        definition:
+          $ref: "./workflow.yaml#/components/schemas/Definition"
+
+    Publish:
+      type: object
+      required: [revision]
+      additionalProperties: false
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+
+    Provenance:
+      type: object
+      required: [actor]
+      properties:
+        actor:
+          type: string
+          description: Who saved it. In v1 always "token".
+        client:
+          type: string
+          description: What it was saved with, from the User-Agent header.
+
+    Revision:
+      type: object
+      required: [workflow_id, revision, definition, problems, provenance, created_at]
+      properties:
+        workflow_id:
+          type: string
+        revision:
+          type: integer
+        definition:
+          $ref: "./workflow.yaml#/components/schemas/Definition"
+        problems:
+          type: array
+          description: Everything wrong with the definition. Empty when it can be published.
+          items:
+            $ref: "#/components/schemas/ProblemError"
+        provenance:
+          $ref: "#/components/schemas/Provenance"
+        created_at:
+          type: string
+          format: date-time
+
+    RevisionSummary:
+      type: object
+      required: [revision, provenance, created_at]
+      properties:
+        revision:
+          type: integer
+        provenance:
+          $ref: "#/components/schemas/Provenance"
+        created_at:
+          type: string
+          format: date-time
+
+    RevisionList:
+      type: object
+      required: [revisions]
+      properties:
+        revisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RevisionSummary"
+
+    WorkflowRevision:
+      type: object
+      required: [workflow, revision]
+      properties:
+        workflow:
+          $ref: "#/components/schemas/Workflow"
+        revision:
+          $ref: "#/components/schemas/Revision"
 
     # RFC 9457 problem details: the shape of every error response.
     Problem:

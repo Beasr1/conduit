@@ -1,45 +1,13 @@
-# The app on http://127.0.0.1:8088. nginx serves the web build and forwards
-# /api to the server, which isn't published on the host.
+# The whole stack: the app on http://127.0.0.1:8088, behind nginx.
+#
+# Each service has a directory of its own with its compose file, and its
+# Dockerfile when we build the image. This file only includes them. Each
+# included file resolves its paths from its own directory, and together they
+# make one project on one network. Settings come from .env; the justfile
+# passes --env-file.
 name: conduit
 
-# Rotated JSON logs, so a long-running stack can't fill the disk.
-x-logging: &logging
-  driver: json-file
-  options:
-    max-size: "10m"
-    max-file: "3"
-
-# Both containers run as non-root with no Linux capabilities, a read-only
-# filesystem, and no way to gain privileges.
-x-hardening: &hardening
-  read_only: true
-  cap_drop: [ALL]
-  security_opt: ["no-new-privileges:true"]
-
-services:
-  server:
-    <<: *hardening
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.server
-    environment:
-      CONDUIT_LOG_FORMAT: json
-    logging: *logging
-
-  web:
-    <<: *hardening
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.web
-    tmpfs:
-      - /tmp # nginx's pid file and temp files
-    depends_on:
-      - server
-    ports:
-      - "127.0.0.1:8088:8080"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/nginx-health"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-    logging: *logging
+include:
+  - postgres/compose.yaml
+  - server/compose.yaml
+  - web/compose.yaml

@@ -2,8 +2,9 @@
 # cooldown matches pnpm's release-age guard: nothing brand new gets proposed.
 version: 2
 updates:
+  # The Dockerfiles we build. Postgres has none; its image is in compose.
   - package-ecosystem: docker
-    directory: /docker
+    directories: ["/docker/server", "/docker/web"]
     schedule:
       interval: weekly
     cooldown:
@@ -19,6 +20,18 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: golang
         update-types: ["version-update:semver-minor"]
+
+  # Images named only in compose files: Postgres.
+  - package-ecosystem: docker-compose
+    directory: /docker/postgres
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    ignore:
+      # A Postgres major needs a dump and restore, so it moves by hand.
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /

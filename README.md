@@ -16,8 +16,10 @@ first use. corepack runs the pnpm version that `web/package.json` pins.
 
 | Command | What it does |
 |---|---|
-| `just setup` | installs the pinned golangci-lint and the web dependencies |
-| `just dev-server` | API server on http://127.0.0.1:8080 |
+| `just setup` | creates `.env` (setup settings) and `server/.env` (the server's) from their examples, installs the pinned golangci-lint and the web dependencies |
+| `just db-up` | Postgres on 127.0.0.1:5432 (`just db-reset` starts it afresh) |
+| `just migrate` | applies database migrations |
+| `just dev-server` | API server on http://127.0.0.1:8080, against that Postgres |
 | `just dev-web` | web app on http://127.0.0.1:5173, with `/api` proxied to the server |
 | `just up` / `just down` | both in Docker behind nginx, on http://127.0.0.1:8088 |
 | `just check` | the gate CI runs: format, lint, race tests, coverage floors, typecheck, build and generated-code drift |

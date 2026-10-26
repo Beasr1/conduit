@@ -9,20 +9,181 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"time"
+
+	externalRef0 "github.com/Beasr1/conduit/server/internal/workflow"
+	"github.com/oapi-codegen/runtime"
 )
+
+// CreateWorkflow defines model for CreateWorkflow.
+type CreateWorkflow struct {
+	// Definition A workflow. A node runs once its parents have finished and at least one edge into it was taken.
+	Definition externalRef0.Definition `json:"definition"`
+	Name       string                  `json:"name"`
+	Slug       string                  `json:"slug"`
+}
 
 // Health defines model for Health.
 type Health struct {
 	Status string `json:"status"`
 }
 
+// Problem defines model for Problem.
+type Problem struct {
+	// Code Our stable error code.
+	Code   string `json:"code,omitempty"`
+	Detail string `json:"detail,omitempty"`
+
+	// Errors Every validation problem at once.
+	Errors   []ProblemError `json:"errors,omitempty"`
+	Instance string         `json:"instance,omitempty"`
+	Status   int            `json:"status,omitempty"`
+	Title    string         `json:"title,omitempty"`
+
+	// Type A URI identifying the kind of problem.
+	Type string `json:"type,omitempty"`
+}
+
+// ProblemError defines model for ProblemError.
+type ProblemError struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
+
+	// Pointer A JSON Pointer (RFC 6901, plain form) into the submitted document.
+	Pointer string `json:"pointer"`
+}
+
+// Provenance defines model for Provenance.
+type Provenance struct {
+	// Actor Who saved it. In v1 always "token".
+	Actor string `json:"actor"`
+
+	// Client What it was saved with, from the User-Agent header.
+	Client string `json:"client,omitempty"`
+}
+
+// Publish defines model for Publish.
+type Publish struct {
+	Revision int `json:"revision"`
+}
+
+// Revision defines model for Revision.
+type Revision struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Definition A workflow. A node runs once its parents have finished and at least one edge into it was taken.
+	Definition externalRef0.Definition `json:"definition"`
+
+	// Problems Everything wrong with the definition. Empty when it can be published.
+	Problems   []ProblemError `json:"problems"`
+	Provenance Provenance     `json:"provenance"`
+	Revision   int            `json:"revision"`
+	WorkflowID string         `json:"workflow_id"`
+}
+
+// RevisionList defines model for RevisionList.
+type RevisionList struct {
+	Revisions []RevisionSummary `json:"revisions"`
+}
+
+// RevisionSummary defines model for RevisionSummary.
+type RevisionSummary struct {
+	CreatedAt  time.Time  `json:"created_at"`
+	Provenance Provenance `json:"provenance"`
+	Revision   int        `json:"revision"`
+}
+
+// Workflow defines model for Workflow.
+type Workflow struct {
+	CreatedAt      time.Time `json:"created_at"`
+	ID             string    `json:"id"`
+	LatestRevision int       `json:"latest_revision"`
+	Name           string    `json:"name"`
+
+	// PublishedRevision Absent until a revision is published.
+	PublishedRevision int `json:"published_revision,omitempty"`
+
+	// Slug Lowercase letters, digits and hyphens. The served endpoint is /serve/{slug}.
+	Slug string `json:"slug"`
+}
+
+// WorkflowList defines model for WorkflowList.
+type WorkflowList struct {
+	// Next Pass as `before` for the next page. Absent on the last page.
+	Next      string     `json:"next,omitempty"`
+	Workflows []Workflow `json:"workflows"`
+}
+
+// WorkflowRevision defines model for WorkflowRevision.
+type WorkflowRevision struct {
+	Revision Revision `json:"revision"`
+	Workflow Workflow `json:"workflow"`
+}
+
+// WorkflowID defines model for WorkflowID.
+type WorkflowID = string
+
+// ListWorkflowsParams defines parameters for ListWorkflows.
+type ListWorkflowsParams struct {
+	Limit int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Before Return workflows older than this id, for the next page.
+	Before string `form:"before,omitempty" json:"before,omitempty"`
+}
+
+// SaveDraftParams defines parameters for SaveDraft.
+type SaveDraftParams struct {
+	// IfMatch The latest revision's ETag, such as "3". Without it the save is refused with 428.
+	IfMatch string `json:"If-Match,omitempty"`
+}
+
+// ValidateDefinitionJSONRequestBody defines body for ValidateDefinition for application/json ContentType.
+type ValidateDefinitionJSONRequestBody = externalRef0.Definition
+
+// CreateWorkflowJSONRequestBody defines body for CreateWorkflow for application/json ContentType.
+type CreateWorkflowJSONRequestBody = CreateWorkflow
+
+// SaveDraftJSONRequestBody defines body for SaveDraft for application/json ContentType.
+type SaveDraftJSONRequestBody = externalRef0.Definition
+
+// PublishWorkflowJSONRequestBody defines body for PublishWorkflow for application/json ContentType.
+type PublishWorkflowJSONRequestBody = Publish
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetHealthz Report that the process is up
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
+	// GetReadyz Report that the server can reach its database
+	// (GET /readyz)
+	GetReadyz(w http.ResponseWriter, r *http.Request)
+	// ValidateDefinition Check a definition without saving it
+	// (POST /v1/validate)
+	ValidateDefinition(w http.ResponseWriter, r *http.Request)
+	// ListWorkflows List workflows, newest first
+	// (GET /v1/workflows)
+	ListWorkflows(w http.ResponseWriter, r *http.Request, params ListWorkflowsParams)
+	// CreateWorkflow Create a workflow; its definition becomes revision 1
+	// (POST /v1/workflows)
+	CreateWorkflow(w http.ResponseWriter, r *http.Request)
+	// GetWorkflow Get a workflow and its latest revision
+	// (GET /v1/workflows/{id})
+	GetWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID)
+	// SaveDraft Save the next revision
+	// (PUT /v1/workflows/{id}/draft)
+	SaveDraft(w http.ResponseWriter, r *http.Request, id WorkflowID, params SaveDraftParams)
+	// PublishWorkflow Make a revision the one served
+	// (POST /v1/workflows/{id}/publish)
+	PublishWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID)
+	// ListRevisions List a workflow's revisions, newest first
+	// (GET /v1/workflows/{id}/revisions)
+	ListRevisions(w http.ResponseWriter, r *http.Request, id WorkflowID)
+	// GetRevision Get one revision, with its problems
+	// (GET /v1/workflows/{id}/revisions/{revision})
+	GetRevision(w http.ResponseWriter, r *http.Request, id WorkflowID, revision int)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -39,6 +200,257 @@ func (siw *ServerInterfaceWrapper) GetHealthz(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReadyz operation middleware
+func (siw *ServerInterfaceWrapper) GetReadyz(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReadyz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ValidateDefinition operation middleware
+func (siw *ServerInterfaceWrapper) ValidateDefinition(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ValidateDefinition(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWorkflows operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkflows(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWorkflowsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkflows(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWorkflow(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) GetWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWorkflow(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SaveDraft operation middleware
+func (siw *ServerInterfaceWrapper) SaveDraft(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SaveDraftParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = IfMatch
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SaveDraft(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PublishWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) PublishWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PublishWorkflow(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRevisions operation middleware
+func (siw *ServerInterfaceWrapper) ListRevisions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRevisions(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRevision operation middleware
+func (siw *ServerInterfaceWrapper) GetRevision(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "revision" -------------
+	var revision int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "revision", r.PathValue("revision"), &revision, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revision", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRevision(w, r, id, revision)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -169,9 +581,20 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/healthz", wrapper.GetHealthz)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/readyz", wrapper.GetReadyz)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows", wrapper.ListWorkflows)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows", wrapper.CreateWorkflow)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{id}", wrapper.GetWorkflow)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/workflows/{id}/draft", wrapper.SaveDraft)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{id}/revisions", wrapper.ListRevisions)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{id}/revisions/{revision}", wrapper.GetRevision)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/publish", wrapper.PublishWorkflow)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/validate", wrapper.ValidateDefinition)
 
 	return m
 }
+
+type ProblemApplicationProblemPlusJSONResponse Problem
 
 type GetHealthzRequestObject struct {
 }
@@ -194,11 +617,571 @@ func (response GetHealthz200JSONResponse) VisitGetHealthzResponse(w http.Respons
 	return err
 }
 
+type GetReadyzRequestObject struct {
+}
+
+type GetReadyzResponseObject interface {
+	VisitGetReadyzResponse(w http.ResponseWriter) error
+}
+
+type GetReadyz200JSONResponse Health
+
+func (response GetReadyz200JSONResponse) VisitGetReadyzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReadyz503ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetReadyz503ApplicationProblemPlusJSONResponse) VisitGetReadyzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateDefinitionRequestObject struct {
+	Body *ValidateDefinitionJSONRequestBody
+}
+
+type ValidateDefinitionResponseObject interface {
+	VisitValidateDefinitionResponse(w http.ResponseWriter) error
+}
+
+type ValidateDefinition204Response struct {
+}
+
+func (response ValidateDefinition204Response) VisitValidateDefinitionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ValidateDefinition401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ValidateDefinition401ApplicationProblemPlusJSONResponse) VisitValidateDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateDefinition422ApplicationProblemPlusJSONResponse Problem
+
+func (response ValidateDefinition422ApplicationProblemPlusJSONResponse) VisitValidateDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkflowsRequestObject struct {
+	Params ListWorkflowsParams
+}
+
+type ListWorkflowsResponseObject interface {
+	VisitListWorkflowsResponse(w http.ResponseWriter) error
+}
+
+type ListWorkflows200JSONResponse WorkflowList
+
+func (response ListWorkflows200JSONResponse) VisitListWorkflowsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkflows401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListWorkflows401ApplicationProblemPlusJSONResponse) VisitListWorkflowsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkflowRequestObject struct {
+	Body *CreateWorkflowJSONRequestBody
+}
+
+type CreateWorkflowResponseObject interface {
+	VisitCreateWorkflowResponse(w http.ResponseWriter) error
+}
+
+type CreateWorkflow201ResponseHeaders struct {
+	ETag     string
+	Location string
+}
+
+type CreateWorkflow201JSONResponse struct {
+	Body    WorkflowRevision
+	Headers CreateWorkflow201ResponseHeaders
+}
+
+func (response CreateWorkflow201JSONResponse) VisitCreateWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("Location", fmt.Sprint(response.Headers.Location))
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkflow401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CreateWorkflow401ApplicationProblemPlusJSONResponse) VisitCreateWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkflow409ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateWorkflow409ApplicationProblemPlusJSONResponse) VisitCreateWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkflow422ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateWorkflow422ApplicationProblemPlusJSONResponse) VisitCreateWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkflowRequestObject struct {
+	ID WorkflowID `json:"id"`
+}
+
+type GetWorkflowResponseObject interface {
+	VisitGetWorkflowResponse(w http.ResponseWriter) error
+}
+
+type GetWorkflow200ResponseHeaders struct {
+	ETag string
+}
+
+type GetWorkflow200JSONResponse struct {
+	Body    WorkflowRevision
+	Headers GetWorkflow200ResponseHeaders
+}
+
+func (response GetWorkflow200JSONResponse) VisitGetWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkflow401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetWorkflow401ApplicationProblemPlusJSONResponse) VisitGetWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkflow404ApplicationProblemPlusJSONResponse Problem
+
+func (response GetWorkflow404ApplicationProblemPlusJSONResponse) VisitGetWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveDraftRequestObject struct {
+	ID     WorkflowID `json:"id"`
+	Params SaveDraftParams
+	Body   *SaveDraftJSONRequestBody
+}
+
+type SaveDraftResponseObject interface {
+	VisitSaveDraftResponse(w http.ResponseWriter) error
+}
+
+type SaveDraft200ResponseHeaders struct {
+	ETag string
+}
+
+type SaveDraft200JSONResponse struct {
+	Body    Revision
+	Headers SaveDraft200ResponseHeaders
+}
+
+func (response SaveDraft200JSONResponse) VisitSaveDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveDraft401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response SaveDraft401ApplicationProblemPlusJSONResponse) VisitSaveDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveDraft404ApplicationProblemPlusJSONResponse Problem
+
+func (response SaveDraft404ApplicationProblemPlusJSONResponse) VisitSaveDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveDraft412ApplicationProblemPlusJSONResponse Problem
+
+func (response SaveDraft412ApplicationProblemPlusJSONResponse) VisitSaveDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveDraft422ApplicationProblemPlusJSONResponse Problem
+
+func (response SaveDraft422ApplicationProblemPlusJSONResponse) VisitSaveDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveDraft428ApplicationProblemPlusJSONResponse Problem
+
+func (response SaveDraft428ApplicationProblemPlusJSONResponse) VisitSaveDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(428)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishWorkflowRequestObject struct {
+	ID   WorkflowID `json:"id"`
+	Body *PublishWorkflowJSONRequestBody
+}
+
+type PublishWorkflowResponseObject interface {
+	VisitPublishWorkflowResponse(w http.ResponseWriter) error
+}
+
+type PublishWorkflow200JSONResponse Workflow
+
+func (response PublishWorkflow200JSONResponse) VisitPublishWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishWorkflow401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response PublishWorkflow401ApplicationProblemPlusJSONResponse) VisitPublishWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishWorkflow404ApplicationProblemPlusJSONResponse Problem
+
+func (response PublishWorkflow404ApplicationProblemPlusJSONResponse) VisitPublishWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishWorkflow422ApplicationProblemPlusJSONResponse Problem
+
+func (response PublishWorkflow422ApplicationProblemPlusJSONResponse) VisitPublishWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisionsRequestObject struct {
+	ID WorkflowID `json:"id"`
+}
+
+type ListRevisionsResponseObject interface {
+	VisitListRevisionsResponse(w http.ResponseWriter) error
+}
+
+type ListRevisions200JSONResponse RevisionList
+
+func (response ListRevisions200JSONResponse) VisitListRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisions401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListRevisions401ApplicationProblemPlusJSONResponse) VisitListRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisions404ApplicationProblemPlusJSONResponse Problem
+
+func (response ListRevisions404ApplicationProblemPlusJSONResponse) VisitListRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevisionRequestObject struct {
+	ID       WorkflowID `json:"id"`
+	Revision int        `json:"revision"`
+}
+
+type GetRevisionResponseObject interface {
+	VisitGetRevisionResponse(w http.ResponseWriter) error
+}
+
+type GetRevision200JSONResponse Revision
+
+func (response GetRevision200JSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevision401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetRevision401ApplicationProblemPlusJSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevision404ApplicationProblemPlusJSONResponse Problem
+
+func (response GetRevision404ApplicationProblemPlusJSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetHealthz Report that the process is up
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
+	// GetReadyz Report that the server can reach its database
+	// (GET /readyz)
+	GetReadyz(ctx context.Context, request GetReadyzRequestObject) (GetReadyzResponseObject, error)
+	// ValidateDefinition Check a definition without saving it
+	// (POST /v1/validate)
+	ValidateDefinition(ctx context.Context, request ValidateDefinitionRequestObject) (ValidateDefinitionResponseObject, error)
+	// ListWorkflows List workflows, newest first
+	// (GET /v1/workflows)
+	ListWorkflows(ctx context.Context, request ListWorkflowsRequestObject) (ListWorkflowsResponseObject, error)
+	// CreateWorkflow Create a workflow; its definition becomes revision 1
+	// (POST /v1/workflows)
+	CreateWorkflow(ctx context.Context, request CreateWorkflowRequestObject) (CreateWorkflowResponseObject, error)
+	// GetWorkflow Get a workflow and its latest revision
+	// (GET /v1/workflows/{id})
+	GetWorkflow(ctx context.Context, request GetWorkflowRequestObject) (GetWorkflowResponseObject, error)
+	// SaveDraft Save the next revision
+	// (PUT /v1/workflows/{id}/draft)
+	SaveDraft(ctx context.Context, request SaveDraftRequestObject) (SaveDraftResponseObject, error)
+	// PublishWorkflow Make a revision the one served
+	// (POST /v1/workflows/{id}/publish)
+	PublishWorkflow(ctx context.Context, request PublishWorkflowRequestObject) (PublishWorkflowResponseObject, error)
+	// ListRevisions List a workflow's revisions, newest first
+	// (GET /v1/workflows/{id}/revisions)
+	ListRevisions(ctx context.Context, request ListRevisionsRequestObject) (ListRevisionsResponseObject, error)
+	// GetRevision Get one revision, with its problems
+	// (GET /v1/workflows/{id}/revisions/{revision})
+	GetRevision(ctx context.Context, request GetRevisionRequestObject) (GetRevisionResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -257,6 +1240,264 @@ func (sh *strictHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetHealthzResponseObject); ok {
 		if err := validResponse.VisitGetHealthzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetReadyz operation middleware
+func (sh *strictHandler) GetReadyz(w http.ResponseWriter, r *http.Request) {
+	var request GetReadyzRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetReadyz(ctx, request.(GetReadyzRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetReadyz")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetReadyzResponseObject); ok {
+		if err := validResponse.VisitGetReadyzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ValidateDefinition operation middleware
+func (sh *strictHandler) ValidateDefinition(w http.ResponseWriter, r *http.Request) {
+	var request ValidateDefinitionRequestObject
+
+	var body ValidateDefinitionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ValidateDefinition(ctx, request.(ValidateDefinitionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ValidateDefinition")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ValidateDefinitionResponseObject); ok {
+		if err := validResponse.VisitValidateDefinitionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkflows operation middleware
+func (sh *strictHandler) ListWorkflows(w http.ResponseWriter, r *http.Request, params ListWorkflowsParams) {
+	var request ListWorkflowsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkflows(ctx, request.(ListWorkflowsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkflows")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkflowsResponseObject); ok {
+		if err := validResponse.VisitListWorkflowsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWorkflow operation middleware
+func (sh *strictHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
+	var request CreateWorkflowRequestObject
+
+	var body CreateWorkflowJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWorkflow(ctx, request.(CreateWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateWorkflowResponseObject); ok {
+		if err := validResponse.VisitCreateWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWorkflow operation middleware
+func (sh *strictHandler) GetWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID) {
+	var request GetWorkflowRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWorkflow(ctx, request.(GetWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWorkflowResponseObject); ok {
+		if err := validResponse.VisitGetWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SaveDraft operation middleware
+func (sh *strictHandler) SaveDraft(w http.ResponseWriter, r *http.Request, id WorkflowID, params SaveDraftParams) {
+	var request SaveDraftRequestObject
+
+	request.ID = id
+	request.Params = params
+
+	var body SaveDraftJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SaveDraft(ctx, request.(SaveDraftRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SaveDraft")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SaveDraftResponseObject); ok {
+		if err := validResponse.VisitSaveDraftResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PublishWorkflow operation middleware
+func (sh *strictHandler) PublishWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID) {
+	var request PublishWorkflowRequestObject
+
+	request.ID = id
+
+	var body PublishWorkflowJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PublishWorkflow(ctx, request.(PublishWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PublishWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PublishWorkflowResponseObject); ok {
+		if err := validResponse.VisitPublishWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListRevisions operation middleware
+func (sh *strictHandler) ListRevisions(w http.ResponseWriter, r *http.Request, id WorkflowID) {
+	var request ListRevisionsRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRevisions(ctx, request.(ListRevisionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRevisions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRevisionsResponseObject); ok {
+		if err := validResponse.VisitListRevisionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRevision operation middleware
+func (sh *strictHandler) GetRevision(w http.ResponseWriter, r *http.Request, id WorkflowID, revision int) {
+	var request GetRevisionRequestObject
+
+	request.ID = id
+	request.Revision = revision
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRevision(ctx, request.(GetRevisionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRevision")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRevisionResponseObject); ok {
+		if err := validResponse.VisitGetRevisionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -4,10 +4,10 @@ No-code API orchestration. Users compose upstream API calls into a DAG,
 using a graph editor or a page-by-page builder, and map data between steps
 with JSONata. A Go engine runs it, fanning out in parallel.
 
-**Status: engine built (plan 02), not yet wired to the API (03).** A server
-with a health route, a web shell, nginx and Docker, plus the workflow engine
-as a library. What's left is in docs/plans/02-engine.md and
-01-foundation.md; the bigger picture is docs/plans/README.md.
+**Status: plan 03 in progress; phase A (Postgres and the workflows API) is
+built.** The server stores workflows and their revisions; runs, live events
+and serving come in phase B. What's left is in docs/plans/03-api.md; the
+bigger picture is docs/plans/README.md.
 
 ## Read before working
 
@@ -39,21 +39,25 @@ as a library. What's left is in docs/plans/02-engine.md and
 ## Layout
 
 - `server/`: Go module. `cmd/conduit`, plus `internal/` packages `config`,
-  `workflow`, `engine`, `transform`, `upstream`, `store` and `httpapi`.
-  `store` doesn't exist yet (03).
+  `workflow`, `engine`, `transform`, `upstream`, `store` and `httpapi`;
+  `migrations/` holds the goose SQL.
 - `web/`: React app.
 - `schema/openapi.yaml`: source of truth for API types on both sides.
 - `schema/workflow.yaml`: the workflow definition; the Go types in
   `internal/workflow` are generated from it.
-- `docker/`: compose files and Dockerfiles.
+- `docker/`: a directory per service (`postgres`, `server`, `web`) with its
+  compose file, and its Dockerfile when we build one. `docker/compose.yaml`
+  includes them all.
 - `docs/`: plans and working style.
 
 ## Commands
 
 ```
 just                list recipes
-just setup          install the pinned golangci-lint (.tools/bin) and web dependencies
-just dev-server     API server on http://127.0.0.1:8080
+just setup          create .env; install the pinned golangci-lint (.tools/bin) and web dependencies
+just db-up          Postgres on 127.0.0.1:5432; db-reset deletes it and starts afresh
+just migrate        apply migrations; `just migrate status` lists them
+just dev-server     API server on http://127.0.0.1:8080, after db-up and migrate
 just dev-web        web app on http://127.0.0.1:5173; /api is proxied to the server
 just check          the gate: format, lint, race tests, coverage floors, typecheck, build, stale generated code
 just fmt            apply formatting: gofumpt + goimports, Prettier
@@ -70,6 +74,11 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`.
 - Generated code (`server/internal/httpapi/gen`,
   `server/internal/workflow/definition.gen.go`, `web/src/gen`) is never
   edited by hand. Change `schema/` and run `just gen`.
+- Settings are in two gitignored files, each loaded only where it's needed:
+  `.env` for setup (compose's passwords, the tests' database URLs) and
+  `server/.env` for the server. `just setup` makes both from their
+  `.env.example`. Store and HTTP tests need Postgres: `just test` and
+  `just check` start it.
 - Coverage floors live in the justfile. Raise one when coverage rises;
   never lower one to get `just check` passing.
 - All outbound HTTP goes through `internal/upstream`, which applies the

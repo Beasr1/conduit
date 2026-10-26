@@ -1,0 +1,21 @@
+# nginx: serves the web build and forwards /api to the server, on
+# http://127.0.0.1:8088. Its config is in nginx/, one file per topic.
+services:
+  web:
+    extends:
+      file: ../base.yaml
+      service: hardened
+    build:
+      context: ../..
+      dockerfile: docker/web/Dockerfile
+    tmpfs:
+      - /tmp # nginx's pid file and temp files
+    depends_on:
+      - server
+    ports:
+      - "127.0.0.1:8088:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/nginx-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3

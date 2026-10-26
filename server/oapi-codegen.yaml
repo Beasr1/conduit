@@ -6,3 +6,11 @@ generate:
   models: true
   std-http-server: true
   strict-server: true
+output-options:
+  # Optional fields are plain values, not pointers, as in the workflow types.
+  prefer-skip-optional-pointer: true
+  name-normalizer: ToCamelCaseWithInitialisms
+# The definition is written in workflow.yaml and generated into the workflow
+# package, so the API uses that same type instead of a copy.
+import-mapping:
+  ./workflow.yaml: github.com/Beasr1/conduit/server/internal/workflow

@@ -1,27 +1,63 @@
-// Package httpapi holds the HTTP routes and handlers. It translates between
-// HTTP and the rest of the server; nothing below it knows about requests.
-// Routes and types are generated from schema/openapi.yaml into gen/.
+// Package httpapi is the HTTP layer: the handlers for the interface
+// generated from schema/openapi.yaml, the token check, body limits, and
+// problem details. Every error leaves through answerError, the one place
+// that maps errors to statuses.
 package httpapi
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
+	"github.com/Beasr1/conduit/server/internal/store"
 )
 
-// NewRouter returns the server's routes.
-func NewRouter() http.Handler {
-	mux := http.NewServeMux()
-	gen.HandlerFromMux(gen.NewStrictHandler(api{}, nil), mux)
-	return mux
+// maxBody is nginx's client_max_body_size too.
+const maxBody = 1 << 20
+
+// Deps is what the HTTP layer needs.
+type Deps struct {
+	Store *store.Store
+	Token string // CONDUIT_API_TOKEN
+	Log   *slog.Logger
 }
 
-// api implements the operations in schema/openapi.yaml.
-type api struct{}
+// NewRouter returns the server's handler.
+func NewRouter(d Deps) http.Handler {
+	a := &api{store: d.Store, log: d.Log}
+	strict := gen.NewStrictHandlerWithOptions(a, nil, gen.StrictHTTPServerOptions{
+		RequestErrorHandlerFunc:  a.requestError,
+		ResponseErrorHandlerFunc: a.answerError,
+	})
+	h := gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{
+		BaseRouter: http.NewServeMux(),
+		// Each wraps the one before, so the token is checked before the body.
+		Middlewares:      []gen.MiddlewareFunc{checkShape, requireToken(d.Token)},
+		ErrorHandlerFunc: a.requestError,
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+		h.ServeHTTP(w, r)
+	})
+}
 
-// GetHealthz reports that the process is up. It checks no dependencies, so a
-// slow dependency can't make the process look dead.
-func (api) GetHealthz(context.Context, gen.GetHealthzRequestObject) (gen.GetHealthzResponseObject, error) {
+type api struct {
+	store *store.Store
+	log   *slog.Logger
+}
+
+func (*api) GetHealthz(context.Context, gen.GetHealthzRequestObject) (gen.GetHealthzResponseObject, error) {
 	return gen.GetHealthz200JSONResponse{Status: "ok"}, nil
+}
+
+func (a *api) GetReadyz(ctx context.Context, _ gen.GetReadyzRequestObject) (gen.GetReadyzResponseObject, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := a.store.Ping(ctx); err != nil {
+		a.log.WarnContext(ctx, "not ready", "err", err)
+		return nil, &problem{status: http.StatusServiceUnavailable, code: "not_ready", detail: "The database isn't answering."}
+	}
+	return gen.GetReadyz200JSONResponse{Status: "ok"}, nil
 }

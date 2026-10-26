@@ -1,0 +1,39 @@
+# The API server, plus a one-shot run of the same image that applies the
+# migrations embedded in it before the server starts. Not published on the
+# host: nginx (../web) forwards /api to it.
+#
+# Both get the server's own settings from server/.env, as `just dev-server`
+# does. The database URL is the one override: inside compose, Postgres is
+# the db container, not 127.0.0.1.
+x-build: &build
+  context: ../..
+  dockerfile: docker/server/Dockerfile
+
+x-database: &database postgres://conduit:${CONDUIT_DB_PASSWORD:?set it in .env}@db:5432/conduit?sslmode=disable
+
+services:
+  migrate:
+    extends:
+      file: ../base.yaml
+      service: hardened
+    build: *build
+    command: ["migrate", "up"]
+    env_file: ../../server/.env
+    environment:
+      CONDUIT_DATABASE_URL: *database
+    depends_on:
+      db:
+        condition: service_healthy
+
+  server:
+    extends:
+      file: ../base.yaml
+      service: hardened
+    build: *build
+    env_file: ../../server/.env
+    environment:
+      CONDUIT_DATABASE_URL: *database
+      CONDUIT_LOG_FORMAT: json
+    depends_on:
+      migrate:
+        condition: service_completed_successfully

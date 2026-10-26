@@ -1,0 +1,14 @@
+# What every service extends, so it's written once. Not a service itself.
+services:
+  hardened:
+    # Non-root, no Linux capabilities, a read-only filesystem, and no way to
+    # gain privileges.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # Rotated JSON logs, so a long-running stack can't fill the disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

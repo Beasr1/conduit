@@ -1,0 +1,45 @@
+# Postgres for the server's state, on 127.0.0.1:5432. `just db-up` starts it
+# alone; the official image is used as it is, configured by flags and an init
+# script, so there's no Dockerfile.
+services:
+  db:
+    extends:
+      file: ../base.yaml
+      service: hardened
+    image: postgres:18.6-alpine@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
+    # The image's own postgres user from the start, so nothing runs as root.
+    user: "70:70"
+    environment:
+      POSTGRES_PASSWORD: ${CONDUIT_DB_ADMIN_PASSWORD:?set it in .env}
+      CONDUIT_DB_PASSWORD: ${CONDUIT_DB_PASSWORD:?set it in .env} # read by init.sh
+    command:
+      - postgres
+      - -c
+      - timezone=UTC
+      - -c
+      - log_timezone=UTC
+      - -c
+      - log_min_duration_statement=500ms
+      - -c
+      - "log_line_prefix=%m [%p] db=%d user=%u app=%a client=%h "
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql/18/docker, so
+      # the volume goes on the parent. On /var/lib/postgresql/data it
+      # wouldn't persist.
+      - db-data:/var/lib/postgresql
+      - ./init.sh:/docker-entrypoint-initdb.d/10-conduit.sh:ro
+    tmpfs:
+      - /var/run/postgresql # the socket
+      - /tmp
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      # Over TCP: while init.sh runs, a temporary server answers on the socket
+      # only, so a socket check would pass before the database exists.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "conduit", "-d", "conduit"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  db-data:

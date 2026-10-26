@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Build context is the repo root: docker build -f docker/Dockerfile.web .
+# Build context is the repo root: docker build -f docker/web/Dockerfile .
 
 FROM node:24.22.0-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS build
 # corepack runs the pnpm version pinned in package.json's packageManager.
@@ -15,7 +15,7 @@ RUN corepack pnpm build
 FROM nginxinc/nginx-unprivileged:1.30.6-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
 # conf.d/ loads inside the image's http {} block, in file-name order; our
 # default.conf replaces the image's. snippets/ are pulled in with include.
-COPY docker/nginx/conf.d/ /etc/nginx/conf.d/
-COPY docker/nginx/snippets/ /etc/nginx/snippets/
+COPY docker/web/nginx/conf.d/ /etc/nginx/conf.d/
+COPY docker/web/nginx/snippets/ /etc/nginx/snippets/
 COPY --from=build /web/dist /usr/share/nginx/html
 EXPOSE 8080

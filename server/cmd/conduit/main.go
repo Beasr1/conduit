@@ -1,4 +1,9 @@
 // Command conduit runs the Conduit API server.
+//
+//	conduit                  serve the API (the same as `conduit serve`)
+//	conduit migrate [up]     apply pending database migrations
+//	conduit migrate down     undo the latest migration
+//	conduit migrate status   list migrations and whether each is applied
 package main
 
 import (
@@ -14,28 +19,52 @@ import (
 
 	"github.com/Beasr1/conduit/server/internal/config"
 	"github.com/Beasr1/conduit/server/internal/httpapi"
+	"github.com/Beasr1/conduit/server/internal/store"
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "conduit:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(args []string) error {
 	cfg, err := config.Load(os.LookupEnv)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	log := newLogger(cfg)
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	switch {
+	case len(args) == 0 || args[0] == "serve":
+		return serve(ctx, stop, cfg)
+	case args[0] == "migrate":
+		command := "up"
+		if len(args) > 1 {
+			command = args[1]
+		}
+		return store.Migrate(ctx, cfg.DatabaseURL, command, os.Stdout)
+	default:
+		return fmt.Errorf("unknown command %q: use serve or migrate", args[0])
+	}
+}
+
+func serve(ctx context.Context, stop context.CancelFunc, cfg config.Config) error {
+	if err := cfg.CheckServe(); err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	log := newLogger(cfg)
+	db, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer db.Close() // after the server has stopped, below
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(),
+		Handler:           httpapi.NewRouter(httpapi.Deps{Store: db, Token: cfg.APIToken, Log: log}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		// Just above the 30 s default for served runs (roadmap, execution

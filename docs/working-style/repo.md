@@ -41,7 +41,9 @@ when a second consumer of shared TypeScript code does.
   | `gen` | regenerate code from `schema/` |
   | `hooks-install` | pre-push hook that runs `just check` |
   | `up`, `down` | the Docker stack |
-  | `dev`, `db-migrate`, `db-reset` | arrive with the database in 03 |
+  | `db-up`, `db-reset` | Postgres from compose, on 127.0.0.1:5432; reset deletes the volume |
+  | `migrate *args` | `conduit migrate`; `up` by default |
+  | `dev` | everything at once: arrives in plan 03 phase C |
 
 - Start with one justfile. Once it passes ~15 recipes, split into
   `mod name 'just/name.just'` modules. Each module sets
@@ -100,7 +102,13 @@ lint fails only in CI, on code that's clean everywhere else.
 - Config comes only from environment variables: `CONDUIT_*` for the server,
   `VITE_*` for the web app.
 - Each component has a committed `.env.example`, split into commented
-  sections. `.env` is gitignored.
+  sections. `.env` is gitignored. Today there are two:
+  - `.env` at the root, for setup: compose's database passwords and the
+    tests' database URLs.
+  - `server/.env`, for the server: what `internal/config` reads.
+
+  Each recipe loads only the file it needs, with no `set dotenv-load`, so
+  the server process never sees the database superuser's password.
 - Secrets never go in the repo, in logs or in API responses.
 
 ## Docker
@@ -109,16 +117,29 @@ lint fails only in CI, on code that's clean everywhere else.
   digest is what gets pulled, so a republished tag can't change a build.
   The catch: a digest never picks up patches by itself, so a bot
   (Dependabot or Renovate) has to bump them.
-- **Images.** `docker/Dockerfile.server` is distroless and non-root.
-  `docker/Dockerfile.web` puts the build behind NGINX's non-root image. The
-  build context is the repo root, with `.dockerignore` next to it.
-- **`docker/compose.yaml`.**
-  - Only nginx is published, on `127.0.0.1`.
-  - Every container runs read-only, with no capabilities,
-    `no-new-privileges` and rotated logs.
-  - Postgres joins when the database lands: pinned tag, healthcheck, named
-    volume, port bound to `127.0.0.1`.
-- **`docker/nginx/`, one file per topic.**
+- **One directory per service**, holding its compose file and, when we
+  build an image, its Dockerfile:
+  - `docker/postgres/`: the official image, as it is, configured by flags
+    and `init.sh`. No Dockerfile, since there's nothing to build.
+  - `docker/server/`: distroless and non-root. The same image runs
+    `conduit migrate up` as a one-shot service before the server starts,
+    so migrations need no image of their own.
+  - `docker/web/`: the web build behind nginx's non-root image, with its
+    config in `nginx/`.
+  - A new service, such as Redis when a plan needs it, is a new directory
+    plus one line in the top-level file.
+- **`docker/compose.yaml` only `include`s them.** Each included file
+  resolves its paths from its own directory, and together they make one
+  project on one network. Stacking files with `-f` instead resolves every
+  path from the first file.
+- **`docker/base.yaml`** holds what every service `extends`: read-only,
+  no capabilities, `no-new-privileges`, rotated logs. YAML anchors can't
+  cross files, so it's written once there.
+- **Exposure.** Only nginx (127.0.0.1:8088) and Postgres (127.0.0.1:5432,
+  for the host's tests and `just dev-server`) are published, and only on
+  loopback. The build context is the repo root, with `.dockerignore` next
+  to it.
+- **`docker/web/nginx/`, one file per topic.**
   - `conf.d/` loads inside nginx's `http {}` block in file-name order. The
     numbered files define things: `00-logging` (log format),
     `10-security` (CSP map), `20-limits` (rate-limit zones) and

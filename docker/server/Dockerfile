@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
-# Build context is the repo root: docker build -f docker/Dockerfile.server .
+# Build context is the repo root: docker build -f docker/server/Dockerfile .
 
 # Keep this version equal to server/go.mod's toolchain line. Official Go images
 # set GOTOOLCHAIN=local, so a newer requirement fails the build.
 FROM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS build
 WORKDIR /src
-COPY server/go.mod ./
+COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/conduit ./cmd/conduit

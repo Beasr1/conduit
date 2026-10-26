@@ -1,8 +1,10 @@
 // Package config loads the server's settings from environment variables. It
 // owns every variable name; main hands it os.LookupEnv.
 //
-// Variables, all optional:
+// Variables:
 //
+//	CONDUIT_DATABASE_URL      required: postgres://user:password@host:port/database
+//	CONDUIT_API_TOKEN         required to serve: the one bearer token (D12), 32+ characters
 //	CONDUIT_HTTP_ADDR         listen address, default 127.0.0.1:8080
 //	CONDUIT_LOG_FORMAT        json (default) or text
 //	CONDUIT_LOG_LEVEL         debug, info (default), warn or error
@@ -13,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"time"
 )
 
@@ -22,6 +25,8 @@ type Config struct {
 	LogFormat       string
 	LogLevel        slog.Level
 	ShutdownTimeout time.Duration
+	DatabaseURL     string
+	APIToken        string
 }
 
 // Load reads the settings through lookup, which is os.LookupEnv in main and a
@@ -37,6 +42,8 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	}
 
 	var errs []error
+	cfg.DatabaseURL, _ = lookup("CONDUIT_DATABASE_URL")
+	cfg.APIToken, _ = lookup("CONDUIT_API_TOKEN")
 	if v, ok := lookup("CONDUIT_HTTP_ADDR"); ok {
 		cfg.HTTPAddr = v
 	}
@@ -73,5 +80,18 @@ func (c Config) Validate() error {
 	if c.ShutdownTimeout <= 0 {
 		errs = append(errs, fmt.Errorf("CONDUIT_SHUTDOWN_TIMEOUT: %s must be positive", c.ShutdownTimeout))
 	}
+	if u, err := url.Parse(c.DatabaseURL); c.DatabaseURL == "" || err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
+		// The value isn't echoed: it holds the database password.
+		errs = append(errs, errors.New("CONDUIT_DATABASE_URL: required, as postgres://user:password@host:port/database"))
+	}
 	return errors.Join(errs...)
+}
+
+// CheckServe reports what serving needs beyond Validate: the API token. A
+// short token is refused, since it's the only thing guarding the server.
+func (c Config) CheckServe() error {
+	if len(c.APIToken) < 32 {
+		return errors.New("CONDUIT_API_TOKEN: required, at least 32 characters (try: openssl rand -hex 32)")
+	}
+	return nil
 }

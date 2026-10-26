@@ -54,10 +54,16 @@ func (e NodeKind) Valid() bool {
 // Definition A workflow. A node runs once its parents have finished and at least one edge into it was taken.
 type Definition struct {
 	Edges []Edge `json:"edges,omitempty"`
-	Nodes []Node `json:"nodes"`
+
+	// InputSchema A JSON Schema (2020-12) that run input must match. A served workflow answers input that doesn't with 400. Its $refs can only point inside it.
+	InputSchema map[string]interface{} `json:"input_schema,omitempty"`
+	Nodes       []Node                 `json:"nodes"`
 
 	// Output JSONata over the finished run. Its value is the run's result.
 	Output string `json:"output,omitempty"`
+
+	// OutputSchema A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet.
+	OutputSchema map[string]interface{} `json:"output_schema,omitempty"`
 }
 
 // Edge defines model for Edge.

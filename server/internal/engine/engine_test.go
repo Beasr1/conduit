@@ -606,3 +606,43 @@ func TestCompile_ReportsExpressionProblemsWithTheRest(t *testing.T) {
 		t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+func TestCompile_ChecksJSONSchemas(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, schemas, want string // want: "pointer code", or "" for no problems
+	}{
+		{"valid", `"input_schema": {"type": "object", "required": ["user_id"], "properties": {"user_id": {"type": "string"}}}`, ""},
+		{"a ref inside the schema", `"input_schema": {"$defs": {"id": {"type": "string"}}, "properties": {"user_id": {"$ref": "#/$defs/id"}}}`, ""},
+		{"not a schema", `"input_schema": {"type": 5}`, "/input_schema invalid_schema"},
+		{"output too", `"output_schema": {"minimum": "zero"}`, "/output_schema invalid_schema"},
+		// The library's default loader reads local files; none may load.
+		{"a ref to a local file", `"input_schema": {"$ref": "file:///etc/passwd"}`, "/input_schema invalid_schema"},
+		{"a ref to a remote schema", `"input_schema": {"$ref": "https://example.com/schema.json"}`, "/input_schema invalid_schema"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var d workflow.Definition
+			if err := json.Unmarshal([]byte(`{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], `+tt.schemas+`}`), &d); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Compile(&d)
+			var got []string
+			var ps workflow.Problems
+			if errors.As(err, &ps) {
+				for _, p := range ps {
+					got = append(got, p.Pointer+" "+p.Code)
+					if strings.Contains(p.Detail, "/Users/") || strings.Contains(p.Detail, "root:") {
+						t.Errorf("detail leaks the server's files: %s", p.Detail)
+					}
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(got, ", ") != tt.want {
+				t.Errorf("problems = %q, want %q", strings.Join(got, ", "), tt.want)
+			}
+		})
+	}
+}

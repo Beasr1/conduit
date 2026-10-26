@@ -9,6 +9,16 @@ export PATH := justfile_directory() / ".tools/bin" + ":" + env("PATH")
 # corepack fetches the pnpm pinned in web/package.json without asking
 export COREPACK_ENABLE_DOWNLOAD_PROMPT := "0"
 
+compose := "docker compose -f docker/compose.yaml --env-file .env"
+
+# Settings live in two files, each loaded only where it's needed, so the
+# server never sees the database superuser's password:
+#   .env         setup: compose's passwords and the tests' database URLs
+#   server/.env  the server's own settings, read by dev-server and migrate
+# `just setup` makes both from their .env.example. This loads the one in
+# the current directory into the environment.
+load_env := "set -a && . ./.env && set +a"
+
 generated := "server/internal/httpapi/gen server/internal/workflow/definition.gen.go web/src/gen"
 
 # Test coverage floors, in percent, for the engine's packages. Raise one when
@@ -18,23 +28,39 @@ coverage_floors := "workflow=88 transform=84 upstream=91 engine=96"
 default:
     @just --list
 
-# install the pinned golangci-lint and the web dependencies
+# create .env and server/.env if missing; install the pinned golangci-lint and the web dependencies
 setup:
+    @for f in .env server/.env; do [ -f "$f" ] || { cp "$f.example" "$f"; echo "created $f from $f.example"; }; done
     @if golangci-lint version 2>/dev/null | grep -q "version {{golangci_version}} "; then echo "golangci-lint {{golangci_version}} already installed"; else curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b .tools/bin v{{golangci_version}}; fi
     cd web && corepack pnpm install --frozen-lockfile
 
-# run the API server on http://127.0.0.1:8080
-dev-server:
-    cd server && go run ./cmd/conduit
+# run the API server on http://127.0.0.1:8080, against the compose Postgres
+dev-server: db-up migrate
+    cd server && {{load_env}} && go run ./cmd/conduit
 
 # run the web app on http://127.0.0.1:5173, proxying /api to the server
 dev-web:
     cd web && corepack pnpm dev
 
+# start Postgres on 127.0.0.1:5432 and wait until it's healthy
+db-up:
+    {{compose}} up --detach --wait db
+
+# delete the database and start a fresh one
+db-reset:
+    {{compose}} rm --stop --force db
+    docker volume rm --force conduit_db-data
+    just db-up
+
+# apply migrations to the database in server/.env; `just migrate status` lists them
+migrate *args="up":
+    cd server && {{load_env}} && go run ./cmd/conduit migrate {{args}}
+
 # the gate: format, lint, tests and coverage floors, typecheck, build, stale generated code. CI runs the same
 check: _require-tools
     @cd server && golangci-lint fmt --diff || { echo "Go code isn't formatted: run just fmt"; exit 1; }
     cd server && golangci-lint run ./...
+    just db-up
     just _coverage
     cd web && corepack pnpm format:check
     cd web && corepack pnpm lint
@@ -51,8 +77,8 @@ fmt: _require-tools
     cd web && corepack pnpm format
 
 # run the tests; extra arguments pass through to go test
-test *args:
-    cd server && go test -race {{args}} ./...
+test *args: db-up
+    {{load_env}} && cd server && go test -race {{args}} ./...
     cd web && corepack pnpm test
 
 # regenerate code from schema/: the server's HTTP layer and workflow types, and web's types
@@ -67,11 +93,11 @@ hooks-install:
 
 # build and start everything behind nginx on http://127.0.0.1:8088
 up:
-    docker compose -f docker/compose.yaml up --build --detach
+    {{compose}} up --build --detach
 
-# stop and remove the containers
+# stop and remove the containers; the database volume stays
 down:
-    docker compose -f docker/compose.yaml down
+    {{compose}} down
 
 [private]
 _require-tools:
@@ -84,6 +110,7 @@ _require-tools:
 _coverage:
     #!/usr/bin/env bash
     set -euo pipefail
+    {{load_env}}
     cd server
     out=$(go test -race -cover ./... 2>&1) || { echo "$out"; exit 1; }
     echo "$out"

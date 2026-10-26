@@ -40,7 +40,8 @@ server/
 - Wire by hand in `main`: build dependencies in order and pass them
   explicitly. No DI framework, no `init()`, no package-level mutable state.
   `var ErrX = errors.New(...)` sentinels are fine.
-- `os.Getenv` appears only in `internal/config`. Reading env at package
+- `os.Getenv` appears only in `internal/config`, and in `storetest`, which
+  reads the test database's address. Reading env at package
   load skips validation and makes tests depend on the machine.
 
 ## Context
@@ -94,8 +95,13 @@ server/
   the learning repo's go-services file 10).
 - `http.Server` sets `ReadHeaderTimeout`, `ReadTimeout`, `IdleTimeout`, and
   `WriteTimeout` on every route except SSE.
-- `http.MaxBytesReader` on every request body. Unknown JSON fields are
-  rejected.
+- `http.MaxBytesReader` on every request body: 1 MiB, nginx's limit too.
+- Unknown JSON fields are refused, not dropped. The generated server
+  decodes with a plain `json.Decoder`, which ignores them, so a middleware
+  first walks each body against its generated Go type. It reports every
+  unknown field and wrong type at once, with pointers, before any
+  validation runs. A route with a JSON body must be in its `bodies` table,
+  and a test sends each one an unknown field.
 - Success returns the resource itself, with no envelope. Errors use RFC 9457
   problem details (`application/problem+json`): `type`, `title`, `status`
   and `detail`, plus our stable `code`.
@@ -170,6 +176,19 @@ server/
 - Queries live in `store/`, one file per table or aggregate.
 - Migrations: goose SQL (`-- +goose Up` / `Down`), timestamped names,
   embedded, applied by `conduit migrate up`. Never edit an applied migration.
+- The server's pool sets `statement_timeout` (5 s) and
+  `idle_in_transaction_session_timeout` (10 s) on every session, so a
+  stuck query or a forgotten transaction fails instead of holding locks.
+  `conduit migrate` connects without them.
+- Ids are UUIDv7, from Postgres 18's `uuidv7()`: time-ordered, so lists
+  page by cursor (`id < $before`), and random enough to be unguessable.
+- Optimistic concurrency: a save names its base revision, and the store
+  locks the row (`FOR UPDATE`) to compare. A stale base is
+  `ErrRevisionMismatch`, which the API answers with `412`.
+- Store tests get a database per test package from `storetest.Run` in
+  `TestMain`. It's created through a superuser connection and owned by the
+  server's own role, so tests run with the server's privileges. With no
+  database they fail; they don't skip.
 
 ## Logging
 
