@@ -143,6 +143,7 @@ func TestEveryJSONBodyRefusesUnknownFields(t *testing.T) {
 		"PUT /v1/workflows/{id}/draft":    "/v1/workflows/" + id + "/draft",
 		"POST /v1/workflows/{id}/publish": "/v1/workflows/" + id + "/publish",
 		"POST /v1/validate":               "/v1/validate",
+		"POST /v1/workflows/{id}/runs":    "/v1/workflows/" + id + "/runs",
 	}
 	for pattern := range bodies {
 		path, ok := paths[pattern]

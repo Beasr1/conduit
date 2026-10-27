@@ -178,6 +178,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workflows/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a revision in the background
+         * @description The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it.
+         */
+        post: operations["startRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List runs, newest first */
+        get: operations["listRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        /** Get a run, with what each node did */
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runs/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Follow a run as it happens
+         * @description Server-sent events. Each node's progress is an event named `node`, with a NodeEvent as its data. The run's end is an event named `run`, with the Run as its data, and the stream closes after it. Each event's `id` is its number in the run.
+         *
+         *     A client that connects late, or reconnects with Last-Event-ID, gets the events it missed while the run goes on and for a minute after it ends. After that the stream sends only the `run` event, without an id. A comment line arrives every 15 s while nothing else does.
+         */
+        get: operations["streamRunEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/serve/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a workflow's published revision and answer with its output
+         * @description The body is the run's input. A run that fails answers with problem details naming the node; `instance` is the run, at /v1/runs/{id}. Served runs time out after 30 s.
+         */
+        post: operations["serveWorkflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -247,6 +349,8 @@ export interface components {
             instance?: string;
             /** @description Our stable error code. */
             code?: string;
+            /** @description The node that failed a served run. */
+            node?: string;
             /** @description Every validation problem at once. */
             errors?: components["schemas"]["ProblemError"][];
         };
@@ -255,6 +359,116 @@ export interface components {
             pointer: string;
             code: string;
             detail: string;
+        };
+        StartRun: {
+            /** @description The revision to run. Absent means the latest. */
+            revision?: number;
+            /** @description The run's input, checked against the definition's input_schema. Absent means null. */
+            input?: unknown;
+        };
+        RunSummary: {
+            id: string;
+            workflow_id: string;
+            revision: number;
+            /**
+             * @description editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+             * @enum {string}
+             */
+            trigger: "editor" | "served";
+            /** @enum {string} */
+            status: "running" | "succeeded" | "failed" | "cancelled";
+            error?: components["schemas"]["RunError"];
+            /** Format: date-time */
+            started_at: string;
+            /**
+             * Format: date-time
+             * @description Absent while the run goes on.
+             */
+            ended_at?: string;
+        };
+        Run: components["schemas"]["RunSummary"] & {
+            /** @description The input, as sent. */
+            input: unknown;
+            /** @description The output, once the run succeeded. Over 256 KiB, its first 256 KiB as a string, and output_truncated is true. */
+            output?: unknown;
+            output_truncated?: boolean;
+            /** @description What each node did, in the order they ended. Only from GET /v1/runs/{id}. */
+            nodes?: components["schemas"]["NodeRun"][];
+        };
+        RunList: {
+            runs: components["schemas"]["RunSummary"][];
+            /** @description Pass as `before` for the next page. Absent on the last page. */
+            next?: string;
+        };
+        /** @description Why a run or a node didn't succeed. */
+        RunError: {
+            /**
+             * @description upstream_failed: an upstream answered with an error status, or couldn't be reached, read or allowed.
+             *     timeout: the run, or a node's last attempt, ran out of time.
+             *     workflow_error: the workflow's own configuration failed, such as an expression.
+             *     internal_error: our bug; the details are in the server's log.
+             *     cancelled: the caller hung up, or the server shut down.
+             *     interrupted: the server stopped before the run ended.
+             * @enum {string}
+             */
+            code: "upstream_failed" | "timeout" | "workflow_error" | "internal_error" | "cancelled" | "interrupted";
+            detail: string;
+            /** @description On a run's error, the node that failed it. */
+            node?: string;
+        };
+        NodeRun: {
+            node: string;
+            /** @enum {string} */
+            status: "succeeded" | "failed" | "skipped" | "cancelled";
+            /** @description Requests an http node sent. 0 for a node that sent none. */
+            attempts: number;
+            request?: components["schemas"]["NodeRequest"];
+            response?: components["schemas"]["NodeResponse"];
+            error?: components["schemas"]["RunError"];
+            /**
+             * Format: date-time
+             * @description Absent if the node never started.
+             */
+            started_at?: string;
+            /** Format: date-time */
+            ended_at: string;
+        };
+        /** @description What an http node sent. Secrets aren't kept. The values of the Authorization, Proxy-Authorization, Cookie and Set-Cookie headers are [redacted], as are those of any header or query parameter whose name contains key, token, secret or password, and a password in the URL. */
+        NodeRequest: {
+            method: string;
+            url: string;
+            /** @description Lower-case names; repeated headers joined by commas. */
+            headers: {
+                [key: string]: string;
+            };
+            /** @description The JSON body. Over 256 KiB, its first 256 KiB as a string, and truncated is true. */
+            body?: unknown;
+            truncated?: boolean;
+        };
+        /** @description What an http node got back, or a transform node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest. */
+        NodeResponse: {
+            /** @description http nodes only. */
+            status?: number;
+            /** @description http nodes only. */
+            headers?: {
+                [key: string]: string;
+            };
+            /** @description null when there was none, or it wasn't JSON. */
+            body: unknown;
+            truncated?: boolean;
+        };
+        /** @description The data of a `node` event in a run's stream. */
+        NodeEvent: {
+            node: string;
+            /** @enum {string} */
+            kind: "started" | "retrying" | "succeeded" | "failed" | "skipped" | "cancelled";
+            /** @description The attempt starting; on the event that ends the node, the attempts made. */
+            attempt: number;
+            /** Format: date-time */
+            at: string;
+            /** @description On the event that ends an http node that got an answer. */
+            http_status?: number;
+            error?: components["schemas"]["RunError"];
         };
         /** @enum {string} */
         NodeKind: "http" | "transform";
@@ -325,9 +539,20 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
+        /** @description Too many runs are in progress, or the server is shutting down. Try again after Retry-After seconds. */
+        Busy: {
+            headers: {
+                "Retry-After"?: number;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
     };
     parameters: {
         WorkflowID: string;
+        RunID: string;
     };
     requestBodies: never;
     headers: {
@@ -593,6 +818,151 @@ export interface operations {
             };
             401: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+        };
+    };
+    startRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartRun"];
+            };
+        };
+        responses: {
+            /** @description Started. */
+            202: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Busy"];
+        };
+    };
+    listRuns: {
+        parameters: {
+            query?: {
+                /** @description Only this workflow's runs. */
+                workflow_id?: string;
+                limit?: number;
+                /** @description Return runs older than this id, for the next page. */
+                before?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of runs, without their input, output or nodes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    streamRunEvents: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The id of the last event received. The stream resumes after it. */
+                "Last-Event-ID"?: string;
+            };
+            path: {
+                id: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The event stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            503: components["responses"]["Busy"];
+        };
+    };
+    serveWorkflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            /** @description The run's output. null when the workflow has no output expression. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            502: components["responses"]["Problem"];
+            503: components["responses"]["Busy"];
+            504: components["responses"]["Problem"];
         };
     };
 }

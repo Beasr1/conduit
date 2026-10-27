@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
+	"github.com/Beasr1/conduit/server/internal/runner"
 	"github.com/Beasr1/conduit/server/internal/store"
 )
 
@@ -19,14 +20,15 @@ const maxBody = 1 << 20
 
 // Deps is what the HTTP layer needs.
 type Deps struct {
-	Store *store.Store
-	Token string // CONDUIT_API_TOKEN
-	Log   *slog.Logger
+	Store  *store.Store
+	Runner *runner.Runner
+	Token  string // CONDUIT_API_TOKEN
+	Log    *slog.Logger
 }
 
 // NewRouter returns the server's handler.
 func NewRouter(d Deps) http.Handler {
-	a := &api{store: d.Store, log: d.Log}
+	a := &api{store: d.Store, runner: d.Runner, log: d.Log}
 	strict := gen.NewStrictHandlerWithOptions(a, nil, gen.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  a.requestError,
 		ResponseErrorHandlerFunc: a.answerError,
@@ -44,8 +46,9 @@ func NewRouter(d Deps) http.Handler {
 }
 
 type api struct {
-	store *store.Store
-	log   *slog.Logger
+	store  *store.Store
+	runner *runner.Runner
+	log    *slog.Logger
 }
 
 func (*api) GetHealthz(context.Context, gen.GetHealthzRequestObject) (gen.GetHealthzResponseObject, error) {

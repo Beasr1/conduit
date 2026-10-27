@@ -25,13 +25,15 @@ server/
     transform/   JSONata (gnata) behind a small interface, guardrails always on
     upstream/    the only outbound HTTP: SSRF-safe transport, retries, error kinds
     store/       Postgres via pgx; returns domain types, translates driver errors
+    runner/      starts and records runs: input checks, the cap, the writer, the event log, shutdown
     httpapi/     handlers, middleware, error mapping, SSE; gen/ is generated
   migrations/    goose .sql files, embedded
 ```
 
 - Packages are named for what they own, not for a layer. No `pkg/`,
   `util/`, `common/`, `models/`.
-- Imports point inward: `httpapi` → `engine`, `store` → `workflow`.
+- Imports point inward: `httpapi` → `runner` → `engine`, `store` →
+  `workflow`.
   `workflow` imports nothing internal. That's the hexagonal dependency
   rule without central `port/` packages.
 - Interfaces are declared by the package that uses them, kept to 1–3
@@ -82,8 +84,12 @@ server/
   fail fast. The first error cancels the rest by design.
 - Sleeps and backoff `select` on `ctx.Done()`. No bare `time.Sleep` in a
   loop.
-- Shutdown: `signal.NotifyContext` in `main`, then stop accepting HTTP,
-  cancel running runs, wait with a deadline, close the pool.
+- Shutdown, under one deadline: `signal.NotifyContext` in `main`; cancel
+  editor runs, whose event streams would otherwise hold `srv.Shutdown` open;
+  `srv.Shutdown`, which waits for requests, served runs included; wait for
+  the runs to be recorded; close the pool.
+- The engine's scheduler never waits on the database. A run's node results
+  go to a writer goroutine through a channel with room for every node.
 
 ## Inbound HTTP
 
@@ -94,7 +100,9 @@ server/
   silently keeps the old mux, and method patterns answer 404 (measured in
   the learning repo's go-services file 10).
 - `http.Server` sets `ReadHeaderTimeout`, `ReadTimeout`, `IdleTimeout`, and
-  `WriteTimeout` on every route except SSE.
+  `WriteTimeout`. The event stream clears its own write deadline through
+  `http.ResponseController`, and sends a comment line every 15 s inside
+  nginx's 40 s read timeout.
 - `http.MaxBytesReader` on every request body: 1 MiB, nginx's limit too.
 - Unknown JSON fields are refused, not dropped. The generated server
   decodes with a plain `json.Decoder`, which ignores them, so a middleware
@@ -185,6 +193,10 @@ server/
 - Optimistic concurrency: a save names its base revision, and the store
   locks the row (`FOR UPDATE`) to compare. A stale base is
   `ErrRevisionMismatch`, which the API answers with `412`.
+- A run is recorded as it goes: each node when it ends, the run when it
+  ends. Header and query values with secret-looking names are stored as
+  `[redacted]`, and bodies over 256 KiB as a string of their first
+  256 KiB, flagged truncated.
 - Store tests get a database per test package from `storetest.Run` in
   `TestMain`. It's created through a superuser connection and owned by the
   server's own role, so tests run with the server's privileges. With no
@@ -213,8 +225,10 @@ server/
   that's what failed the first CI run.
 - Name tests after behaviour: `TestScheduler_FanInWaitsForAllParents`.
 - Use `slog.New(slog.DiscardHandler)` in tests; no hand-rolled nop logger.
-- Coverage floors for `workflow`, `engine`, `transform` and `upstream` only,
-  in the justfile. Floors ratchet up, never down.
+- Coverage floors for `workflow`, `engine`, `transform`, `upstream` and
+  `runner` only, in the justfile. Floors ratchet up, never down.
+- Timing (an event log's expiry, keep-alives) is tested on
+  `testing/synctest`'s fake clock, not with sleeps.
 
 ## Dependencies
 

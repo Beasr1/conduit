@@ -129,6 +129,7 @@ func (r *run) call(i int, doc []byte) outcome {
 		header.Set("Idempotency-Key", r.id+":"+n.id)
 	}
 
+	o.result.Request = &SentRequest{Method: n.method, URL: u, Header: header, Body: body}
 	o.result.Attempts = 1
 	res, err := r.e.client.Do(r.ctx, &upstream.Request{
 		Method: n.method, URL: u, Header: header, Body: body,

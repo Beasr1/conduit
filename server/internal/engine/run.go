@@ -49,7 +49,7 @@ const (
 type Result struct {
 	Status Status          // succeeded, failed or cancelled
 	Output json.RawMessage // the output expression's value, after success
-	Err    error           // why the run didn't succeed
+	Err    error           // why the run didn't succeed: a *NodeError when a node failed it
 	Nodes  []NodeResult    // one per node, in declaration order
 }
 
@@ -64,6 +64,17 @@ type NodeResult struct {
 	// The response body, or a transform node's value.
 	Body json.RawMessage
 	Err  error
+	// Request is what an http node sent, as built, once its URL, headers and
+	// body rendered. Nothing is redacted here; whoever stores it does that.
+	Request *SentRequest
+}
+
+// SentRequest is a request as an http node built it.
+type SentRequest struct {
+	Method string
+	URL    string
+	Header http.Header
+	Body   json.RawMessage
 }
 
 // EventKind is what happened to a node.
@@ -85,6 +96,10 @@ type Event struct {
 	Kind    EventKind
 	Attempt int // the attempt starting, or the attempts made when the node ended
 	At      time.Time
+	// Result is the node's result, on the events that end it: succeeded,
+	// failed, skipped and cancelled. So a caller can record and stream each
+	// node as it ends, without waiting for the run.
+	Result *NodeResult
 }
 
 // PanicError is a node or the output panicking: a bug in the engine or in
@@ -96,9 +111,21 @@ type PanicError struct {
 
 func (e *PanicError) Error() string { return fmt.Sprintf("panic: %v", e.Value) }
 
+// NodeError is a node's failure failing the run.
+type NodeError struct {
+	Node string
+	Err  error
+}
+
+func (e *NodeError) Error() string { return "node " + e.Node + ": " + e.Err.Error() }
+
+func (e *NodeError) Unwrap() error { return e.Err }
+
 var (
-	errFailFast   = errors.New("another node failed")
-	errRunTimeout = errors.New("the run ran out of time")
+	errFailFast = errors.New("another node failed")
+	// ErrRunTimeout is a run stopped by its deadline. Nodes it cut off are
+	// failed, not cancelled: they're why the run failed.
+	ErrRunTimeout = errors.New("the run ran out of time")
 )
 
 // Run executes p with input, raw JSON, and returns when every node has
@@ -114,7 +141,7 @@ func (e *Engine) Run(ctx context.Context, p *Program, runID string, input json.R
 	}
 	ctx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
-	ctx, cancel := context.WithTimeoutCause(ctx, e.runTimeout, errRunTimeout)
+	ctx, cancel := context.WithTimeoutCause(ctx, e.runTimeout, ErrRunTimeout)
 	defer cancel()
 
 	r := &run{
@@ -178,7 +205,7 @@ func (r *run) schedule() *Result {
 		}
 		m := <-r.msgs
 		if m.retry > 0 {
-			r.emit(m.node, EventRetrying, m.retry)
+			r.emit(m.node, EventRetrying, m.retry, nil)
 			continue
 		}
 		r.inFlight--
@@ -201,8 +228,8 @@ func (r *run) schedule() *Result {
 	switch cause := context.Cause(r.ctx); {
 	case r.firstErr != nil:
 		res.Status, res.Err = StatusFailed, r.firstErr
-	case errors.Is(cause, errRunTimeout):
-		res.Status, res.Err = StatusFailed, fmt.Errorf("%w (%v)", errRunTimeout, r.e.runTimeout)
+	case errors.Is(cause, ErrRunTimeout):
+		res.Status, res.Err = StatusFailed, fmt.Errorf("%w (%v)", ErrRunTimeout, r.e.runTimeout)
 	case cause != nil:
 		res.Status, res.Err = StatusCancelled, cause
 	default:
@@ -227,7 +254,7 @@ func (r *run) startReady() {
 		}
 		n.started = true
 		r.inFlight++
-		r.emit(i, EventStarted, 1)
+		r.emit(i, EventStarted, 1, nil)
 		go r.exec(i, r.parts(i))
 	}
 }
@@ -254,10 +281,10 @@ func (r *run) finish(i int, o outcome) {
 			r.parentEnded(r.p.edges[k].to, o.taken[j])
 		}
 	case !stopped:
-		r.firstErr = fmt.Errorf("node %s: %w", r.p.nodes[i].id, o.err)
+		r.firstErr = &NodeError{Node: r.p.nodes[i].id, Err: o.err}
 		r.end(i, StatusFailed, &o)
 		r.stop(errFailFast)
-	case errors.Is(context.Cause(r.ctx), errRunTimeout):
+	case errors.Is(context.Cause(r.ctx), ErrRunTimeout):
 		r.end(i, StatusFailed, &o)
 	default:
 		r.end(i, StatusCancelled, &o)
@@ -296,12 +323,13 @@ func (r *run) end(i int, s Status, o *outcome) {
 		n.result.Err = o.err
 	}
 	n.result.Status = s
-	r.emit(i, EventKind(s), n.result.Attempts)
+	res := n.result
+	r.emit(i, EventKind(s), n.result.Attempts, &res)
 }
 
-func (r *run) emit(i int, kind EventKind, attempt int) {
+func (r *run) emit(i int, kind EventKind, attempt int, result *NodeResult) {
 	if r.onEvent != nil {
-		r.onEvent(Event{Run: r.id, Node: r.p.nodes[i].id, Kind: kind, Attempt: attempt, At: time.Now()})
+		r.onEvent(Event{Run: r.id, Node: r.p.nodes[i].id, Kind: kind, Attempt: attempt, At: time.Now(), Result: result})
 	}
 }
 

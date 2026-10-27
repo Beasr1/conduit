@@ -73,12 +73,8 @@ func (s *Store) Workflow(ctx context.Context, id string) (Workflow, error) {
 // Workflows lists up to limit workflows, newest first, older than before
 // when it isn't empty. Ids are UUIDv7, so their order is their age.
 func (s *Store) Workflows(ctx context.Context, limit int, before string) ([]Workflow, error) {
-	var cursor any // NULL when there's no cursor
-	if before != "" {
-		cursor = before
-	}
 	rows, err := s.pool.Query(ctx, `SELECT `+workflowColumns+` FROM workflows
-		WHERE $2::uuid IS NULL OR id < $2::uuid ORDER BY id DESC LIMIT $1`, limit, cursor)
+		WHERE $2::uuid IS NULL OR id < $2::uuid ORDER BY id DESC LIMIT $1`, limit, orNull(before))
 	if err != nil {
 		return nil, fmt.Errorf("list workflows: %w", translate(err))
 	}

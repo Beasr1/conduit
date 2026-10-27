@@ -3,6 +3,7 @@ package config
 import (
 	"log/slog"
 	"maps"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -31,8 +32,10 @@ func TestLoad_DefaultsWhenUnset(t *testing.T) {
 		LogLevel:        slog.LevelInfo,
 		ShutdownTimeout: 20 * time.Second,
 		DatabaseURL:     dbURL,
+		UpstreamPorts:   []uint16{80, 443},
+		MaxRuns:         32,
 	}
-	if cfg != want {
+	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("Load() = %+v, want %+v", cfg, want)
 	}
 }
@@ -45,6 +48,10 @@ func TestLoad_ReadsEveryVariable(t *testing.T) {
 		"CONDUIT_LOG_LEVEL":        "debug",
 		"CONDUIT_SHUTDOWN_TIMEOUT": "5s",
 		"CONDUIT_API_TOKEN":        token,
+
+		"CONDUIT_ALLOW_PRIVATE_NETWORKS": "true",
+		"CONDUIT_UPSTREAM_PORTS":         "443, 8443",
+		"CONDUIT_MAX_RUNS":               "4",
 	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -56,8 +63,12 @@ func TestLoad_ReadsEveryVariable(t *testing.T) {
 		ShutdownTimeout: 5 * time.Second,
 		DatabaseURL:     dbURL,
 		APIToken:        token,
+
+		AllowPrivateNetworks: true,
+		UpstreamPorts:        []uint16{443, 8443},
+		MaxRuns:              4,
 	}
-	if cfg != want {
+	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("Load() = %+v, want %+v", cfg, want)
 	}
 }
@@ -75,6 +86,13 @@ func TestLoad_RejectsInvalidValues(t *testing.T) {
 		{"zero timeout", map[string]string{"CONDUIT_SHUTDOWN_TIMEOUT": "0s"}, "must be positive"},
 		{"no database", map[string]string{"CONDUIT_DATABASE_URL": ""}, "CONDUIT_DATABASE_URL"},
 		{"not a postgres url", map[string]string{"CONDUIT_DATABASE_URL": "mysql://x/y"}, "CONDUIT_DATABASE_URL"},
+		{"not a boolean", map[string]string{"CONDUIT_ALLOW_PRIVATE_NETWORKS": "yes"}, "CONDUIT_ALLOW_PRIVATE_NETWORKS"},
+		{"not a port", map[string]string{"CONDUIT_UPSTREAM_PORTS": "443,https"}, `"https" is not a port`},
+		{"port 0", map[string]string{"CONDUIT_UPSTREAM_PORTS": "0"}, `"0" is not a port`},
+		{"port too big", map[string]string{"CONDUIT_UPSTREAM_PORTS": "65536"}, `"65536" is not a port`},
+		{"no ports", map[string]string{"CONDUIT_UPSTREAM_PORTS": ""}, "CONDUIT_UPSTREAM_PORTS"},
+		{"unparsable run cap", map[string]string{"CONDUIT_MAX_RUNS": "many"}, "CONDUIT_MAX_RUNS"},
+		{"zero run cap", map[string]string{"CONDUIT_MAX_RUNS": "0"}, "at least 1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

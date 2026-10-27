@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
 	"github.com/Beasr1/conduit/server/internal/store"
@@ -17,6 +18,10 @@ type problem struct {
 	code   string
 	detail string
 	errors []gen.ProblemError
+
+	node       string // the node that failed a served run
+	instance   string // the served run that failed, as /v1/runs/{id}
+	retryAfter int    // seconds, for a 503
 }
 
 func (p *problem) Error() string { return fmt.Sprintf("%d %s: %s", p.status, p.code, p.detail) }
@@ -29,7 +34,7 @@ var statuses = []struct {
 	code   string
 	detail string
 }{
-	{store.ErrNotFound, http.StatusNotFound, "not_found", "There's no such workflow or revision."},
+	{store.ErrNotFound, http.StatusNotFound, "not_found", "There's no such workflow, revision or run."},
 	{store.ErrConflict, http.StatusConflict, "conflict", "That slug is taken."},
 	{
 		store.ErrRevisionMismatch, http.StatusPreconditionFailed, "revision_mismatch",
@@ -72,16 +77,21 @@ func (a *api) requestError(w http.ResponseWriter, _ *http.Request, err error) {
 
 func writeProblem(w http.ResponseWriter, p *problem) {
 	w.Header().Set("Content-Type", "application/problem+json")
+	if p.retryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(p.retryAfter))
+	}
 	w.WriteHeader(p.status)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false) // keep <token> readable, not \u003ctoken\u003e
 	// The status line is already out, so an encoding error can't change the
 	// answer; there's nothing useful to do with it.
 	_ = enc.Encode(gen.Problem{
-		Status: p.status,
-		Title:  http.StatusText(p.status),
-		Code:   p.code,
-		Detail: p.detail,
-		Errors: p.errors,
+		Status:   p.status,
+		Title:    http.StatusText(p.status),
+		Code:     p.code,
+		Detail:   p.detail,
+		Errors:   p.errors,
+		Node:     p.node,
+		Instance: p.instance,
 	})
 }

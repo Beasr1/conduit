@@ -206,7 +206,10 @@ func TestGuardrails(t *testing.T) {
 		{"deep recursion", "($f := function($n) { $n = 0 ? 0 : 1 + $f($n - 1) }; $f(1000))", "D1011"},
 		{"endless tail recursion", "($inf := function() { $inf() }; $inf())", "D1012"},
 		{"a range past the sequence limit", "$count([1..200000])", "D2015"},
-		{"a cross product past the sequence limit", "$count([1..1000].([1..1000]))", "D2015"},
+		// Just past the limit, at 102,400 items: the product is built before
+		// the limit is checked, so a bigger one can reach the timeout first on
+		// a slow machine. A million items did, in CI under -race.
+		{"a cross product past the sequence limit", "$count([1..320].([1..320]))", "D2015"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

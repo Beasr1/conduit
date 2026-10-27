@@ -23,6 +23,7 @@ var bodies = map[string]reflect.Type{
 	"PUT /v1/workflows/{id}/draft":    reflect.TypeFor[workflow.Definition](),
 	"POST /v1/workflows/{id}/publish": reflect.TypeFor[gen.Publish](),
 	"POST /v1/validate":               reflect.TypeFor[workflow.Definition](),
+	"POST /v1/workflows/{id}/runs":    reflect.TypeFor[gen.StartRun](),
 }
 
 // checkShape refuses a body that doesn't fit its route's type: a field the

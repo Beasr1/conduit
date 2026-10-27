@@ -11,12 +11,181 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
 	externalRef0 "github.com/Beasr1/conduit/server/internal/workflow"
 	"github.com/oapi-codegen/runtime"
 )
+
+// Defines values for NodeEventKind.
+const (
+	NodeEventKindCancelled NodeEventKind = "cancelled"
+	NodeEventKindFailed    NodeEventKind = "failed"
+	NodeEventKindRetrying  NodeEventKind = "retrying"
+	NodeEventKindSkipped   NodeEventKind = "skipped"
+	NodeEventKindStarted   NodeEventKind = "started"
+	NodeEventKindSucceeded NodeEventKind = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the NodeEventKind enum.
+func (e NodeEventKind) Valid() bool {
+	switch e {
+	case NodeEventKindCancelled:
+		return true
+	case NodeEventKindFailed:
+		return true
+	case NodeEventKindRetrying:
+		return true
+	case NodeEventKindSkipped:
+		return true
+	case NodeEventKindStarted:
+		return true
+	case NodeEventKindSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NodeRunStatus.
+const (
+	NodeRunStatusCancelled NodeRunStatus = "cancelled"
+	NodeRunStatusFailed    NodeRunStatus = "failed"
+	NodeRunStatusSkipped   NodeRunStatus = "skipped"
+	NodeRunStatusSucceeded NodeRunStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the NodeRunStatus enum.
+func (e NodeRunStatus) Valid() bool {
+	switch e {
+	case NodeRunStatusCancelled:
+		return true
+	case NodeRunStatusFailed:
+		return true
+	case NodeRunStatusSkipped:
+		return true
+	case NodeRunStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunStatus.
+const (
+	RunStatusCancelled RunStatus = "cancelled"
+	RunStatusFailed    RunStatus = "failed"
+	RunStatusRunning   RunStatus = "running"
+	RunStatusSucceeded RunStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the RunStatus enum.
+func (e RunStatus) Valid() bool {
+	switch e {
+	case RunStatusCancelled:
+		return true
+	case RunStatusFailed:
+		return true
+	case RunStatusRunning:
+		return true
+	case RunStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunTrigger.
+const (
+	RunTriggerEditor RunTrigger = "editor"
+	RunTriggerServed RunTrigger = "served"
+)
+
+// Valid indicates whether the value is a known member of the RunTrigger enum.
+func (e RunTrigger) Valid() bool {
+	switch e {
+	case RunTriggerEditor:
+		return true
+	case RunTriggerServed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunErrorCode.
+const (
+	RunErrorCodeCancelled      RunErrorCode = "cancelled"
+	RunErrorCodeInternalError  RunErrorCode = "internal_error"
+	RunErrorCodeInterrupted    RunErrorCode = "interrupted"
+	RunErrorCodeTimeout        RunErrorCode = "timeout"
+	RunErrorCodeUpstreamFailed RunErrorCode = "upstream_failed"
+	RunErrorCodeWorkflowError  RunErrorCode = "workflow_error"
+)
+
+// Valid indicates whether the value is a known member of the RunErrorCode enum.
+func (e RunErrorCode) Valid() bool {
+	switch e {
+	case RunErrorCodeCancelled:
+		return true
+	case RunErrorCodeInternalError:
+		return true
+	case RunErrorCodeInterrupted:
+		return true
+	case RunErrorCodeTimeout:
+		return true
+	case RunErrorCodeUpstreamFailed:
+		return true
+	case RunErrorCodeWorkflowError:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunSummaryStatus.
+const (
+	RunSummaryStatusCancelled RunSummaryStatus = "cancelled"
+	RunSummaryStatusFailed    RunSummaryStatus = "failed"
+	RunSummaryStatusRunning   RunSummaryStatus = "running"
+	RunSummaryStatusSucceeded RunSummaryStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the RunSummaryStatus enum.
+func (e RunSummaryStatus) Valid() bool {
+	switch e {
+	case RunSummaryStatusCancelled:
+		return true
+	case RunSummaryStatusFailed:
+		return true
+	case RunSummaryStatusRunning:
+		return true
+	case RunSummaryStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunSummaryTrigger.
+const (
+	RunSummaryTriggerEditor RunSummaryTrigger = "editor"
+	RunSummaryTriggerServed RunSummaryTrigger = "served"
+)
+
+// Valid indicates whether the value is a known member of the RunSummaryTrigger enum.
+func (e RunSummaryTrigger) Valid() bool {
+	switch e {
+	case RunSummaryTriggerEditor:
+		return true
+	case RunSummaryTriggerServed:
+		return true
+	default:
+		return false
+	}
+}
 
 // CreateWorkflow defines model for CreateWorkflow.
 type CreateWorkflow struct {
@@ -31,20 +200,91 @@ type Health struct {
 	Status string `json:"status"`
 }
 
+// NodeEvent The data of a `node` event in a run's stream.
+type NodeEvent struct {
+	At time.Time `json:"at"`
+
+	// Attempt The attempt starting; on the event that ends the node, the attempts made.
+	Attempt int `json:"attempt"`
+
+	// Error Why a run or a node didn't succeed.
+	Error RunError `json:"error,omitempty,omitzero"`
+
+	// HTTPStatus On the event that ends an http node that got an answer.
+	HTTPStatus int           `json:"http_status,omitempty,omitzero"`
+	Kind       NodeEventKind `json:"kind"`
+	Node       string        `json:"node"`
+}
+
+// NodeEventKind defines model for NodeEvent.Kind.
+type NodeEventKind string
+
+// NodeRequest What an http node sent. Secrets aren't kept. The values of the Authorization, Proxy-Authorization, Cookie and Set-Cookie headers are [redacted], as are those of any header or query parameter whose name contains key, token, secret or password, and a password in the URL.
+type NodeRequest struct {
+	// Body The JSON body. Over 256 KiB, its first 256 KiB as a string, and truncated is true.
+	Body json.RawMessage `json:"body,omitempty,omitzero"`
+
+	// Headers Lower-case names; repeated headers joined by commas.
+	Headers   map[string]string `json:"headers"`
+	Method    string            `json:"method"`
+	Truncated bool              `json:"truncated,omitempty,omitzero"`
+	URL       string            `json:"url"`
+}
+
+// NodeResponse What an http node got back, or a transform node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
+type NodeResponse struct {
+	// Body null when there was none, or it wasn't JSON.
+	Body json.RawMessage `json:"body"`
+
+	// Headers http nodes only.
+	Headers map[string]string `json:"headers,omitempty,omitzero"`
+
+	// Status http nodes only.
+	Status    int  `json:"status,omitempty,omitzero"`
+	Truncated bool `json:"truncated,omitempty,omitzero"`
+}
+
+// NodeRun defines model for NodeRun.
+type NodeRun struct {
+	// Attempts Requests an http node sent. 0 for a node that sent none.
+	Attempts int       `json:"attempts"`
+	EndedAt  time.Time `json:"ended_at"`
+
+	// Error Why a run or a node didn't succeed.
+	Error RunError `json:"error,omitempty,omitzero"`
+	Node  string   `json:"node"`
+
+	// Request What an http node sent. Secrets aren't kept. The values of the Authorization, Proxy-Authorization, Cookie and Set-Cookie headers are [redacted], as are those of any header or query parameter whose name contains key, token, secret or password, and a password in the URL.
+	Request NodeRequest `json:"request,omitempty,omitzero"`
+
+	// Response What an http node got back, or a transform node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
+	Response NodeResponse `json:"response,omitempty,omitzero"`
+
+	// StartedAt Absent if the node never started.
+	StartedAt time.Time     `json:"started_at,omitempty,omitzero"`
+	Status    NodeRunStatus `json:"status"`
+}
+
+// NodeRunStatus defines model for NodeRun.Status.
+type NodeRunStatus string
+
 // Problem defines model for Problem.
 type Problem struct {
 	// Code Our stable error code.
-	Code   string `json:"code,omitempty"`
-	Detail string `json:"detail,omitempty"`
+	Code   string `json:"code,omitempty,omitzero"`
+	Detail string `json:"detail,omitempty,omitzero"`
 
 	// Errors Every validation problem at once.
-	Errors   []ProblemError `json:"errors,omitempty"`
-	Instance string         `json:"instance,omitempty"`
-	Status   int            `json:"status,omitempty"`
-	Title    string         `json:"title,omitempty"`
+	Errors   []ProblemError `json:"errors,omitempty,omitzero"`
+	Instance string         `json:"instance,omitempty,omitzero"`
+
+	// Node The node that failed a served run.
+	Node   string `json:"node,omitempty,omitzero"`
+	Status int    `json:"status,omitempty,omitzero"`
+	Title  string `json:"title,omitempty,omitzero"`
 
 	// Type A URI identifying the kind of problem.
-	Type string `json:"type,omitempty"`
+	Type string `json:"type,omitempty,omitzero"`
 }
 
 // ProblemError defines model for ProblemError.
@@ -62,7 +302,7 @@ type Provenance struct {
 	Actor string `json:"actor"`
 
 	// Client What it was saved with, from the User-Agent header.
-	Client string `json:"client,omitempty"`
+	Client string `json:"client,omitempty,omitzero"`
 }
 
 // Publish defines model for Publish.
@@ -96,6 +336,101 @@ type RevisionSummary struct {
 	Revision   int        `json:"revision"`
 }
 
+// Run defines model for Run.
+type Run struct {
+	// EndedAt Absent while the run goes on.
+	EndedAt time.Time `json:"ended_at,omitempty,omitzero"`
+
+	// Error Why a run or a node didn't succeed.
+	Error RunError `json:"error,omitempty,omitzero"`
+	ID    string   `json:"id"`
+
+	// Input The input, as sent.
+	Input json.RawMessage `json:"input"`
+
+	// Nodes What each node did, in the order they ended. Only from GET /v1/runs/{id}.
+	Nodes []NodeRun `json:"nodes,omitempty,omitzero"`
+
+	// Output The output, once the run succeeded. Over 256 KiB, its first 256 KiB as a string, and output_truncated is true.
+	Output          json.RawMessage `json:"output,omitempty,omitzero"`
+	OutputTruncated bool            `json:"output_truncated,omitempty,omitzero"`
+	Revision        int             `json:"revision"`
+	StartedAt       time.Time       `json:"started_at"`
+	Status          RunStatus       `json:"status"`
+
+	// Trigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+	Trigger    RunTrigger `json:"trigger"`
+	WorkflowID string     `json:"workflow_id"`
+}
+
+// RunStatus defines model for Run.Status.
+type RunStatus string
+
+// RunTrigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+type RunTrigger string
+
+// RunError Why a run or a node didn't succeed.
+type RunError struct {
+	// Code upstream_failed: an upstream answered with an error status, or couldn't be reached, read or allowed.
+	// timeout: the run, or a node's last attempt, ran out of time.
+	// workflow_error: the workflow's own configuration failed, such as an expression.
+	// internal_error: our bug; the details are in the server's log.
+	// cancelled: the caller hung up, or the server shut down.
+	// interrupted: the server stopped before the run ended.
+	Code   RunErrorCode `json:"code"`
+	Detail string       `json:"detail"`
+
+	// Node On a run's error, the node that failed it.
+	Node string `json:"node,omitempty,omitzero"`
+}
+
+// RunErrorCode upstream_failed: an upstream answered with an error status, or couldn't be reached, read or allowed.
+// timeout: the run, or a node's last attempt, ran out of time.
+// workflow_error: the workflow's own configuration failed, such as an expression.
+// internal_error: our bug; the details are in the server's log.
+// cancelled: the caller hung up, or the server shut down.
+// interrupted: the server stopped before the run ended.
+type RunErrorCode string
+
+// RunList defines model for RunList.
+type RunList struct {
+	// Next Pass as `before` for the next page. Absent on the last page.
+	Next string       `json:"next,omitempty,omitzero"`
+	Runs []RunSummary `json:"runs"`
+}
+
+// RunSummary defines model for RunSummary.
+type RunSummary struct {
+	// EndedAt Absent while the run goes on.
+	EndedAt time.Time `json:"ended_at,omitempty,omitzero"`
+
+	// Error Why a run or a node didn't succeed.
+	Error     RunError         `json:"error,omitempty,omitzero"`
+	ID        string           `json:"id"`
+	Revision  int              `json:"revision"`
+	StartedAt time.Time        `json:"started_at"`
+	Status    RunSummaryStatus `json:"status"`
+
+	// Trigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+	Trigger    RunSummaryTrigger `json:"trigger"`
+	WorkflowID string            `json:"workflow_id"`
+}
+
+// RunSummaryStatus defines model for RunSummary.Status.
+type RunSummaryStatus string
+
+// RunSummaryTrigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+type RunSummaryTrigger string
+
+// StartRun defines model for StartRun.
+type StartRun struct {
+	// Input The run's input, checked against the definition's input_schema. Absent means null.
+	Input json.RawMessage `json:"input,omitempty,omitzero"`
+
+	// Revision The revision to run. Absent means the latest.
+	Revision int `json:"revision,omitempty,omitzero"`
+}
+
 // Workflow defines model for Workflow.
 type Workflow struct {
 	CreatedAt      time.Time `json:"created_at"`
@@ -104,7 +439,7 @@ type Workflow struct {
 	Name           string    `json:"name"`
 
 	// PublishedRevision Absent until a revision is published.
-	PublishedRevision int `json:"published_revision,omitempty"`
+	PublishedRevision int `json:"published_revision,omitempty,omitzero"`
 
 	// Slug Lowercase letters, digits and hyphens. The served endpoint is /serve/{slug}.
 	Slug string `json:"slug"`
@@ -113,7 +448,7 @@ type Workflow struct {
 // WorkflowList defines model for WorkflowList.
 type WorkflowList struct {
 	// Next Pass as `before` for the next page. Absent on the last page.
-	Next      string     `json:"next,omitempty"`
+	Next      string     `json:"next,omitempty,omitzero"`
 	Workflows []Workflow `json:"workflows"`
 }
 
@@ -123,22 +458,50 @@ type WorkflowRevision struct {
 	Workflow Workflow `json:"workflow"`
 }
 
+// RunID defines model for RunID.
+type RunID = string
+
 // WorkflowID defines model for WorkflowID.
 type WorkflowID = string
 
+// Busy defines model for Busy.
+type Busy = Problem
+
+// ServeWorkflowJSONBody defines parameters for ServeWorkflow.
+type ServeWorkflowJSONBody = json.RawMessage
+
+// ListRunsParams defines parameters for ListRuns.
+type ListRunsParams struct {
+	// WorkflowID Only this workflow's runs.
+	WorkflowID string `form:"workflow_id,omitempty" json:"workflow_id,omitempty,omitzero"`
+	Limit      int    `form:"limit,omitempty" json:"limit,omitempty,omitzero"`
+
+	// Before Return runs older than this id, for the next page.
+	Before string `form:"before,omitempty" json:"before,omitempty,omitzero"`
+}
+
+// StreamRunEventsParams defines parameters for StreamRunEvents.
+type StreamRunEventsParams struct {
+	// LastEventID The id of the last event received. The stream resumes after it.
+	LastEventID string `json:"Last-Event-ID,omitempty,omitzero"`
+}
+
 // ListWorkflowsParams defines parameters for ListWorkflows.
 type ListWorkflowsParams struct {
-	Limit int `form:"limit,omitempty" json:"limit,omitempty"`
+	Limit int `form:"limit,omitempty" json:"limit,omitempty,omitzero"`
 
 	// Before Return workflows older than this id, for the next page.
-	Before string `form:"before,omitempty" json:"before,omitempty"`
+	Before string `form:"before,omitempty" json:"before,omitempty,omitzero"`
 }
 
 // SaveDraftParams defines parameters for SaveDraft.
 type SaveDraftParams struct {
 	// IfMatch The latest revision's ETag, such as "3". Without it the save is refused with 428.
-	IfMatch string `json:"If-Match,omitempty"`
+	IfMatch string `json:"If-Match,omitempty,omitzero"`
 }
+
+// ServeWorkflowJSONRequestBody defines body for ServeWorkflow for application/json ContentType.
+type ServeWorkflowJSONRequestBody = ServeWorkflowJSONBody
 
 // ValidateDefinitionJSONRequestBody defines body for ValidateDefinition for application/json ContentType.
 type ValidateDefinitionJSONRequestBody = externalRef0.Definition
@@ -152,6 +515,9 @@ type SaveDraftJSONRequestBody = externalRef0.Definition
 // PublishWorkflowJSONRequestBody defines body for PublishWorkflow for application/json ContentType.
 type PublishWorkflowJSONRequestBody = Publish
 
+// StartRunJSONRequestBody defines body for StartRun for application/json ContentType.
+type StartRunJSONRequestBody = StartRun
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetHealthz Report that the process is up
@@ -160,6 +526,18 @@ type ServerInterface interface {
 	// GetReadyz Report that the server can reach its database
 	// (GET /readyz)
 	GetReadyz(w http.ResponseWriter, r *http.Request)
+	// ServeWorkflow Run a workflow's published revision and answer with its output
+	// (POST /serve/{slug})
+	ServeWorkflow(w http.ResponseWriter, r *http.Request, slug string)
+	// ListRuns List runs, newest first
+	// (GET /v1/runs)
+	ListRuns(w http.ResponseWriter, r *http.Request, params ListRunsParams)
+	// GetRun Get a run, with what each node did
+	// (GET /v1/runs/{id})
+	GetRun(w http.ResponseWriter, r *http.Request, id RunID)
+	// StreamRunEvents Follow a run as it happens
+	// (GET /v1/runs/{id}/events)
+	StreamRunEvents(w http.ResponseWriter, r *http.Request, id RunID, params StreamRunEventsParams)
 	// ValidateDefinition Check a definition without saving it
 	// (POST /v1/validate)
 	ValidateDefinition(w http.ResponseWriter, r *http.Request)
@@ -184,6 +562,9 @@ type ServerInterface interface {
 	// GetRevision Get one revision, with its problems
 	// (GET /v1/workflows/{id}/revisions/{revision})
 	GetRevision(w http.ResponseWriter, r *http.Request, id WorkflowID, revision int)
+	// StartRun Run a revision in the background
+	// (POST /v1/workflows/{id}/runs)
+	StartRun(w http.ResponseWriter, r *http.Request, id WorkflowID)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -214,6 +595,167 @@ func (siw *ServerInterfaceWrapper) GetReadyz(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetReadyz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ServeWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) ServeWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ServeWorkflow(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRuns operation middleware
+func (siw *ServerInterfaceWrapper) ListRuns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListRunsParams
+
+	// ------------- Optional query parameter "workflow_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workflow_id", r.URL.Query(), &params.WorkflowID, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "workflow_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workflow_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRuns(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRun operation middleware
+func (siw *ServerInterfaceWrapper) GetRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id RunID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StreamRunEvents operation middleware
+func (siw *ServerInterfaceWrapper) StreamRunEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id RunID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StreamRunEventsParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Last-Event-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Last-Event-ID")]; found {
+		var LastEventID string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Last-Event-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Last-Event-ID", valueList[0], &LastEventID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Last-Event-ID", Err: err})
+			return
+		}
+
+		params.LastEventID = LastEventID
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StreamRunEvents(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -460,6 +1002,32 @@ func (siw *ServerInterfaceWrapper) GetRevision(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// StartRun operation middleware
+func (siw *ServerInterfaceWrapper) StartRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -590,8 +1158,22 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{id}/revisions/{revision}", wrapper.GetRevision)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/publish", wrapper.PublishWorkflow)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/validate", wrapper.ValidateDefinition)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/runs", wrapper.StartRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs", wrapper.ListRuns)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}", wrapper.GetRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}/events", wrapper.StreamRunEvents)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/serve/{slug}", wrapper.ServeWorkflow)
 
 	return m
+}
+
+type BusyResponseHeaders struct {
+	RetryAfter int
+}
+type BusyApplicationProblemPlusJSONResponse struct {
+	Body Problem
+
+	Headers BusyResponseHeaders
 }
 
 type ProblemApplicationProblemPlusJSONResponse Problem
@@ -649,6 +1231,335 @@ func (response GetReadyz503ApplicationProblemPlusJSONResponse) VisitGetReadyzRes
 		return err
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeWorkflowRequestObject struct {
+	Slug string `json:"slug"`
+	Body *ServeWorkflowJSONRequestBody
+}
+
+type ServeWorkflowResponseObject interface {
+	VisitServeWorkflowResponse(w http.ResponseWriter) error
+}
+
+type ServeWorkflow200JSONResponse json.RawMessage
+
+func (response ServeWorkflow200JSONResponse) VisitServeWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeWorkflow400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ServeWorkflow400ApplicationProblemPlusJSONResponse) VisitServeWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeWorkflow401ApplicationProblemPlusJSONResponse Problem
+
+func (response ServeWorkflow401ApplicationProblemPlusJSONResponse) VisitServeWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeWorkflow404ApplicationProblemPlusJSONResponse Problem
+
+func (response ServeWorkflow404ApplicationProblemPlusJSONResponse) VisitServeWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeWorkflow500ApplicationProblemPlusJSONResponse Problem
+
+func (response ServeWorkflow500ApplicationProblemPlusJSONResponse) VisitServeWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeWorkflow502ApplicationProblemPlusJSONResponse Problem
+
+func (response ServeWorkflow502ApplicationProblemPlusJSONResponse) VisitServeWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeWorkflow503ApplicationProblemPlusJSONResponse struct {
+	BusyApplicationProblemPlusJSONResponse
+}
+
+func (response ServeWorkflow503ApplicationProblemPlusJSONResponse) VisitServeWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeWorkflow504ApplicationProblemPlusJSONResponse Problem
+
+func (response ServeWorkflow504ApplicationProblemPlusJSONResponse) VisitServeWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(504)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRunsRequestObject struct {
+	Params ListRunsParams
+}
+
+type ListRunsResponseObject interface {
+	VisitListRunsResponse(w http.ResponseWriter) error
+}
+
+type ListRuns200JSONResponse RunList
+
+func (response ListRuns200JSONResponse) VisitListRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRuns401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListRuns401ApplicationProblemPlusJSONResponse) VisitListRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRunRequestObject struct {
+	ID RunID `json:"id"`
+}
+
+type GetRunResponseObject interface {
+	VisitGetRunResponse(w http.ResponseWriter) error
+}
+
+type GetRun200JSONResponse Run
+
+func (response GetRun200JSONResponse) VisitGetRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRun401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetRun401ApplicationProblemPlusJSONResponse) VisitGetRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRun404ApplicationProblemPlusJSONResponse Problem
+
+func (response GetRun404ApplicationProblemPlusJSONResponse) VisitGetRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StreamRunEventsRequestObject struct {
+	ID     RunID `json:"id"`
+	Params StreamRunEventsParams
+}
+
+type StreamRunEventsResponseObject interface {
+	VisitStreamRunEventsResponse(w http.ResponseWriter) error
+}
+
+type StreamRunEvents200TextEventStreamResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response StreamRunEvents200TextEventStreamResponse) VisitStreamRunEventsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// If w doesn't support flushing, fall back to io.Copy.
+		_, err := io.Copy(w, response.Body)
+		return err
+	}
+	// text/event-stream messages are typically small; use a
+	// modest buffer and flush after each chunk so clients see
+	// events immediately instead of waiting on OS buffering.
+	buf := make([]byte, 4096)
+	for {
+		n, err := response.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+type StreamRunEvents400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response StreamRunEvents400ApplicationProblemPlusJSONResponse) VisitStreamRunEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StreamRunEvents401ApplicationProblemPlusJSONResponse Problem
+
+func (response StreamRunEvents401ApplicationProblemPlusJSONResponse) VisitStreamRunEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StreamRunEvents404ApplicationProblemPlusJSONResponse Problem
+
+func (response StreamRunEvents404ApplicationProblemPlusJSONResponse) VisitStreamRunEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StreamRunEvents503ApplicationProblemPlusJSONResponse struct {
+	BusyApplicationProblemPlusJSONResponse
+}
+
+func (response StreamRunEvents503ApplicationProblemPlusJSONResponse) VisitStreamRunEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
 	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
@@ -1150,6 +2061,112 @@ func (response GetRevision404ApplicationProblemPlusJSONResponse) VisitGetRevisio
 	return err
 }
 
+type StartRunRequestObject struct {
+	ID   WorkflowID `json:"id"`
+	Body *StartRunJSONRequestBody
+}
+
+type StartRunResponseObject interface {
+	VisitStartRunResponse(w http.ResponseWriter) error
+}
+
+type StartRun202ResponseHeaders struct {
+	Location string
+}
+
+type StartRun202JSONResponse struct {
+	Body    Run
+	Headers StartRun202ResponseHeaders
+}
+
+func (response StartRun202JSONResponse) VisitStartRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Location", fmt.Sprint(response.Headers.Location))
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartRun400ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response StartRun400ApplicationProblemPlusJSONResponse) VisitStartRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartRun401ApplicationProblemPlusJSONResponse Problem
+
+func (response StartRun401ApplicationProblemPlusJSONResponse) VisitStartRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartRun404ApplicationProblemPlusJSONResponse Problem
+
+func (response StartRun404ApplicationProblemPlusJSONResponse) VisitStartRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartRun422ApplicationProblemPlusJSONResponse Problem
+
+func (response StartRun422ApplicationProblemPlusJSONResponse) VisitStartRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartRun503ApplicationProblemPlusJSONResponse struct {
+	BusyApplicationProblemPlusJSONResponse
+}
+
+func (response StartRun503ApplicationProblemPlusJSONResponse) VisitStartRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetHealthz Report that the process is up
@@ -1158,6 +2175,18 @@ type StrictServerInterface interface {
 	// GetReadyz Report that the server can reach its database
 	// (GET /readyz)
 	GetReadyz(ctx context.Context, request GetReadyzRequestObject) (GetReadyzResponseObject, error)
+	// ServeWorkflow Run a workflow's published revision and answer with its output
+	// (POST /serve/{slug})
+	ServeWorkflow(ctx context.Context, request ServeWorkflowRequestObject) (ServeWorkflowResponseObject, error)
+	// ListRuns List runs, newest first
+	// (GET /v1/runs)
+	ListRuns(ctx context.Context, request ListRunsRequestObject) (ListRunsResponseObject, error)
+	// GetRun Get a run, with what each node did
+	// (GET /v1/runs/{id})
+	GetRun(ctx context.Context, request GetRunRequestObject) (GetRunResponseObject, error)
+	// StreamRunEvents Follow a run as it happens
+	// (GET /v1/runs/{id}/events)
+	StreamRunEvents(ctx context.Context, request StreamRunEventsRequestObject) (StreamRunEventsResponseObject, error)
 	// ValidateDefinition Check a definition without saving it
 	// (POST /v1/validate)
 	ValidateDefinition(ctx context.Context, request ValidateDefinitionRequestObject) (ValidateDefinitionResponseObject, error)
@@ -1182,6 +2211,9 @@ type StrictServerInterface interface {
 	// GetRevision Get one revision, with its problems
 	// (GET /v1/workflows/{id}/revisions/{revision})
 	GetRevision(ctx context.Context, request GetRevisionRequestObject) (GetRevisionResponseObject, error)
+	// StartRun Run a revision in the background
+	// (POST /v1/workflows/{id}/runs)
+	StartRun(ctx context.Context, request StartRunRequestObject) (StartRunResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -1264,6 +2296,121 @@ func (sh *strictHandler) GetReadyz(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetReadyzResponseObject); ok {
 		if err := validResponse.VisitGetReadyzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ServeWorkflow operation middleware
+func (sh *strictHandler) ServeWorkflow(w http.ResponseWriter, r *http.Request, slug string) {
+	var request ServeWorkflowRequestObject
+
+	request.Slug = slug
+
+	var body ServeWorkflowJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ServeWorkflow(ctx, request.(ServeWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ServeWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ServeWorkflowResponseObject); ok {
+		if err := validResponse.VisitServeWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListRuns operation middleware
+func (sh *strictHandler) ListRuns(w http.ResponseWriter, r *http.Request, params ListRunsParams) {
+	var request ListRunsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRuns(ctx, request.(ListRunsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRuns")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRunsResponseObject); ok {
+		if err := validResponse.VisitListRunsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRun operation middleware
+func (sh *strictHandler) GetRun(w http.ResponseWriter, r *http.Request, id RunID) {
+	var request GetRunRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRun(ctx, request.(GetRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRun")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRunResponseObject); ok {
+		if err := validResponse.VisitGetRunResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StreamRunEvents operation middleware
+func (sh *strictHandler) StreamRunEvents(w http.ResponseWriter, r *http.Request, id RunID, params StreamRunEventsParams) {
+	var request StreamRunEventsRequestObject
+
+	request.ID = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StreamRunEvents(ctx, request.(StreamRunEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StreamRunEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StreamRunEventsResponseObject); ok {
+		if err := validResponse.VisitStreamRunEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -1498,6 +2645,39 @@ func (sh *strictHandler) GetRevision(w http.ResponseWriter, r *http.Request, id 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRevisionResponseObject); ok {
 		if err := validResponse.VisitGetRevisionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartRun operation middleware
+func (sh *strictHandler) StartRun(w http.ResponseWriter, r *http.Request, id WorkflowID) {
+	var request StartRunRequestObject
+
+	request.ID = id
+
+	var body StartRunJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartRun(ctx, request.(StartRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartRun")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartRunResponseObject); ok {
+		if err := validResponse.VisitStartRunResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

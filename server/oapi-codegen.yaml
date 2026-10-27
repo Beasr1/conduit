@@ -8,7 +8,13 @@ generate:
   strict-server: true
 output-options:
   # Optional fields are plain values, not pointers, as in the workflow types.
+  # omitzero leaves them out when unset, objects and times included, which
+  # omitempty alone doesn't.
   prefer-skip-optional-pointer: true
+  prefer-skip-optional-pointer-with-omitzero: true
+  # Generate every schema, used or not: NodeEvent is the data of the event
+  # stream, which the schema can only describe as text.
+  skip-prune: true
   name-normalizer: ToCamelCaseWithInitialisms
 # The definition is written in workflow.yaml and generated into the workflow
 # package, so the API uses that same type instead of a copy.

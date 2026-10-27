@@ -4,8 +4,9 @@
 between them with JSONata, and publish the whole workflow as its own
 endpoint. Go engine, React editor.
 
-**Status:** early scaffold. A server with a health route, a web shell, and
-nginx in front of both in Docker. The plan is in
+**Status:** the API works; the editor is next. Workflows are saved as
+revisions, run in the background with live events, and published at their
+own endpoint. The web app is still a shell. The plan is in
 [docs/plans](docs/plans/README.md).
 
 ## Run it

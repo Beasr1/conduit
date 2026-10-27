@@ -11,18 +11,30 @@ import (
 	"testing"
 
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
+	"github.com/Beasr1/conduit/server/internal/runner"
 	"github.com/Beasr1/conduit/server/internal/store"
 	"github.com/Beasr1/conduit/server/internal/store/storetest"
+	"github.com/Beasr1/conduit/server/internal/upstream"
 )
 
 const testToken = "test-token-0123456789abcdef0123456789abcdef"
 
-var router http.Handler
+var (
+	db     *store.Store
+	router http.Handler
+)
 
 func TestMain(m *testing.M) {
 	os.Exit(storetest.Run(m, func(s *store.Store, _ string) {
-		router = NewRouter(Deps{Store: s, Token: testToken, Log: slog.New(slog.DiscardHandler)})
+		db, router = s, newRouter(s, runner.Options{})
 	}))
+}
+
+// newRouter's runs reach httptest upstreams, which listen on loopback.
+func newRouter(s *store.Store, o runner.Options) http.Handler {
+	log := slog.New(slog.DiscardHandler)
+	runs := runner.New(s, upstream.New(upstream.Options{AllowPrivateNetworks: true}), log, o)
+	return NewRouter(Deps{Store: s, Runner: runs, Token: testToken, Log: log})
 }
 
 // reply is what came back. A struct of its own rather than *http.Response,

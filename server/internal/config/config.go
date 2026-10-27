@@ -9,6 +9,10 @@
 //	CONDUIT_LOG_FORMAT        json (default) or text
 //	CONDUIT_LOG_LEVEL         debug, info (default), warn or error
 //	CONDUIT_SHUTDOWN_TIMEOUT  how long shutdown waits for requests, default 20s
+//	CONDUIT_ALLOW_PRIVATE_NETWORKS  true lets workflows call private and loopback
+//	                          addresses: local development only. Default false
+//	CONDUIT_UPSTREAM_PORTS    the ports workflows may call, default 80,443
+//	CONDUIT_MAX_RUNS          runs in progress at once, default 32
 package config
 
 import (
@@ -16,6 +20,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,6 +33,10 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	DatabaseURL     string
 	APIToken        string
+
+	AllowPrivateNetworks bool
+	UpstreamPorts        []uint16
+	MaxRuns              int
 }
 
 // Load reads the settings through lookup, which is os.LookupEnv in main and a
@@ -39,6 +49,8 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		LogFormat:       "json",
 		LogLevel:        slog.LevelInfo,
 		ShutdownTimeout: 20 * time.Second,
+		UpstreamPorts:   []uint16{80, 443},
+		MaxRuns:         32,
 	}
 
 	var errs []error
@@ -62,6 +74,27 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		}
 		cfg.ShutdownTimeout = d
 	}
+	if v, ok := lookup("CONDUIT_ALLOW_PRIVATE_NETWORKS"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("CONDUIT_ALLOW_PRIVATE_NETWORKS: %q is not true or false", v))
+		}
+		cfg.AllowPrivateNetworks = b
+	}
+	if v, ok := lookup("CONDUIT_UPSTREAM_PORTS"); ok {
+		ports, err := parsePorts(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("CONDUIT_UPSTREAM_PORTS: %w", err))
+		}
+		cfg.UpstreamPorts = ports
+	}
+	if v, ok := lookup("CONDUIT_MAX_RUNS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("CONDUIT_MAX_RUNS: %q is not a whole number", v))
+		}
+		cfg.MaxRuns = n
+	}
 	if err := errors.Join(errs...); err != nil {
 		return Config{}, err
 	}
@@ -80,6 +113,12 @@ func (c Config) Validate() error {
 	if c.ShutdownTimeout <= 0 {
 		errs = append(errs, fmt.Errorf("CONDUIT_SHUTDOWN_TIMEOUT: %s must be positive", c.ShutdownTimeout))
 	}
+	if len(c.UpstreamPorts) == 0 {
+		errs = append(errs, errors.New("CONDUIT_UPSTREAM_PORTS: name at least one port"))
+	}
+	if c.MaxRuns < 1 {
+		errs = append(errs, fmt.Errorf("CONDUIT_MAX_RUNS: %d must be at least 1", c.MaxRuns))
+	}
 	if u, err := url.Parse(c.DatabaseURL); c.DatabaseURL == "" || err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
 		// The value isn't echoed: it holds the database password.
 		errs = append(errs, errors.New("CONDUIT_DATABASE_URL: required, as postgres://user:password@host:port/database"))
@@ -94,4 +133,17 @@ func (c Config) CheckServe() error {
 		return errors.New("CONDUIT_API_TOKEN: required, at least 32 characters (try: openssl rand -hex 32)")
 	}
 	return nil
+}
+
+// parsePorts reads a comma-separated list of ports, such as 80,443.
+func parsePorts(v string) ([]uint16, error) {
+	var ports []uint16
+	for f := range strings.SplitSeq(v, ",") {
+		n, err := strconv.ParseUint(strings.TrimSpace(f), 10, 16)
+		if err != nil || n == 0 {
+			return nil, fmt.Errorf("%q is not a port", strings.TrimSpace(f))
+		}
+		ports = append(ports, uint16(n))
+	}
+	return ports, nil
 }

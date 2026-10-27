@@ -142,7 +142,11 @@ func TestRun_SpecExample(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	res, rec := execute(t, testEngine(Options{}), program(t, srv.URL, specExample), `{"user_id": "u-42"}`)
+	p := program(t, srv.URL, specExample)
+	if n := p.NodeCount(); n != 4 {
+		t.Errorf("NodeCount() = %d, want 4", n)
+	}
+	res, rec := execute(t, testEngine(Options{}), p, `{"user_id": "u-42"}`)
 	if res.Status != StatusSucceeded {
 		t.Fatalf("run %s: %v (%s)", res.Status, res.Err, statuses(res))
 	}
@@ -340,7 +344,8 @@ func TestRun_FailFastCancelsInFlightNodes(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Errorf("run took %v; the slow call wasn't cancelled", elapsed)
 	}
-	if res.Status != StatusFailed || !strings.Contains(res.Err.Error(), "node fails") {
+	var ne *NodeError
+	if res.Status != StatusFailed || !errors.As(res.Err, &ne) || ne.Node != "fails" || !strings.HasPrefix(res.Err.Error(), "node fails: ") {
 		t.Errorf("run %s: %v; want failed by node fails", res.Status, res.Err)
 	}
 	if got, want := statuses(res), "fails failed, slow cancelled, after cancelled"; got != want {
@@ -349,6 +354,9 @@ func TestRun_FailFastCancelsInFlightNodes(t *testing.T) {
 	var ue *upstream.Error
 	if !errors.As(res.Nodes[0].Err, &ue) || ue.Status != http.StatusInternalServerError {
 		t.Errorf("fails: %v, want an upstream 500", res.Nodes[0].Err)
+	}
+	if !errors.As(res.Err, &ue) {
+		t.Errorf("the run's error %v doesn't unwrap to the node's", res.Err)
 	}
 	select {
 	case <-slowCancelled:
@@ -441,7 +449,7 @@ func TestRun_TimesOut(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Errorf("run took %v, want about 100ms", elapsed)
 	}
-	if res.Status != StatusFailed || !errors.Is(res.Err, errRunTimeout) {
+	if res.Status != StatusFailed || !errors.Is(res.Err, ErrRunTimeout) {
 		t.Errorf("run %s: %v; want failed by the timeout", res.Status, res.Err)
 	}
 	if got, want := statuses(res), "slow failed, next cancelled"; got != want {
@@ -644,5 +652,78 @@ func TestCompile_ChecksJSONSchemas(t *testing.T) {
 				t.Errorf("problems = %q, want %q", strings.Join(got, ", "), tt.want)
 			}
 		})
+	}
+}
+
+func TestRun_EventsThatEndANodeCarryItsResult(t *testing.T) {
+	t.Parallel()
+	srv := echo(t)
+	p := program(t, srv.URL, `{
+	  "nodes": [
+	    {"id": "a", "kind": "http", "request": {"method": "POST", "url": "BASE/v1/{{ input.id }}",
+	      "headers": {"X-Trace": "t-{{ input.id }}"}, "body": "{ 'id': input.id }"}},
+	    {"id": "b", "kind": "transform", "expr": "nodes.a.status"},
+	    {"id": "c", "kind": "transform", "expr": "1"}
+	  ],
+	  "edges": [{"from": "a", "to": "b"}, {"from": "a", "to": "c", "when": "false"}]
+	}`)
+	_, rec := execute(t, testEngine(Options{}), p, `{"id": "7"}`)
+	ends := map[string]*NodeResult{}
+	for _, e := range rec.events {
+		switch e.Kind {
+		case EventStarted, EventRetrying:
+			if e.Result != nil {
+				t.Errorf("%s %s carries a result", e.Node, e.Kind)
+			}
+		default:
+			if e.Result == nil || e.Result.ID != e.Node || string(e.Result.Status) != string(e.Kind) {
+				t.Errorf("%s %s: result %+v", e.Node, e.Kind, e.Result)
+			}
+			ends[e.Node] = e.Result
+		}
+	}
+	a := ends["a"]
+	if a == nil || a.Request == nil {
+		t.Fatalf("a's result lacks the request it sent: %+v", a)
+	}
+	if a.Request.Method != "POST" || a.Request.URL != srv.URL+"/v1/7" || a.Request.Header.Get("X-Trace") != "t-7" || string(a.Request.Body) != `{"id":"7"}` {
+		t.Errorf("sent request = %+v, body %s", a.Request, a.Request.Body)
+	}
+	if b := ends["b"]; b == nil || string(b.Body) != "200" || b.Request != nil {
+		t.Errorf("transform b = %+v", b)
+	}
+	if c := ends["c"]; c == nil || c.Status != StatusSkipped {
+		t.Errorf("skipped c = %+v", c)
+	}
+}
+
+func TestProgram_CheckInput(t *testing.T) {
+	t.Parallel()
+	p := program(t, "", `{
+	  "nodes": [{"id": "a", "kind": "transform", "expr": "1"}],
+	  "input_schema": {"type": "object", "required": ["user_id"],
+	    "properties": {"user_id": {"type": "string"}, "limit": {"type": "integer", "maximum": 10}}}
+	}`)
+	tests := []struct {
+		input, want string // each problem as "pointer code: detail", sorted
+	}{
+		{`{"user_id": "u-1"}`, ""},
+		{`{"user_id": "u-1", "limit": 99}`, "/limit invalid_input: maximum: got 99, want 10"},
+		{`{"user_id": 7, "limit": 1.5}`, "/limit invalid_input: got number, want integer | /user_id invalid_input: got number, want string"},
+		{`{}`, " invalid_input: missing property 'user_id'"},
+		{`[`, " invalid_json: the input isn't JSON"},
+	}
+	for _, tt := range tests {
+		var got []string
+		for _, p := range p.CheckInput(json.RawMessage(tt.input)) {
+			got = append(got, p.Pointer+" "+p.Code+": "+p.Detail)
+		}
+		slices.Sort(got)
+		if g := strings.Join(got, " | "); g != tt.want {
+			t.Errorf("CheckInput(%s) = %q, want %q", tt.input, g, tt.want)
+		}
+	}
+	if ps := program(t, "", `{"nodes": []}`).CheckInput(json.RawMessage(`"anything"`)); ps != nil {
+		t.Errorf("without an input_schema: %v", ps)
 	}
 }

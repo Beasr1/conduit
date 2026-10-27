@@ -9,6 +9,9 @@
 package engine
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -25,7 +28,8 @@ import (
 type Program struct {
 	nodes  []node
 	edges  []edge
-	output *transform.Expr // nil when the definition has none
+	output *transform.Expr    // nil when the definition has none
+	input  *jsonschema.Schema // nil when the definition has no input_schema
 }
 
 type node struct {
@@ -99,7 +103,7 @@ func Compile(d *workflow.Definition) (*Program, error) {
 		p.output = c.expr("/output", d.Output)
 	}
 	if len(d.InputSchema) > 0 {
-		c.jsonSchema("/input_schema", d.InputSchema)
+		p.input = c.jsonSchema("/input_schema", d.InputSchema)
 	}
 	if len(d.OutputSchema) > 0 {
 		c.jsonSchema("/output_schema", d.OutputSchema)
@@ -180,18 +184,48 @@ func (c *compiler) params(pointer string, m map[string]string) []param {
 // jsonSchema checks that doc compiles as JSON Schema 2020-12. Its $refs can
 // only point inside it. The library's default loader reads local files, and
 // a schema someone typed mustn't make the server read anything.
-func (c *compiler) jsonSchema(pointer string, doc map[string]any) {
+func (c *compiler) jsonSchema(pointer string, doc map[string]any) *jsonschema.Schema {
 	jc := jsonschema.NewCompiler()
 	jc.UseLoader(nil)
 	jc.DefaultDraft(jsonschema.Draft2020)
 	// A made-up absolute base, so messages carry no local path and a relative
 	// $ref resolves to a URL nothing will load.
 	const loc = "https://conduit.invalid/schema.json"
+	var sch *jsonschema.Schema
 	err := jc.AddResource(loc, doc)
 	if err == nil {
-		_, err = jc.Compile(loc)
+		sch, err = jc.Compile(loc)
 	}
 	if err != nil {
 		c.problems = append(c.problems, workflow.Problem{Pointer: pointer, Code: "invalid_schema", Detail: err.Error()})
 	}
+	return sch
 }
+
+// CheckInput reports how input, raw JSON, fails the definition's
+// input_schema: one problem per failing value, each pointing into the input.
+// A definition without an input_schema takes any JSON.
+func (p *Program) CheckInput(input json.RawMessage) []workflow.Problem {
+	if p.input == nil {
+		return nil
+	}
+	// The library's own decoder keeps numbers exact.
+	v, err := jsonschema.UnmarshalJSON(bytes.NewReader(input))
+	if err != nil {
+		return []workflow.Problem{{Pointer: "", Code: "invalid_json", Detail: "the input isn't JSON"}}
+	}
+	var ve *jsonschema.ValidationError
+	if !errors.As(p.input.Validate(v), &ve) {
+		return nil
+	}
+	var out []workflow.Problem
+	for _, u := range ve.BasicOutput().Errors {
+		if u.Error != nil {
+			out = append(out, workflow.Problem{Pointer: u.InstanceLocation, Code: "invalid_input", Detail: u.Error.String()})
+		}
+	}
+	return out
+}
+
+// NodeCount is how many nodes p has, so how many events end a node in a run.
+func (p *Program) NodeCount() int { return len(p.nodes) }

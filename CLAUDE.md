@@ -4,10 +4,11 @@ No-code API orchestration. Users compose upstream API calls into a DAG,
 using a graph editor or a page-by-page builder, and map data between steps
 with JSONata. A Go engine runs it, fanning out in parallel.
 
-**Status: plan 03 in progress; phase A (Postgres and the workflows API) is
-built.** The server stores workflows and their revisions; runs, live events
-and serving come in phase B. What's left is in docs/plans/03-api.md; the
-bigger picture is docs/plans/README.md.
+**Status: plan 03 in progress; phases A and B are built.** The server
+stores workflows and their revisions, runs them in the background with
+live events, and serves published ones at /serve/{slug}. Phase C, the dev
+loop, is left; it's in docs/plans/03-api.md. The bigger picture is
+docs/plans/README.md.
 
 ## Read before working
 
@@ -39,8 +40,8 @@ bigger picture is docs/plans/README.md.
 ## Layout
 
 - `server/`: Go module. `cmd/conduit`, plus `internal/` packages `config`,
-  `workflow`, `engine`, `transform`, `upstream`, `store` and `httpapi`;
-  `migrations/` holds the goose SQL.
+  `workflow`, `engine`, `transform`, `upstream`, `store`, `runner` and
+  `httpapi`; `migrations/` holds the goose SQL.
 - `web/`: React app.
 - `schema/openapi.yaml`: source of truth for API types on both sides.
 - `schema/workflow.yaml`: the workflow definition; the Go types in

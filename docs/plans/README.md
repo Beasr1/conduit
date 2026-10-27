@@ -9,7 +9,7 @@ lives as a row in 00-roadmap.md.
 | 00 | 00-roadmap.md | scope, architecture, execution semantics, decisions, milestones | proposed; D1, D10, D11, D13, D14, D17 open |
 | 01 | 01-foundation.md | monorepo skeleton; every gate runs locally and in CI | done locally; CI green to see on the next push |
 | 02 | 02-engine.md | workflow model, validation, scheduler, upstream caller, JSONata | built; `just check` green locally |
-| 03 | 03-api.md | persistence, REST, live run events, serving published workflows | phase A built; phase B next |
+| 03 | 03-api.md | persistence, REST, live run events, serving published workflows | phases A and B built; phase C next |
 | 04 | graph-editor | build, save and run workflows in graph mode | not started |
 | 05 | page-mode | step-by-step builder over the same definition | not started |
 | 06 | hardening | credentials, limits, images, observability | not started |

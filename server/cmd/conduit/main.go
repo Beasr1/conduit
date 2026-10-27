@@ -19,7 +19,9 @@ import (
 
 	"github.com/Beasr1/conduit/server/internal/config"
 	"github.com/Beasr1/conduit/server/internal/httpapi"
+	"github.com/Beasr1/conduit/server/internal/runner"
 	"github.com/Beasr1/conduit/server/internal/store"
+	"github.com/Beasr1/conduit/server/internal/upstream"
 )
 
 func main() {
@@ -62,9 +64,20 @@ func serve(ctx context.Context, stop context.CancelFunc, cfg config.Config) erro
 	}
 	defer db.Close() // after the server has stopped, below
 
+	if cfg.AllowPrivateNetworks {
+		log.Warn("workflows may call private and loopback addresses: CONDUIT_ALLOW_PRIVATE_NETWORKS is for local development only")
+	}
+	client := upstream.New(upstream.Options{AllowPrivateNetworks: cfg.AllowPrivateNetworks, Ports: cfg.UpstreamPorts})
+	runs := runner.New(db, client, log, runner.Options{MaxRuns: cfg.MaxRuns})
+	// Before serving, so every run still marked running is a stopped
+	// process's, never this one's.
+	if err := runs.Recover(ctx); err != nil {
+		return err
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(httpapi.Deps{Store: db, Token: cfg.APIToken, Log: log}),
+		Handler:           httpapi.NewRouter(httpapi.Deps{Store: db, Runner: runs, Token: cfg.APIToken, Log: log}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		// Just above the 30 s default for served runs (roadmap, execution
@@ -89,7 +102,15 @@ func serve(ctx context.Context, stop context.CancelFunc, cfg config.Config) erro
 	log.Info("shutting down", "timeout", cfg.ShutdownTimeout)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
+	// Shutdown waits for every request, and an editor run's event stream
+	// lasts as long as the run, so those runs are cancelled first. Served
+	// runs finish: their callers are waiting.
+	runs.Stop()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown: %w", err)
+	}
+	// The cancelled runs record how they ended before the database closes.
+	if err := runs.Wait(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {

@@ -1,7 +1,7 @@
 # 03 — API
 
-Status: accepted 2026-10-26. Phase A is built; phase B is next. All seven questions are
-answered (Answers, at the end), and D4, D5, D8 and D9 are accepted.
+Status: accepted 2026-10-26. Phases A and B are built; phase C is next. All seven
+questions are answered (Answers, at the end), and D4, D5, D8 and D9 are accepted.
 
 ## Goal
 
@@ -82,16 +82,17 @@ CREATE TABLE workflow_revisions (
 );
 
 CREATE TABLE runs (
-  id          uuid PRIMARY KEY DEFAULT uuidv7(),
-  workflow_id uuid  NOT NULL,
-  revision    int   NOT NULL,
-  trigger     text  NOT NULL,   -- editor | served
-  status      text  NOT NULL,   -- running | succeeded | failed | cancelled
-  input       jsonb NOT NULL,
-  output      jsonb,
-  error       jsonb,            -- {code, detail, node}
-  started_at  timestamptz NOT NULL DEFAULT now(),
-  ended_at    timestamptz,
+  id               uuid PRIMARY KEY DEFAULT uuidv7(),
+  workflow_id      uuid  NOT NULL,
+  revision         int   NOT NULL,
+  trigger          text  NOT NULL,   -- editor | served
+  status           text  NOT NULL,   -- running | succeeded | failed | cancelled
+  input            jsonb NOT NULL,
+  output           jsonb,            -- capped like node bodies
+  output_truncated bool  NOT NULL DEFAULT false,
+  error            jsonb,            -- {code, detail, node}
+  started_at       timestamptz NOT NULL DEFAULT now(),
+  ended_at         timestamptz,
   FOREIGN KEY (workflow_id, revision) REFERENCES workflow_revisions
 );
 
@@ -100,9 +101,9 @@ CREATE TABLE node_runs (
   node_id    text NOT NULL,
   status     text NOT NULL,
   attempts   int  NOT NULL,
-  request    jsonb,             -- redacted; body capped
-  response   jsonb,             -- redacted; body capped, with a truncated flag
-  error      jsonb,
+  request    jsonb,             -- redacted; body capped, with a truncated flag
+  response   jsonb,             -- the same; or a transform node's value
+  error      jsonb,             -- {code, detail}
   started_at timestamptz,
   ended_at   timestamptz NOT NULL,
   PRIMARY KEY (run_id, node_id)
@@ -337,17 +338,59 @@ Built differently from the plan above, and why:
   compose hands `server/.env` to the server's containers, overriding only
   the database URL.
 
-**Phase B: runs and serving**
-- [ ] The `engine` changes: results on terminal events, the sent request on
+**Phase B: runs and serving** (built 2026-10-27)
+- [x] The `engine` changes: results on terminal events, the sent request on
       node results.
-- [ ] `runner`: start, the writer, the cap, the event log with replay,
+- [x] `runner`: start, the writer, the cap, the event log with replay,
       interrupted runs, shutdown. Tests with a fake clock where timing
       matters, and real upstreams.
-- [ ] The runs endpoints and the event stream: `Last-Event-ID`,
+- [x] The runs endpoints and the event stream: `Last-Event-ID`,
       keep-alives, the write deadline.
-- [ ] Serving: input checks, the status mapping, the 30 s timeout, nginx
+- [x] Serving: input checks, the status mapping, the 30 s timeout, nginx
       `/serve/`.
-- [ ] The end-to-end test from Done.
+- [x] The end-to-end test from Done: `TestEndToEnd` in `httpapi`.
+
+Seen on 2026-10-27, besides the tests:
+- **The Docker stack, through nginx:** serving answers 200, 400 and 404,
+  and an editor run's events stream through `/api/`.
+- **A killed process:** a server killed with SIGKILL mid-run left the run
+  `running`. The next start logged "marked interrupted runs as failed
+  runs=1" before listening, and the run was `failed` with code
+  `interrupted`.
+- **Shutdown:** SIGTERM with a run in progress and its stream open. The
+  stream got the run's `cancelled` event and closed, and the server exited
+  in 0.04 s.
+
+Built differently from the plan above, and why:
+- **The stream's `run` event comes from the database.** The in-memory log
+  keeps node events only, since a run event can carry 256 KiB of output and
+  ended runs stay a minute. The run is recorded before the log hears of its
+  end, so the database always has it.
+- **The stored output is capped like node bodies**, with
+  `output_truncated`. A served caller still gets all of it.
+- **A failure's code is decided once, by the runner**, and stored with the
+  run, the node and the stream's events. The HTTP layer only maps codes to
+  statuses. Codes beyond the plan: `cancelled` (the caller hung up, or
+  shutdown), answered `503` though no one reads it, and `interrupted`.
+- **A served run's problem names the run** in `instance`, as
+  `/v1/runs/{id}`, as well as the node.
+- **A run that's only just starting answers the stream with `503`** and
+  `Retry-After: 1`. Its row exists a moment before its event log does,
+  and `GET /v1/runs` could list it in between.
+- **Shutdown calls `runner.Stop` before `srv.Shutdown`**, rather than
+  through `RegisterOnShutdown`. It's the same moment, and reads in order.
+- **The served answer has its own response type.** The generated one is
+  `json.RawMessage` under another name, which encoding/json would send as
+  base64.
+- **oapi-codegen options:**
+  - `prefer-skip-optional-pointer-with-omitzero` leaves unset optional
+    objects and times out of answers, which `omitempty` doesn't;
+  - `skip-prune` generates `NodeEvent`, which the schema can only
+    describe in the stream's text.
+- **Bodies aren't redacted, only headers and query values.** A token in a
+  response body, such as an OAuth exchange's, is stored as it came. That's
+  06's, with credentials.
+- **`runner` has a coverage floor**, 92.
 
 **Phase C: development loop**
 - [ ] `just dev`; CLAUDE.md, go.md, repo.md and the roadmap updated.

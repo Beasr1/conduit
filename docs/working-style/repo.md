@@ -154,7 +154,9 @@ lint fails only in CI, on code that's clean everywhere else.
   - Security headers go on every response, with the CSP chosen by content
     type. `add_header_inherit merge` stops a location's own headers from
     dropping them.
-  - `/api` is rate-limited and body-capped.
+  - `/api/` and `/serve/` are rate-limited and body-capped. `/serve/`
+    reaches the server unchanged. The server turns buffering off for event
+    streams with `X-Accel-Buffering: no`.
   - The server is found through Docker's DNS on every request, so
     recreating it doesn't strand nginx on an old IP.
 

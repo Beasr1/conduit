@@ -56,12 +56,9 @@ func (a *api) CreateWorkflow(ctx context.Context, req gen.CreateWorkflowRequestO
 }
 
 func (a *api) ListWorkflows(ctx context.Context, req gen.ListWorkflowsRequestObject) (gen.ListWorkflowsResponseObject, error) {
-	limit := req.Params.Limit
-	switch {
-	case limit == 0:
-		limit = 50
-	case limit < 1 || limit > 200:
-		return nil, &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "limit is 1 to 200"}
+	limit, err := pageLimit(req.Params.Limit)
+	if err != nil {
+		return nil, err
 	}
 	ws, err := a.store.Workflows(ctx, limit, req.Params.Before)
 	if err != nil {
@@ -179,15 +176,33 @@ func invalidDefinition(ps []gen.ProblemError, format string, args ...any) *probl
 	return &problem{status: http.StatusUnprocessableEntity, code: "invalid_definition", detail: fmt.Sprintf(format, args...), errors: ps}
 }
 
+// pageLimit is a list's limit parameter, or the default page size.
+func pageLimit(limit int) (int, error) {
+	switch {
+	case limit == 0:
+		return 50, nil
+	case limit < 1 || limit > 200:
+		return 0, &problem{status: http.StatusBadRequest, code: "invalid_request", detail: "limit is 1 to 200"}
+	}
+	return limit, nil
+}
+
 // problemsOf is everything engine.Compile finds wrong with d.
 func problemsOf(d *workflow.Definition) []gen.ProblemError {
-	out := []gen.ProblemError{} // [] rather than null: the field is required
 	_, err := engine.Compile(d)
 	var ps workflow.Problems
-	if errors.As(err, &ps) {
-		for _, p := range ps {
-			out = append(out, gen.ProblemError{Pointer: p.Pointer, Code: p.Code, Detail: p.Detail})
-		}
+	if !errors.As(err, &ps) {
+		return problemErrors(nil)
+	}
+	return problemErrors(ps)
+}
+
+// problemErrors is ps as the API sends them: [] rather than null when there
+// are none, since the field is required where it appears.
+func problemErrors(ps []workflow.Problem) []gen.ProblemError {
+	out := make([]gen.ProblemError, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, gen.ProblemError{Pointer: p.Pointer, Code: p.Code, Detail: p.Detail})
 	}
 	return out
 }

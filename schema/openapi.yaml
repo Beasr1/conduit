@@ -243,6 +243,162 @@ paths:
         "422":
           $ref: "#/components/responses/Problem"
 
+  /v1/workflows/{id}/runs:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    post:
+      operationId: startRun
+      summary: Run a revision in the background
+      description: The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRun"
+      responses:
+        "202":
+          description: Started.
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Busy"
+
+  /v1/runs:
+    get:
+      operationId: listRuns
+      summary: List runs, newest first
+      parameters:
+        - name: workflow_id
+          in: query
+          description: Only this workflow's runs.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: before
+          in: query
+          description: Return runs older than this id, for the next page.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of runs, without their input, output or nodes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunList"
+        "401":
+          $ref: "#/components/responses/Problem"
+
+  /v1/runs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: getRun
+      summary: Get a run, with what each node did
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
+  /v1/runs/{id}/events:
+    parameters:
+      - $ref: "#/components/parameters/RunID"
+    get:
+      operationId: streamRunEvents
+      summary: Follow a run as it happens
+      description: |
+        Server-sent events. Each node's progress is an event named `node`, with a NodeEvent as its data. The run's end is an event named `run`, with the Run as its data, and the stream closes after it. Each event's `id` is its number in the run.
+
+        A client that connects late, or reconnects with Last-Event-ID, gets the events it missed while the run goes on and for a minute after it ends. After that the stream sends only the `run` event, without an id. A comment line arrives every 15 s while nothing else does.
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          description: The id of the last event received. The stream resumes after it.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Busy"
+
+  /serve/{slug}:
+    post:
+      operationId: serveWorkflow
+      summary: Run a workflow's published revision and answer with its output
+      description: The body is the run's input. A run that fails answers with problem details naming the node; `instance` is the run, at /v1/runs/{id}. Served runs time out after 30 s.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              description: The run's input. Absent means null.
+              x-go-type: json.RawMessage
+      responses:
+        "200":
+          description: The run's output. null when the workflow has no output expression.
+          content:
+            application/json:
+              schema:
+                x-go-type: json.RawMessage
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Busy"
+        "504":
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     bearer:
@@ -252,6 +408,12 @@ components:
 
   parameters:
     WorkflowID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    RunID:
       name: id
       in: path
       required: true
@@ -267,6 +429,16 @@ components:
   responses:
     Problem:
       description: RFC 9457 problem details. `code` says what went wrong; `errors` lists every problem with a JSON Pointer.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Busy:
+      description: Too many runs are in progress, or the server is shutting down. Try again after Retry-After seconds.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
       content:
         application/problem+json:
           schema:
@@ -416,6 +588,9 @@ components:
         code:
           type: string
           description: Our stable error code.
+        node:
+          type: string
+          description: The node that failed a served run.
         errors:
           type: array
           description: Every validation problem at once.
@@ -433,3 +608,182 @@ components:
           type: string
         detail:
           type: string
+
+    StartRun:
+      type: object
+      additionalProperties: false
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+          description: The revision to run. Absent means the latest.
+        input:
+          description: The run's input, checked against the definition's input_schema. Absent means null.
+          x-go-type: json.RawMessage
+
+    RunSummary:
+      type: object
+      required: [id, workflow_id, revision, trigger, status, started_at]
+      properties:
+        id:
+          type: string
+        workflow_id:
+          type: string
+        revision:
+          type: integer
+        trigger:
+          type: string
+          enum: [editor, served]
+          description: editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+        status:
+          type: string
+          enum: [running, succeeded, failed, cancelled]
+        error:
+          $ref: "#/components/schemas/RunError"
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          description: Absent while the run goes on.
+
+    Run:
+      allOf:
+        - $ref: "#/components/schemas/RunSummary"
+        - type: object
+          required: [input]
+          properties:
+            input:
+              description: The input, as sent.
+              x-go-type: json.RawMessage
+            output:
+              description: The output, once the run succeeded. Over 256 KiB, its first 256 KiB as a string, and output_truncated is true.
+              x-go-type: json.RawMessage
+            output_truncated:
+              type: boolean
+            nodes:
+              type: array
+              description: What each node did, in the order they ended. Only from GET /v1/runs/{id}.
+              items:
+                $ref: "#/components/schemas/NodeRun"
+
+    RunList:
+      type: object
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunSummary"
+        next:
+          type: string
+          description: Pass as `before` for the next page. Absent on the last page.
+
+    RunError:
+      type: object
+      description: Why a run or a node didn't succeed.
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          enum: [upstream_failed, timeout, workflow_error, internal_error, cancelled, interrupted]
+          description: |
+            upstream_failed: an upstream answered with an error status, or couldn't be reached, read or allowed.
+            timeout: the run, or a node's last attempt, ran out of time.
+            workflow_error: the workflow's own configuration failed, such as an expression.
+            internal_error: our bug; the details are in the server's log.
+            cancelled: the caller hung up, or the server shut down.
+            interrupted: the server stopped before the run ended.
+        detail:
+          type: string
+        node:
+          type: string
+          description: On a run's error, the node that failed it.
+
+    NodeRun:
+      type: object
+      required: [node, status, attempts, ended_at]
+      properties:
+        node:
+          type: string
+        status:
+          type: string
+          enum: [succeeded, failed, skipped, cancelled]
+        attempts:
+          type: integer
+          description: Requests an http node sent. 0 for a node that sent none.
+        request:
+          $ref: "#/components/schemas/NodeRequest"
+        response:
+          $ref: "#/components/schemas/NodeResponse"
+        error:
+          $ref: "#/components/schemas/RunError"
+        started_at:
+          type: string
+          format: date-time
+          description: Absent if the node never started.
+        ended_at:
+          type: string
+          format: date-time
+
+    NodeRequest:
+      type: object
+      description: What an http node sent. Secrets aren't kept. The values of the Authorization, Proxy-Authorization, Cookie and Set-Cookie headers are [redacted], as are those of any header or query parameter whose name contains key, token, secret or password, and a password in the URL.
+      required: [method, url, headers]
+      properties:
+        method:
+          type: string
+        url:
+          type: string
+        headers:
+          type: object
+          description: Lower-case names; repeated headers joined by commas.
+          additionalProperties:
+            type: string
+        body:
+          description: The JSON body. Over 256 KiB, its first 256 KiB as a string, and truncated is true.
+          x-go-type: json.RawMessage
+        truncated:
+          type: boolean
+
+    NodeResponse:
+      type: object
+      description: What an http node got back, or a transform node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
+      required: [body]
+      properties:
+        status:
+          type: integer
+          description: http nodes only.
+        headers:
+          type: object
+          description: http nodes only.
+          additionalProperties:
+            type: string
+        body:
+          description: null when there was none, or it wasn't JSON.
+          x-go-type: json.RawMessage
+        truncated:
+          type: boolean
+
+    NodeEvent:
+      type: object
+      description: The data of a `node` event in a run's stream.
+      required: [node, kind, attempt, at]
+      properties:
+        node:
+          type: string
+        kind:
+          type: string
+          enum: [started, retrying, succeeded, failed, skipped, cancelled]
+        attempt:
+          type: integer
+          description: The attempt starting; on the event that ends the node, the attempts made.
+        at:
+          type: string
+          format: date-time
+        http_status:
+          type: integer
+          description: On the event that ends an http node that got an answer.
+        error:
+          $ref: "#/components/schemas/RunError"
