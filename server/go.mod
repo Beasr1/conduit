@@ -9,7 +9,7 @@ tool github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen
 require (
 	code.dny.dev/ssrf v0.3.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/oapi-codegen/runtime v1.7.0
+	github.com/oapi-codegen/runtime v1.8.0
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/recolabs/gnata v0.6.2
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
