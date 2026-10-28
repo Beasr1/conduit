@@ -34,6 +34,34 @@ setup:
     @if golangci-lint version 2>/dev/null | grep -q "version {{golangci_version}} "; then echo "golangci-lint {{golangci_version}} already installed"; else curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b .tools/bin v{{golangci_version}}; fi
     cd web && corepack pnpm install --frozen-lockfile
 
+# run Postgres, the API server and the web app together; Ctrl-C stops them all
+dev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Postgres is stopped at the end only if this started it: the tests and
+    # `just up` use the same container.
+    db_was_up=$({{compose}} ps --status running --quiet db)
+    just db-up migrate
+    (cd server && {{load_env}} && exec go run ./cmd/conduit) &
+    server=$!
+    (cd web && exec corepack pnpm dev) &
+    web=$!
+    # Ctrl-C reaches every process in the terminal's foreground group, go
+    # run's server and pnpm's Vite included, so each shuts itself down. This
+    # waits for them, then stops Postgres if it started it.
+    status=0
+    cleanup() {
+        wait || true
+        if [ -z "$db_was_up" ]; then {{compose}} stop db; fi
+    }
+    trap cleanup EXIT
+    trap 'exit "$status"' INT
+    # If either stops on its own, stop the other the way Ctrl-C would.
+    while kill -0 "$server" 2>/dev/null && kill -0 "$web" 2>/dev/null; do sleep 1; done
+    status=1
+    echo "the server or the web app stopped, so dev is stopping the rest" >&2
+    kill -INT 0
+
 # run the API server on http://127.0.0.1:8080, against the compose Postgres
 dev-server: db-up migrate
     cd server && {{load_env}} && go run ./cmd/conduit

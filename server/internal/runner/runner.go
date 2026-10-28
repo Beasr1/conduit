@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
@@ -188,44 +189,69 @@ func (r *Runner) Wait(ctx context.Context) error {
 	return nil
 }
 
-// Watch returns a run's events from the one after number after: those that
-// have already happened, then, while the run goes on, the rest as they
-// happen. The run's own event always comes last. Close it when done.
+// Watch follows a run's events from the node event after number after. It
+// fails at once if there's no such run (store.ErrNotFound), or if it's
+// running but this process doesn't hold its events (ErrNotHere).
 func (r *Runner) Watch(ctx context.Context, runID string, after int) (*Watch, error) {
-	events, end, live, ok := r.events.watch(runID, after)
-	if live != nil {
-		return &Watch{Events: events, Live: live, close: func() { r.events.unwatch(runID, live) }}, nil
+	if _, _, _, ok := r.events.since(runID, after); !ok {
+		if _, err := r.ended(ctx, runID); err != nil {
+			return nil, err
+		}
 	}
-	// The run has ended, or its log is gone. Either way the database has
-	// how it ended: it's recorded before the log hears of it.
+	return &Watch{r: r, runID: runID, after: after}, nil
+}
+
+// Watch is one client's place in a run's events.
+type Watch struct {
+	r     *Runner
+	runID string
+	after int  // the last node event returned
+	done  bool // the run's own event has been returned
+}
+
+// Next returns the events after those already returned: at once if there
+// are any, or else once there are, or when ctx is done. The run's own event
+// comes last, and after it Next returns io.EOF.
+func (w *Watch) Next(ctx context.Context) ([]Event, error) {
+	if w.done {
+		return nil, io.EOF
+	}
+	for {
+		events, ended, changed, ok := w.r.events.since(w.runID, w.after)
+		if n := len(events); n > 0 {
+			w.after = events[n-1].Seq
+		}
+		if !ok || ended {
+			run, err := w.r.ended(ctx, w.runID)
+			if err != nil {
+				return nil, err
+			}
+			w.done = true
+			return append(events, Event{Run: &run}), nil
+		}
+		if len(events) > 0 {
+			return events, nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// ended is how a run ended, from the database: a run is recorded before its
+// log hears it ended. A run there that's still running, with no log here,
+// belongs to no process this one knows of.
+func (r *Runner) ended(ctx context.Context, runID string) (store.Run, error) {
 	run, err := r.store.Run(ctx, runID)
 	if err != nil {
-		return nil, err
+		return store.Run{}, err
 	}
 	if run.Status == "running" {
-		return nil, ErrNotHere
+		return store.Run{}, ErrNotHere
 	}
-	if !ok || after < end {
-		events = append(events, Event{Seq: end, Run: &run}) // Seq 0 once the log is gone
-	}
-	return &Watch{Events: events}, nil
-}
-
-// Watch is a run's event stream, from one client's point of view.
-type Watch struct {
-	Events []Event // already happened
-	// Live gets each event from here on, while the run goes on: nil if it
-	// had ended. It's closed after the run's event, or early if the client
-	// fell behind; it should reconnect, saying the last Seq it got.
-	Live  <-chan Event
-	close func()
-}
-
-// Close stops the watch.
-func (w *Watch) Close() {
-	if w.close != nil {
-		w.close()
-	}
+	return run, nil
 }
 
 // prepare compiles a revision and checks input against its input_schema.
@@ -356,7 +382,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 		final.Status, final.Output, final.OutputTruncated, final.Error, final.EndedAt = string(res.Status), output, truncated, errDoc, &now
 	}
 	out.Run = final
-	r.events.end(run.ID, final)
+	r.events.end(run.ID)
 	return out
 }
 

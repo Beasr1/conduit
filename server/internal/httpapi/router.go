@@ -5,6 +5,7 @@
 package httpapi
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"net/http"
@@ -20,15 +21,16 @@ const maxBody = 1 << 20
 
 // Deps is what the HTTP layer needs.
 type Deps struct {
-	Store  *store.Store
-	Runner *runner.Runner
-	Token  string // CONDUIT_API_TOKEN
-	Log    *slog.Logger
+	Store      *store.Store
+	Runner     *runner.Runner
+	Token      string // CONDUIT_API_TOKEN
+	Log        *slog.Logger
+	MaxStreams int // run event streams open at once; default 256
 }
 
 // NewRouter returns the server's handler.
 func NewRouter(d Deps) http.Handler {
-	a := &api{store: d.Store, runner: d.Runner, log: d.Log}
+	a := &api{store: d.Store, runner: d.Runner, log: d.Log, streams: make(chan struct{}, cmp.Or(d.MaxStreams, 256))}
 	strict := gen.NewStrictHandlerWithOptions(a, nil, gen.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  a.requestError,
 		ResponseErrorHandlerFunc: a.answerError,
@@ -49,6 +51,9 @@ type api struct {
 	store  *store.Store
 	runner *runner.Runner
 	log    *slog.Logger
+	// streams holds a token for each open event stream. Each costs a
+	// connection and a goroutine for as long as its run goes on.
+	streams chan struct{}
 }
 
 func (*api) GetHealthz(context.Context, gen.GetHealthzRequestObject) (gen.GetHealthzResponseObject, error) {

@@ -73,7 +73,7 @@ func TestEndToEnd(t *testing.T) {
 	run := strict[gen.Run](t, r.body)
 	r = send(http.MethodGet, "/v1/runs/"+run.ID+"/events", "")
 	want(r, http.StatusOK, "events")
-	if got := eventList(t, readEvents(t, bytes.NewReader(r.body))); got != "1 user started, 2 user succeeded, 3 greet started, 4 greet succeeded, 5 run succeeded" {
+	if got := eventList(t, readEvents(t, bytes.NewReader(r.body))); got != "1 user started, 2 user succeeded, 3 greet started, 4 greet succeeded, end run succeeded" {
 		t.Errorf("events: %s", got)
 	}
 	r = send(http.MethodGet, "/v1/runs/"+run.ID, "")

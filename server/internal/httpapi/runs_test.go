@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -115,7 +116,7 @@ func readEvents(t *testing.T, r io.Reader) []sseEvent {
 }
 
 // eventList renders node events as "1 user started" and the run's as
-// "5 run succeeded".
+// "end run succeeded".
 func eventList(t *testing.T, events []sseEvent) string {
 	t.Helper()
 	var out []string
@@ -163,7 +164,7 @@ func TestRuns_StartFollowAndFetch(t *testing.T) {
 		t.Fatalf("events = %d, headers %v", r.status, r.header)
 	}
 	events := readEvents(t, bytes.NewReader(r.body))
-	if got, want := eventList(t, events), "1 user started, 2 user succeeded, 3 greet started, 4 greet succeeded, 5 run succeeded"; got != want {
+	if got, want := eventList(t, events), "1 user started, 2 user succeeded, 3 greet started, 4 greet succeeded, end run succeeded"; got != want {
 		t.Fatalf("events: %s\nwant:   %s", got, want)
 	}
 	if end := strict[gen.Run](t, []byte(events[4].data)); string(end.Output) != `{"greeting":"Hello, Ada"}` || end.EndedAt.IsZero() {
@@ -196,17 +197,25 @@ func TestRuns_EventsResumeAfterLastEventID(t *testing.T) {
 	call(t, http.MethodGet, "/v1/runs/"+run.ID+"/events", "") // waits for the end
 
 	r := call(t, http.MethodGet, "/v1/runs/"+run.ID+"/events", "", "Last-Event-ID", "3")
-	if got := eventList(t, readEvents(t, bytes.NewReader(r.body))); got != "4 greet succeeded, 5 run succeeded" {
+	if got := eventList(t, readEvents(t, bytes.NewReader(r.body))); got != "4 greet succeeded, end run succeeded" {
 		t.Errorf("after 3: %s", got)
 	}
-	if r := call(t, http.MethodGet, "/v1/runs/"+run.ID+"/events", "", "Last-Event-ID", "5"); r.status != http.StatusOK || len(r.body) != 0 {
-		t.Errorf("after the last = %d %q", r.status, r.body)
+	r = call(t, http.MethodGet, "/v1/runs/"+run.ID+"/events", "", "Last-Event-ID", "4")
+	if got := eventList(t, readEvents(t, bytes.NewReader(r.body))); got != "end run succeeded" {
+		t.Errorf("after the last node event: %s", got)
+	}
+	// The client has everything: 204 tells an EventSource to stop.
+	if r := call(t, http.MethodGet, "/v1/runs/"+run.ID+"/events", "", "Last-Event-ID", "end"); r.status != http.StatusNoContent || len(r.body) != 0 {
+		t.Errorf("after end = %d %q", r.status, r.body)
 	}
 	if p := problemOf(t, call(t, http.MethodGet, "/v1/runs/"+run.ID+"/events", "", "Last-Event-ID", "x")); p.Status != 400 {
-		t.Errorf("a Last-Event-ID that isn't a number: %+v", p)
+		t.Errorf("a Last-Event-ID that isn't an event's: %+v", p)
 	}
-	if p := problemOf(t, call(t, http.MethodGet, "/v1/runs/01890000-0000-7000-8000-000000000000/events", "")); p.Status != 404 {
-		t.Errorf("an unknown run: %+v", p)
+	for _, last := range []string{"", "end"} {
+		r := call(t, http.MethodGet, "/v1/runs/01890000-0000-7000-8000-000000000000/events", "", "Last-Event-ID", last)
+		if p := problemOf(t, r); p.Status != 404 {
+			t.Errorf("an unknown run, Last-Event-ID %q: %+v", last, p)
+		}
 	}
 }
 
@@ -330,7 +339,7 @@ func TestServe_BusyAtTheCap(t *testing.T) {
 	}))
 	t.Cleanup(up.Close)
 	t.Cleanup(func() { close(release) })
-	capped := newRouter(db, runner.Options{MaxRuns: 1})
+	capped := newRouter(db, runner.Options{MaxRuns: 1}, 0)
 	wr := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}}]}`)
 
 	send := func(method, path, body string) *httptest.ResponseRecorder {
@@ -347,6 +356,71 @@ func TestServe_BusyAtTheCap(t *testing.T) {
 	rec := send(http.MethodPost, "/serve/"+wr.Workflow.Slug, ``)
 	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "5" || !strings.Contains(rec.Body.String(), `"code":"busy"`) {
 		t.Errorf("at the cap = %d, Retry-After %q, %s", rec.Code, rec.Header().Get("Retry-After"), rec.Body)
+	}
+}
+
+func TestEvents_BusyAtTheStreamCap(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+			fmt.Fprint(w, `{}`)
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(up.Close)
+	// A run's events live in the runner that started it, so the run starts
+	// on this router too.
+	srv := httptest.NewServer(newRouter(db, runner.Options{}, 1))
+	t.Cleanup(srv.Close)
+	request := func(method, path, body string) *http.Request {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), method, srv.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		return req
+	}
+	// send makes a request and reads the whole answer.
+	send := func(method, path, body string) reply {
+		t.Helper()
+		res, err := srv.Client().Do(request(method, path, body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reply{status: res.StatusCode, header: res.Header, body: b}
+	}
+	id := create(t, strings.ReplaceAll(`{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}}]}`, "BASE", up.URL)).Workflow.ID
+	run := strict[gen.Run](t, send(http.MethodPost, "/v1/workflows/"+id+"/runs", `{}`).body)
+	events := "/v1/runs/" + run.ID + "/events"
+
+	first, err := srv.Client().Do(request(http.MethodGet, events, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first stream = %d", first.StatusCode)
+	}
+	second := send(http.MethodGet, events, "")
+	if second.status != http.StatusServiceUnavailable || second.header.Get("Retry-After") != "5" || !strings.Contains(string(second.body), `"code":"busy"`) {
+		t.Errorf("a second stream at the cap = %d, Retry-After %q, %s", second.status, second.header.Get("Retry-After"), second.body)
+	}
+	close(release)
+	// The first stream ends with its run, and frees its place before its
+	// client sees the end.
+	if got := eventList(t, readEvents(t, first.Body)); got != "1 a started, 2 a succeeded, end run succeeded" {
+		t.Errorf("first stream: %s", got)
+	}
+	if third := send(http.MethodGet, events, ""); third.status != http.StatusOK {
+		t.Errorf("a stream once the first ended = %d %s", third.status, third.body)
 	}
 }
 
@@ -372,27 +446,45 @@ func TestEvents_OutliveTheWriteTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer res.Body.Close()
-	if got := eventList(t, readEvents(t, res.Body)); got != "1 user started, 2 user succeeded, 3 run succeeded" {
+	if got := eventList(t, readEvents(t, res.Body)); got != "1 user started, 2 user succeeded, end run succeeded" {
 		t.Errorf("events: %s", got)
 	}
 }
 
+// fakeEvents hands a stream each batch sent on it, and io.EOF once it's
+// closed: a run, as far as the stream can tell.
+type fakeEvents chan []runner.Event
+
+func (f fakeEvents) Next(ctx context.Context) ([]runner.Event, error) {
+	select {
+	case batch, ok := <-f:
+		if !ok {
+			return nil, io.EOF
+		}
+		return batch, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+var runEnded = []runner.Event{{Run: &store.Run{ID: "r", Status: "succeeded", Input: json.RawMessage(`null`)}}}
+
 func TestEventStream_KeepsAnIdleStreamAlive(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		live := make(chan runner.Event)
+		run := make(fakeEvents)
 		rec := httptest.NewRecorder()
-		s := eventStream{ctx: t.Context(), watch: &runner.Watch{Live: live}, log: slog.New(slog.DiscardHandler)}
+		s := eventStream{ctx: t.Context(), events: run, log: slog.New(slog.DiscardHandler)}
 		done := make(chan error)
 		go func() { done <- s.VisitStreamRunEventsResponse(rec) }()
 
 		time.Sleep(keepAlive + time.Second)
-		live <- runner.Event{Seq: 1, Run: &store.Run{ID: "r", Status: "succeeded", Input: json.RawMessage(`null`)}}
+		run <- runEnded
+		close(run)
 		if err := <-done; err != nil {
 			t.Fatal(err)
 		}
-		body := rec.Body.String()
-		if !strings.HasPrefix(body, ": keep-alive\n\nid: 1\nevent: run\ndata: {") {
+		if body := rec.Body.String(); !strings.HasPrefix(body, ": keep-alive\n\nid: end\nevent: run\ndata: {") {
 			t.Errorf("stream = %q; want a keep-alive, then the run", body)
 		}
 	})
@@ -402,13 +494,46 @@ func TestEventStream_EndsWhenTheClientGoes(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx, leave := context.WithCancel(t.Context())
-		s := eventStream{ctx: ctx, watch: &runner.Watch{Live: make(chan runner.Event)}, log: slog.New(slog.DiscardHandler)}
+		s := eventStream{ctx: ctx, events: make(fakeEvents), log: slog.New(slog.DiscardHandler)}
 		done := make(chan error)
 		go func() { done <- s.VisitStreamRunEventsResponse(httptest.NewRecorder()) }()
 		synctest.Wait()
 		leave()
 		if err := <-done; err != nil {
 			t.Error(err)
+		}
+	})
+}
+
+// pipeWriter is a ResponseWriter that writes down a net.Pipe, which has no
+// buffer: a client that doesn't read blocks every write, as a full socket
+// does.
+type pipeWriter struct {
+	conn   net.Conn
+	header http.Header
+}
+
+func (p *pipeWriter) Header() http.Header                { return p.header }
+func (p *pipeWriter) WriteHeader(int)                    {}
+func (p *pipeWriter) Write(b []byte) (int, error)        { return p.conn.Write(b) }
+func (p *pipeWriter) Flush()                             {}
+func (p *pipeWriter) SetWriteDeadline(t time.Time) error { return p.conn.SetWriteDeadline(t) }
+
+// A client that stops reading is dropped once a write has waited writeWait,
+// rather than holding its handler for ever.
+func TestEventStream_DropsAClientThatStopsReading(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		defer client.Close() // open, and never read
+		s := eventStream{ctx: t.Context(), events: make(fakeEvents, 1), log: slog.New(slog.DiscardHandler)}
+		s.events.(fakeEvents) <- runEnded
+		start := time.Now()
+		if err := s.VisitStreamRunEventsResponse(&pipeWriter{conn: server, header: http.Header{}}); err != nil {
+			t.Fatal(err)
+		}
+		if waited := time.Since(start); waited != writeWait {
+			t.Errorf("the stream ended after %v, want %v", waited, writeWait)
 		}
 	})
 }

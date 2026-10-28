@@ -69,29 +69,31 @@ func saveWorkflow(t *testing.T, base, def string) store.Workflow {
 	return w
 }
 
-// collect watches a run from the start until its last event.
+// collect follows a run from its start until its own event.
 func collect(t *testing.T, r *Runner, runID string) []Event {
 	t.Helper()
-	w, err := r.Watch(t.Context(), runID, 0)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	w, err := r.Watch(ctx, runID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
-	events := w.Events
-	if w.Live == nil {
-		return events
-	}
-	timeout := time.After(10 * time.Second)
+	return rest(t, ctx, w)
+}
+
+// rest is every event a watch has left, up to and including the run's own.
+func rest(t *testing.T, ctx context.Context, w *Watch) []Event {
+	t.Helper()
+	var events []Event
 	for {
-		select {
-		case e, ok := <-w.Live:
-			if !ok {
-				return events
-			}
-			events = append(events, e)
-		case <-timeout:
-			t.Fatalf("no run event; got %s", seqs(events))
+		batch, err := w.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			return events
 		}
+		if err != nil {
+			t.Fatalf("Next: %v, after %s", err, seqs(events))
+		}
+		events = append(events, batch...)
 	}
 }
 
@@ -145,7 +147,7 @@ func TestStart_StreamsAndRecordsTheRun(t *testing.T) {
 		t.Errorf("started run = %+v", run)
 	}
 	events := collect(t, r, run.ID)
-	if got, want := seqs(events), "1 user started, 2 user succeeded, 3 greet started, 4 greet succeeded, 5 run succeeded"; got != want {
+	if got, want := seqs(events), "1 user started, 2 user succeeded, 3 greet started, 4 greet succeeded, end run succeeded"; got != want {
 		t.Fatalf("events = %s, want %s", got, want)
 	}
 	if e := events[1].Node; e.HTTPStatus != 200 || e.Attempt != 1 || e.Failure != nil {
@@ -408,7 +410,7 @@ func TestStart_RefusedAtTheCap(t *testing.T) {
 		t.Errorf("a served run: %v, want ErrBusy", err)
 	}
 	close(h.release)
-	if got := seqs(collect(t, r, first.ID)); got != "1 a started, 2 a succeeded, 3 run succeeded" {
+	if got := seqs(collect(t, r, first.ID)); got != "1 a started, 2 a succeeded, end run succeeded" {
 		t.Errorf("first run = %s", got)
 	}
 	if _, err := r.Serve(ctx, w.Slug, nil); err != nil {
@@ -455,21 +457,38 @@ func TestWatch(t *testing.T) {
 	}
 	collect(t, r, run.ID)
 
-	// Ended, with its log still in memory: the node events after the one
-	// named, then the run's own from the database.
-	watch, err := r.Watch(ctx, run.ID, 3)
-	if err != nil || watch.Live != nil || seqs(watch.Events) != "4 greet succeeded, 5 run succeeded" {
-		t.Errorf("watch after 3 = %+v, %v", watch, err)
+	// Ended, with its log still in memory: the node events after the
+	// position at once, then the run's own, from the database.
+	from := func(after int) string {
+		t.Helper()
+		w, err := r.Watch(ctx, run.ID, after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seqs(rest(t, ctx, w))
 	}
-	if watch, err := r.Watch(ctx, run.ID, 5); err != nil || len(watch.Events) != 0 {
-		t.Errorf("watch after the last event = %+v, %v", watch, err)
+	if got := from(3); got != "4 greet succeeded, end run succeeded" {
+		t.Errorf("after 3: %s", got)
 	}
-	// Once the log is gone, only the run's event, without a number.
+	if got := from(4); got != "end run succeeded" {
+		t.Errorf("after the last node event: %s", got)
+	}
+	// Once the log is gone, only the run's event.
 	r.events.mu.Lock()
 	delete(r.events.logs, run.ID)
 	r.events.mu.Unlock()
-	if watch, err := r.Watch(ctx, run.ID, 0); err != nil || seqs(watch.Events) != "0 run succeeded" {
-		t.Errorf("watch once the log is gone = %+v, %v", watch, err)
+	if got := from(0); got != "end run succeeded" {
+		t.Errorf("once the log is gone: %s", got)
+	}
+	// The run's event comes from the database, whose errors Next passes on.
+	watch, err := r.Watch(ctx, run.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := watch.Next(cancelled); !errors.Is(err, context.Canceled) {
+		t.Errorf("Next with a cancelled context: %v", err)
 	}
 
 	if _, err := r.Watch(ctx, "01890000-0000-7000-8000-000000000000", 0); !errors.Is(err, store.ErrNotFound) {
@@ -481,6 +500,37 @@ func TestWatch(t *testing.T) {
 	}
 	if _, err := r.Watch(ctx, other.ID, 0); !errors.Is(err, ErrNotHere) {
 		t.Errorf("a running run this process didn't start: %v", err)
+	}
+}
+
+func TestWatch_WaitsForTheRunToGoOn(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	h := newHold(t)
+	r := newRunner(t, Options{})
+	w := saveWorkflow(t, h.srv.URL, holdDef)
+	run, err := r.Start(ctx, w.ID, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.wait(t)
+	watch, err := r.Watch(ctx, run.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events, err := watch.Next(ctx); err != nil || seqs(events) != "1 a started" {
+		t.Fatalf("first Next = %s, %v", seqs(events), err)
+	}
+	// Nothing more happens while the upstream holds, so Next waits until
+	// its context is done.
+	short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	if events, err := watch.Next(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Next while nothing happens = %s, %v; want it to wait", seqs(events), err)
+	}
+	close(h.release)
+	if got := seqs(rest(t, ctx, watch)); got != "2 a succeeded, end run succeeded" {
+		t.Errorf("the rest = %s", got)
 	}
 }
 

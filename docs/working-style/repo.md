@@ -34,6 +34,7 @@ when a second consumer of shared TypeScript code does.
   | Recipe | Does |
   |---|---|
   | `setup` | install the pinned golangci-lint into `.tools/bin`, and the web dependencies |
+  | `dev` | Postgres, the server and Vite together. Ctrl-C stops them, Postgres only if `dev` started it |
   | `dev-server`, `dev-web` | the server, and Vite with `/api` proxied to it |
   | `check` | format, lint, race tests, coverage floors, typecheck, build, generated-code drift. **The gate.** CI runs exactly this |
   | `fmt` | apply formatting |
@@ -154,7 +155,8 @@ lint fails only in CI, on code that's clean everywhere else.
   - Security headers go on every response, with the CSP chosen by content
     type. `add_header_inherit merge` stops a location's own headers from
     dropping them.
-  - `/api/` and `/serve/` are rate-limited and body-capped. `/serve/`
+  - `/api/` and `/serve/` are rate-limited and body-capped, and a client
+    address may have 20 requests in progress across them. `/serve/`
     reaches the server unchanged. The server turns buffering off for event
     streams with `X-Accel-Buffering: no`.
   - The server is found through Docker's DNS on every request, so

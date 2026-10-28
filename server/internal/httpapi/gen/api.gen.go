@@ -482,7 +482,7 @@ type ListRunsParams struct {
 
 // StreamRunEventsParams defines parameters for StreamRunEvents.
 type StreamRunEventsParams struct {
-	// LastEventID The id of the last event received. The stream resumes after it.
+	// LastEventID The id of the last event received, a node event's number or `end`. The stream resumes after it.
 	LastEventID string `json:"Last-Event-ID,omitempty,omitzero"`
 }
 
@@ -1502,6 +1502,14 @@ func (response StreamRunEvents200TextEventStreamResponse) VisitStreamRunEventsRe
 			return err
 		}
 	}
+}
+
+type StreamRunEvents204Response struct {
+}
+
+func (response StreamRunEvents204Response) VisitStreamRunEventsResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
 }
 
 type StreamRunEvents400ApplicationProblemPlusJSONResponse struct {

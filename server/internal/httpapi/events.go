@@ -15,26 +15,47 @@ import (
 	"github.com/Beasr1/conduit/server/internal/runner"
 )
 
-// keepAlive is how often an idle stream sends a comment line, well inside
-// nginx's 40 s proxy_read_timeout.
-const keepAlive = 15 * time.Second
+const (
+	// keepAlive is how often an idle stream sends a comment line, well
+	// inside nginx's 40 s proxy_read_timeout.
+	keepAlive = 15 * time.Second
+	// writeWait bounds each write. It takes the place of the server's
+	// WriteTimeout, which would cut a stream that outlives it. Clearing the
+	// deadline instead would let a client that stops reading hold its
+	// handler, and the connection, for ever.
+	writeWait = 10 * time.Second
+)
 
-// eventStream writes a run's events as server-sent events, each flushed as
-// it comes. The generated response type copies a reader to the end before
-// anything is flushed.
+// events is what a stream reads: a run's events in order, the run's own
+// last, then io.EOF. *runner.Watch is the one implementation; the tests
+// have their own.
+type events interface {
+	Next(ctx context.Context) ([]runner.Event, error)
+}
+
+// eventStream writes a run's events as server-sent events, each batch
+// flushed as it comes. The generated response type copies a reader to the
+// end before anything is flushed.
 type eventStream struct {
-	ctx   context.Context // the request's: done once the client goes away
-	watch *runner.Watch
-	log   *slog.Logger
+	ctx     context.Context // the request's: done once the client goes away
+	events  events
+	log     *slog.Logger
+	release func() // frees the stream's place under the cap; nil for none
 }
 
 func (s eventStream) VisitStreamRunEventsResponse(w http.ResponseWriter) error {
-	defer s.watch.Close()
+	if s.release != nil {
+		defer s.release()
+	}
 	rc := http.NewResponseController(w)
-	// The server's WriteTimeout would cut the stream off. It ends with its
-	// run, or its client, instead.
-	if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		return fmt.Errorf("clear the write deadline: %w", err)
+	deadline := func() error {
+		if err := rc.SetWriteDeadline(time.Now().Add(writeWait)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return err
+		}
+		return nil
+	}
+	if err := deadline(); err != nil {
+		return fmt.Errorf("set the write deadline: %w", err)
 	}
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
@@ -43,72 +64,78 @@ func (s eventStream) VisitStreamRunEventsResponse(w http.ResponseWriter) error {
 	w.WriteHeader(http.StatusOK)
 
 	// Once the status is out, an error can't change the answer: a write
-	// that fails means the client has gone, and the stream just ends.
-	send := func(e runner.Event) bool {
-		b, err := eventBytes(e)
-		if err != nil {
-			s.log.ErrorContext(s.ctx, "encode a run event", "err", err)
+	// that fails or times out means the client has gone, or stopped reading,
+	// and the stream just ends.
+	send := func(b []byte) bool {
+		if deadline() != nil {
 			return false
 		}
-		if _, err := w.Write(b); err != nil {
-			return false
-		}
-		return rc.Flush() == nil
+		_, err := w.Write(b)
+		return err == nil
 	}
-	for _, e := range s.watch.Events {
-		if !send(e) {
-			return nil
-		}
-	}
-	if s.watch.Live == nil || rc.Flush() != nil {
+	flush := func() bool { return rc.Flush() == nil }
+	if !flush() {
 		return nil
 	}
-	tick := time.NewTicker(keepAlive)
-	defer tick.Stop()
 	for {
-		select {
-		case e, ok := <-s.watch.Live:
-			// Closed early, this client fell behind: it reconnects with
-			// Last-Event-ID and catches up.
-			if !ok || !send(e) || e.Run != nil {
+		wait, cancel := context.WithTimeout(s.ctx, keepAlive)
+		batch, err := s.events.Next(wait)
+		cancel()
+		switch {
+		case errors.Is(err, io.EOF):
+			return nil
+		case errors.Is(err, context.DeadlineExceeded) && s.ctx.Err() == nil:
+			if !send([]byte(": keep-alive\n\n")) || !flush() {
 				return nil
 			}
-		case <-tick.C:
-			if _, err := io.WriteString(w, ": keep-alive\n\n"); err != nil || rc.Flush() != nil {
+			continue
+		case err != nil:
+			if s.ctx.Err() == nil {
+				s.log.ErrorContext(s.ctx, "read a run's events", "err", err)
+			}
+			return nil
+		}
+		for _, e := range batch {
+			b, err := eventBytes(e)
+			if err != nil {
+				s.log.ErrorContext(s.ctx, "encode a run event", "err", err)
 				return nil
 			}
-		case <-s.ctx.Done():
+			if !send(b) {
+				return nil
+			}
+		}
+		if !flush() {
 			return nil
 		}
 	}
 }
 
-// eventBytes is one event as the stream sends it: its id, unless it has
-// none, its name, and its data as JSON on one line. encoding/json escapes
-// line breaks inside strings, and compacts raw values, so the data never
-// spans lines.
+// eventBytes is one event as the stream sends it: its id, its name, and its
+// data as JSON on one line. A node event's id is its number; the run's is
+// `end`, which a reconnect sends back to be told there's nothing more.
+// encoding/json escapes line breaks inside strings, and compacts raw
+// values, so the data never spans lines.
 func eventBytes(e runner.Event) ([]byte, error) {
-	var name string
-	var data any
+	var b bytes.Buffer
 	switch {
 	case e.Node != nil:
-		name, data = "node", nodeEventOut(*e.Node)
+		j, err := json.Marshal(nodeEventOut(*e.Node))
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(&b, "id: %d\nevent: node\ndata: %s\n\n", e.Seq, j)
 	case e.Run != nil:
 		run, err := runOut(*e.Run)
 		if err != nil {
 			return nil, err
 		}
-		name, data = "run", run
+		j, err := json.Marshal(run)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(&b, "id: end\nevent: run\ndata: %s\n\n", j)
 	}
-	j, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-	var b bytes.Buffer
-	if e.Seq > 0 {
-		fmt.Fprintf(&b, "id: %d\n", e.Seq)
-	}
-	fmt.Fprintf(&b, "event: %s\ndata: %s\n\n", name, j)
 	return b.Bytes(), nil
 }
 

@@ -4,11 +4,10 @@ No-code API orchestration. Users compose upstream API calls into a DAG,
 using a graph editor or a page-by-page builder, and map data between steps
 with JSONata. A Go engine runs it, fanning out in parallel.
 
-**Status: plan 03 in progress; phases A and B are built.** The server
-stores workflows and their revisions, runs them in the background with
-live events, and serves published ones at /serve/{slug}. Phase C, the dev
-loop, is left; it's in docs/plans/03-api.md. The bigger picture is
-docs/plans/README.md.
+**Status: plan 03 is done (2026-10-27).** The server stores workflows and
+their revisions, runs them in the background with live events, and serves
+published ones at /serve/{slug}. Next is plan 04, the graph editor, not
+yet written. The bigger picture is docs/plans/README.md.
 
 ## Read before working
 
@@ -58,6 +57,7 @@ just                list recipes
 just setup          create .env; install the pinned golangci-lint (.tools/bin) and web dependencies
 just db-up          Postgres on 127.0.0.1:5432; db-reset deletes it and starts afresh
 just migrate        apply migrations; `just migrate status` lists them
+just dev            Postgres, the server and the web app together; Ctrl-C stops them
 just dev-server     API server on http://127.0.0.1:8080, after db-up and migrate
 just dev-web        web app on http://127.0.0.1:5173; /api is proxied to the server
 just check          the gate: format, lint, race tests, coverage floors, typecheck, build, stale generated code
@@ -80,6 +80,10 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`.
   `server/.env` for the server. `just setup` makes both from their
   `.env.example`. Store and HTTP tests need Postgres: `just test` and
   `just check` start it.
+- One server per database. At startup a server marks every run still
+  running as failed (D8), so `just dev` and `just up`, which share the
+  compose Postgres, shouldn't run at once, and a deploy must stop the old
+  server before starting the new one.
 - Coverage floors live in the justfile. Raise one when coverage rises;
   never lower one to get `just check` passing.
 - All outbound HTTP goes through `internal/upstream`, which applies the

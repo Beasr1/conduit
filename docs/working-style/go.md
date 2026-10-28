@@ -100,9 +100,11 @@ server/
   silently keeps the old mux, and method patterns answer 404 (measured in
   the learning repo's go-services file 10).
 - `http.Server` sets `ReadHeaderTimeout`, `ReadTimeout`, `IdleTimeout`, and
-  `WriteTimeout`. The event stream clears its own write deadline through
-  `http.ResponseController`, and sends a comment line every 15 s inside
-  nginx's 40 s read timeout.
+  `WriteTimeout`. The event stream sets a 10 s deadline before each write
+  instead, through `http.ResponseController`: clearing it would let a
+  client that stops reading hold the handler for ever. A comment line
+  every 15 s keeps it inside nginx's 40 s read timeout. Open streams are
+  capped like runs: `CONDUIT_MAX_STREAMS`, then `503`.
 - `http.MaxBytesReader` on every request body: 1 MiB, nginx's limit too.
 - Unknown JSON fields are refused, not dropped. The generated server
   decodes with a plain `json.Decoder`, which ignores them, so a middleware

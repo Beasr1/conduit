@@ -8,12 +8,14 @@ import (
 	"github.com/Beasr1/conduit/server/internal/store"
 )
 
-// Event is one entry in a run's event stream. Seq numbers them from 1, in
-// order, so a client that reconnects can say what it already has.
+// Event is one entry in a run's event stream. Node events are numbered from
+// 1, in order, so a client that reconnects can say what it already has. The
+// run's own event is always the last, and has no number: its stream id is
+// `end`.
 type Event struct {
-	Seq  int
+	Seq  int        // a node event's number; 0 on the run's event
 	Node *NodeEvent // a node's progress
-	Run  *store.Run // the run as recorded once it ended: always the last event
+	Run  *store.Run // the run as recorded once it ended
 }
 
 // NodeEvent is a node starting, retrying or ending.
@@ -26,29 +28,26 @@ type NodeEvent struct {
 	Failure    *Failure // on the event that ends a failed node
 }
 
-const (
-	// keep is how long an ended run's events stay in memory, for a client
-	// that connects late or reconnects.
-	keep = time.Minute
-	// watchBuffer is how far a watcher may fall behind before it's dropped.
-	// A dropped client reconnects and catches up from the log, so a slow
-	// one never slows the run.
-	watchBuffer = 64
-)
+// keep is how long an ended run's events stay in memory, for a client that
+// connects late or reconnects.
+const keep = time.Minute
 
-// hub holds the event logs of runs in progress and runs that ended in the
-// last minute.
+// hub holds the event logs of runs in progress and of runs that ended in the
+// last minute. A client following a run is a position in its log: it takes
+// what's after its position, then waits for the log to grow. No client has a
+// buffer of its own, so a slow one is never dropped, and never slows the run.
 type hub struct {
 	mu   sync.Mutex
 	logs map[string]*eventLog
 }
 
 // eventLog holds a run's node events. The run's own last event isn't kept:
-// it can carry 256 KiB of output, and it's in the database.
+// it can carry 1 MiB of input and 256 KiB of output, and it's in the
+// database.
 type eventLog struct {
-	events   []Event
-	end      int // the run event's Seq once the run has ended, else 0
-	watchers map[chan Event]struct{}
+	events  []Event
+	ended   bool
+	changed chan struct{} // closed, and replaced, each time the log grows or ends
 }
 
 func newHub() *hub { return &hub{logs: make(map[string]*eventLog)} }
@@ -56,43 +55,25 @@ func newHub() *hub { return &hub{logs: make(map[string]*eventLog)} }
 func (h *hub) open(runID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.logs[runID] = &eventLog{watchers: make(map[chan Event]struct{})}
+	h.logs[runID] = &eventLog{changed: make(chan struct{})}
 }
 
-// publish appends e to the run's log and sends it to every watcher. A
-// watcher whose buffer is full is dropped: its channel is closed.
+// publish appends e to the run's log and wakes everyone waiting on it.
 func (h *hub) publish(runID string, e NodeEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	l := h.logs[runID]
-	ev := Event{Seq: len(l.events) + 1, Node: &e}
-	l.events = append(l.events, ev)
-	for ch := range l.watchers {
-		select {
-		case ch <- ev:
-		default:
-			close(ch)
-			delete(l.watchers, ch)
-		}
-	}
+	l.events = append(l.events, Event{Seq: len(l.events) + 1, Node: &e})
+	l.wake()
 }
 
-// end sends the run's last event to every watcher and closes their
-// channels. The log is forgotten a minute later.
-func (h *hub) end(runID string, final store.Run) {
+// end marks the run's log ended, once the run is recorded, and wakes
+// everyone waiting on it. The log is forgotten a minute later.
+func (h *hub) end(runID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	l := h.logs[runID]
-	l.end = len(l.events) + 1
-	ev := Event{Seq: l.end, Run: &final}
-	for ch := range l.watchers {
-		select {
-		case ch <- ev:
-		default: // it fell behind; it reconnects and gets the event from the database
-		}
-		close(ch)
-	}
-	l.watchers = nil
+	h.logs[runID].ended = true
+	h.logs[runID].wake()
 	time.AfterFunc(keep, func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -100,32 +81,25 @@ func (h *hub) end(runID string, final store.Run) {
 	})
 }
 
-// watch returns the run's node events numbered after after, and its
-// number for the run's last event, or 0 while it runs. While it runs, live
-// gets each event from here on; the caller must call unwatch with it. ok is
-// false if the hub has no log for the run.
-func (h *hub) watch(runID string, after int) (events []Event, end int, live chan Event, ok bool) {
+func (l *eventLog) wake() {
+	close(l.changed)
+	l.changed = make(chan struct{})
+}
+
+// since returns the run's node events numbered after after, whether the run
+// has ended, and a channel that's closed when either changes. ok is false if
+// the hub has no log for the run.
+func (h *hub) since(runID string, after int) (events []Event, ended bool, changed <-chan struct{}, ok bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	l, ok := h.logs[runID]
 	if !ok {
-		return nil, 0, nil, false
+		return nil, false, nil, false
 	}
-	if after < len(l.events) {
-		events = append(events, l.events[max(after, 0):]...)
+	if n := len(l.events); after < n {
+		// Capped, so nothing the caller does with it can reach entries
+		// appended later.
+		events = l.events[max(after, 0):n:n]
 	}
-	if l.end == 0 {
-		live = make(chan Event, watchBuffer)
-		l.watchers[live] = struct{}{}
-	}
-	return events, l.end, live, true
-}
-
-// unwatch stops sending to live, if the hub still is.
-func (h *hub) unwatch(runID string, live chan Event) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if l, ok := h.logs[runID]; ok {
-		delete(l.watchers, live)
-	}
+	return events, l.ended, l.changed, true
 }

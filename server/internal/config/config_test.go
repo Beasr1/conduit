@@ -34,6 +34,7 @@ func TestLoad_DefaultsWhenUnset(t *testing.T) {
 		DatabaseURL:     dbURL,
 		UpstreamPorts:   []uint16{80, 443},
 		MaxRuns:         32,
+		MaxStreams:      256,
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("Load() = %+v, want %+v", cfg, want)
@@ -52,6 +53,7 @@ func TestLoad_ReadsEveryVariable(t *testing.T) {
 		"CONDUIT_ALLOW_PRIVATE_NETWORKS": "true",
 		"CONDUIT_UPSTREAM_PORTS":         "443, 8443",
 		"CONDUIT_MAX_RUNS":               "4",
+		"CONDUIT_MAX_STREAMS":            "8",
 	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -67,6 +69,7 @@ func TestLoad_ReadsEveryVariable(t *testing.T) {
 		AllowPrivateNetworks: true,
 		UpstreamPorts:        []uint16{443, 8443},
 		MaxRuns:              4,
+		MaxStreams:           8,
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("Load() = %+v, want %+v", cfg, want)
@@ -93,6 +96,8 @@ func TestLoad_RejectsInvalidValues(t *testing.T) {
 		{"no ports", map[string]string{"CONDUIT_UPSTREAM_PORTS": ""}, "CONDUIT_UPSTREAM_PORTS"},
 		{"unparsable run cap", map[string]string{"CONDUIT_MAX_RUNS": "many"}, "CONDUIT_MAX_RUNS"},
 		{"zero run cap", map[string]string{"CONDUIT_MAX_RUNS": "0"}, "at least 1"},
+		{"unparsable stream cap", map[string]string{"CONDUIT_MAX_STREAMS": "lots"}, "CONDUIT_MAX_STREAMS"},
+		{"zero stream cap", map[string]string{"CONDUIT_MAX_STREAMS": "0"}, "CONDUIT_MAX_STREAMS: 0 must be at least 1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

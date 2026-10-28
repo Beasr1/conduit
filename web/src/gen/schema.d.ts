@@ -247,9 +247,9 @@ export interface paths {
         };
         /**
          * Follow a run as it happens
-         * @description Server-sent events. Each node's progress is an event named `node`, with a NodeEvent as its data. The run's end is an event named `run`, with the Run as its data, and the stream closes after it. Each event's `id` is its number in the run.
+         * @description Server-sent events. Each node's progress is an event named `node`, with a NodeEvent as its data and its number in the run as its `id`. The run's end is an event named `run`, with the Run as its data and the id `end`, and the stream closes after it.
          *
-         *     A client that connects late, or reconnects with Last-Event-ID, gets the events it missed while the run goes on and for a minute after it ends. After that the stream sends only the `run` event, without an id. A comment line arrives every 15 s while nothing else does.
+         *     A client that connects late, or reconnects with Last-Event-ID, gets the node events after that id, then the rest as they happen. They're kept until a minute after the run ends; after that, it gets only the `run` event. A reconnect with Last-Event-ID `end` gets 204, so an EventSource stops reconnecting. A comment line arrives every 15 s while nothing else does.
          */
         get: operations["streamRunEvents"];
         put?: never;
@@ -907,7 +907,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The id of the last event received. The stream resumes after it. */
+                /** @description The id of the last event received, a node event's number or `end`. The stream resumes after it. */
                 "Last-Event-ID"?: string;
             };
             path: {
@@ -925,6 +925,13 @@ export interface operations {
                 content: {
                     "text/event-stream": string;
                 };
+            };
+            /** @description The client already has the run's last event, so there's nothing more to send. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];

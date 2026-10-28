@@ -13,6 +13,7 @@
 //	                          addresses: local development only. Default false
 //	CONDUIT_UPSTREAM_PORTS    the ports workflows may call, default 80,443
 //	CONDUIT_MAX_RUNS          runs in progress at once, default 32
+//	CONDUIT_MAX_STREAMS       run event streams open at once, default 256
 package config
 
 import (
@@ -37,6 +38,7 @@ type Config struct {
 	AllowPrivateNetworks bool
 	UpstreamPorts        []uint16
 	MaxRuns              int
+	MaxStreams           int
 }
 
 // Load reads the settings through lookup, which is os.LookupEnv in main and a
@@ -51,6 +53,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		ShutdownTimeout: 20 * time.Second,
 		UpstreamPorts:   []uint16{80, 443},
 		MaxRuns:         32,
+		MaxStreams:      256,
 	}
 
 	var errs []error
@@ -95,6 +98,13 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		}
 		cfg.MaxRuns = n
 	}
+	if v, ok := lookup("CONDUIT_MAX_STREAMS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("CONDUIT_MAX_STREAMS: %q is not a whole number", v))
+		}
+		cfg.MaxStreams = n
+	}
 	if err := errors.Join(errs...); err != nil {
 		return Config{}, err
 	}
@@ -118,6 +128,9 @@ func (c Config) Validate() error {
 	}
 	if c.MaxRuns < 1 {
 		errs = append(errs, fmt.Errorf("CONDUIT_MAX_RUNS: %d must be at least 1", c.MaxRuns))
+	}
+	if c.MaxStreams < 1 {
+		errs = append(errs, fmt.Errorf("CONDUIT_MAX_STREAMS: %d must be at least 1", c.MaxStreams))
 	}
 	if u, err := url.Parse(c.DatabaseURL); c.DatabaseURL == "" || err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
 		// The value isn't echoed: it holds the database password.

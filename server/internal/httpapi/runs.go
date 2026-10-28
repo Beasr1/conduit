@@ -78,12 +78,21 @@ func (a *api) GetRun(ctx context.Context, req gen.GetRunRequestObject) (gen.GetR
 
 func (a *api) StreamRunEvents(ctx context.Context, req gen.StreamRunEventsRequestObject) (gen.StreamRunEventsResponseObject, error) {
 	after := 0
-	if id := req.Params.LastEventID; id != "" {
+	switch id := req.Params.LastEventID; id {
+	case "end":
+		// The client has the run's own event, so there's nothing more. 204
+		// is how a stream says so: an EventSource stops reconnecting.
+		if _, err := a.store.Run(ctx, req.ID); err != nil {
+			return nil, err
+		}
+		return gen.StreamRunEvents204Response{}, nil
+	case "":
+	default:
 		n, err := strconv.Atoi(id)
 		if err != nil || n < 0 {
 			return nil, &problem{
 				status: http.StatusBadRequest, code: "invalid_request",
-				detail: "Last-Event-ID must be the id of an event from this stream, a whole number.",
+				detail: "Last-Event-ID must be the id of an event from this stream: a whole number, or end.",
 			}
 		}
 		after = n
@@ -98,7 +107,15 @@ func (a *api) StreamRunEvents(ctx context.Context, req gen.StreamRunEventsReques
 	if err != nil {
 		return nil, err
 	}
-	return eventStream{ctx: ctx, watch: w, log: a.log}, nil
+	select {
+	case a.streams <- struct{}{}:
+	default:
+		return nil, &problem{
+			status: http.StatusServiceUnavailable, code: "busy", retryAfter: 5,
+			detail: "Too many event streams are open. Try again shortly.",
+		}
+	}
+	return eventStream{ctx: ctx, events: w, log: a.log, release: func() { <-a.streams }}, nil
 }
 
 func (a *api) ServeWorkflow(ctx context.Context, req gen.ServeWorkflowRequestObject) (gen.ServeWorkflowResponseObject, error) {

@@ -26,15 +26,16 @@ var (
 
 func TestMain(m *testing.M) {
 	os.Exit(storetest.Run(m, func(s *store.Store, _ string) {
-		db, router = s, newRouter(s, runner.Options{})
+		db, router = s, newRouter(s, runner.Options{}, 0)
 	}))
 }
 
 // newRouter's runs reach httptest upstreams, which listen on loopback.
-func newRouter(s *store.Store, o runner.Options) http.Handler {
+// maxStreams 0 means the default.
+func newRouter(s *store.Store, o runner.Options, maxStreams int) http.Handler {
 	log := slog.New(slog.DiscardHandler)
 	runs := runner.New(s, upstream.New(upstream.Options{AllowPrivateNetworks: true}), log, o)
-	return NewRouter(Deps{Store: s, Runner: runs, Token: testToken, Log: log})
+	return NewRouter(Deps{Store: s, Runner: runs, Token: testToken, Log: log, MaxStreams: maxStreams})
 }
 
 // reply is what came back. A struct of its own rather than *http.Response,

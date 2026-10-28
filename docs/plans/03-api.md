@@ -1,7 +1,8 @@
 # 03 — API
 
-Status: accepted 2026-10-26. Phases A and B are built; phase C is next. All seven
-questions are answered (Answers, at the end), and D4, D5, D8 and D9 are accepted.
+Status: done 2026-10-27. All three phases are built. CI first ran green, Postgres
+included, on phase B. All seven questions are answered (Answers, at the end), and
+D4, D5, D8 and D9 are accepted.
 
 ## Goal
 
@@ -195,25 +196,34 @@ The validator is santhosh-tekuri/jsonschema v6.0.3:
   default 32. Past it, a start gets `503` with `Retry-After`.
 - **At startup**, every run still `running` is marked `failed` with code
   `interrupted` (roadmap item 9). That's only safe with one server process,
-  which is D7 and D8.
+  which is D7 and D8. A deploy counts: the old server has to stop before the
+  new one starts. Compose does that. Kubernetes' default rolling update
+  doesn't: even one replica gets a second pod while the update runs, so it
+  would need the Recreate strategy.
 
 **The event stream.**
 - **Events:**
   - `node` (started, retrying, then the end with status and summary);
   - `run` (the end, with status and output or error).
-  - Each has an `id`: its sequence number in the run.
+  - A `node` event's `id` is its number in the run, and the `run`
+    event's is `end`. A reconnect with `Last-Event-ID: end` gets
+    `204 No Content`, which tells an `EventSource` to stop reconnecting
+    (WHATWG HTML §9.2).
 - **Replay:**
   - A live run's events stay in memory until a minute after it ends, so a
     client that connects late, or reconnects with `Last-Event-ID`, gets
     everything it missed.
   - After that the stream sends only the final `run` event, and
     `GET /v1/runs/{id}` has the details.
-- **A slow client** has a buffered channel. If it fills, that client is
-  dropped and reconnects, rather than slowing the run.
+- **A slow client** is a position in the run's log: it takes what's after
+  its position, then waits for more. No client has a buffer of its own, so
+  a slow one is never dropped, and never slows the run.
 - **Proxies and timeouts:**
-  - The handler clears its write deadline through
-    `http.ResponseController`, since the server's 35 s `WriteTimeout`
-    would cut the stream.
+  - Each write gets its own 10 s deadline through
+    `http.ResponseController`, in place of the server's 35 s
+    `WriteTimeout`, which would cut the stream. Clearing the deadline
+    instead would let a client that stops reading hold its handler, and
+    the connection, for ever.
   - It sends `X-Accel-Buffering: no`, which nginx documents as turning off
     buffering for that response.
   - A `:` comment every 15 s keeps the stream inside nginx's 40 s
@@ -250,6 +260,7 @@ revision synchronously.
 | `CONDUIT_ALLOW_PRIVATE_NETWORKS` | `false` | local development only |
 | `CONDUIT_UPSTREAM_PORTS` | `80,443` | |
 | `CONDUIT_MAX_RUNS` | `32` | |
+| `CONDUIT_MAX_STREAMS` | `256` | run event streams open at once (added 2026-10-28) |
 
 `server/.env.example` lists them with development values. Setup settings
 (compose's passwords, the tests' database URLs) are in the root
@@ -289,7 +300,8 @@ revision synchronously.
 - **New recipes:**
   - `just db-up`, `db-reset`, `migrate`;
   - `just dev`, which starts the database, the server and Vite together and
-    stops them all on Ctrl-C.
+    stops them all on Ctrl-C. Postgres only if `just dev` started it: the
+    tests and `just up` share the container.
 - **Dependabot** gains the `postgres` image, with a rule ignoring major
   versions.
 - **Versions** (checked 2026-10-25): pgx v5.11.0 (2026-09-07), goose
@@ -392,8 +404,54 @@ Built differently from the plan above, and why:
   06's, with credentials.
 - **`runner` has a coverage floor**, 92.
 
-**Phase C: development loop**
-- [ ] `just dev`; CLAUDE.md, go.md, repo.md and the roadmap updated.
+**Changed on 2026-10-28**, after measurements made for the learning
+repo's api-orchestration file 08 (these replace what phase B built):
+- **No client is dropped.** A client 64 events behind was dropped and had
+  to reconnect. Each client is a position in the run's log now, with no
+  queue of its own to overflow.
+- **Each write has its own deadline.** The stream cleared its deadline, so
+  a client that stopped reading would hold its handler for good once the
+  socket buffers filled, and a single run event can be over 1 MiB. A test
+  now writes into a pipe that nobody reads and sees the stream end after
+  the deadline.
+- **Open requests are capped, per client and in total** (asked for on
+  2026-10-28). A rate limit counts a request once, when it starts, so it
+  couldn't stop one client piling up event streams or slow served calls.
+  - nginx allows each client address 20 requests in progress across `/api/`
+    and `/serve/`, answered `429`. Seen through the stack: with 20 held, the
+    21st got `429`.
+  - The server allows `CONDUIT_MAX_STREAMS` open streams, 256 by default,
+    answered `503`, for when nginx isn't in front.
+  - Until plan 07's caller keys, a client is an address. Behind a proxy
+    that ends TLS, nginx needs the real address passed on (06), or every
+    client shares one limit.
+- **The stream ends with `id: end`, then a 204.** An `EventSource`
+  reconnects after every close until it gets a 204. Before, a reconnect
+  after the end got an empty 200, and once the log was gone the run event
+  had no id.
+
+**Phase C: development loop** (built 2026-10-27)
+- [x] `just dev`; CLAUDE.md, go.md, repo.md and the roadmap updated.
+
+Seen on 2026-10-27:
+- **Ctrl-C**, sent to `just dev`'s process group as a terminal does,
+  stopped the server (through its graceful shutdown) and Vite within
+  0.1 s, leaving neither port in use. Postgres stayed up when it had been
+  running before, and stopped when `just dev` had started it.
+- **A server that can't start**, with port 8080 taken, made `just dev` stop
+  Vite and exit 1, saying why.
+- **On macOS's bash 3.2**: no `wait -n`, so it polls once a second for
+  either process ending.
+
+Built differently from the plan above, and why:
+- **CI was red from the engine commit on** (2026-10-25), and the log showed
+  why. A guardrail test built a million-item cross product and expected
+  the sequence limit to stop it, but gnata checks the limit only once the
+  product is built. On CI's runner under `-race`, the 500 ms timeout fired
+  first: building it took 111 ms here and over 500 ms there. The test now
+  builds 102,400 items, just past the limit, in 12 ms. It's still the
+  sequence limit that stops it, with room to spare. Two new tests' 300 ms
+  budgets went to 1 s for the same reason.
 
 Each phase ends with `just check` green and is committed on its own.
 

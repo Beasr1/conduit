@@ -77,7 +77,7 @@ func serve(ctx context.Context, stop context.CancelFunc, cfg config.Config) erro
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(httpapi.Deps{Store: db, Runner: runs, Token: cfg.APIToken, Log: log}),
+		Handler:           httpapi.NewRouter(httpapi.Deps{Store: db, Runner: runs, Token: cfg.APIToken, Log: log, MaxStreams: cfg.MaxStreams}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		// Just above the 30 s default for served runs (roadmap, execution

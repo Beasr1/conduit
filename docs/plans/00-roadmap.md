@@ -1,7 +1,7 @@
 # 00 — Roadmap
 
 Status: proposed. Each decision's own status is in the table below; D2,
-D3, D4–D9, D12, D15, D16, D18 and D19 are decided. Updated 2026-10-26.
+D3, D4–D9, D12, D15, D16, D18 and D19 are decided. Updated 2026-10-27.
 
 ## Goal
 
@@ -199,9 +199,10 @@ Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
     - Success returns 200 with the result of the `output` expression.
     - An upstream failure returns 502 and a timeout returns 504, both as
       problem details naming the failed node. Conduit is acting as a
-      gateway here (RFC 9110 §15.6.3, §15.6.5).
-    - Served runs get a shorter default timeout than editor runs (30 s,
-      set per workflow). The server's `WriteTimeout` sits just above it,
+      gateway here (RFC 9110 §15.6.3, §15.6.5). The workflow's own failure,
+      such as an expression, returns 500 (plan 03, answer 6).
+    - Served runs get a shorter timeout than editor runs: 30 s, for every
+      workflow in v1. A per-workflow setting can come when one needs it. The server's `WriteTimeout` sits just above it,
       so the 504 gets out before the connection is cut (learning repo,
       go-services file 03).
     - The endpoint always runs the current published version, so
@@ -303,8 +304,8 @@ can do.
 |---|---|---|
 | 01 foundation | skeleton on both sides, `just`, CI, gates | `just check` green locally and in CI; `just dev` serves a page showing a green health badge |
 | 02 engine | definition types, validation, scheduler, upstream caller, transform | the spec example runs end to end in a test against `httptest` upstreams; `-race` clean; SSRF and guardrail tests pass |
-| 03 api | persistence, REST, SSE, serving. Also, moved from 01: Postgres in compose, pgx, goose, `migrate`, `/readyz`, `.env.example`, `just dev`, openapi-fetch | through the API: create and version a workflow, start a run, stream its events, inspect node runs. A published workflow answers at its own endpoint, with 400, 502 and 504 as problem details |
-| 04 graph-editor | build, edit, save and run in graph mode. Also, moved from 01: Tailwind 4 and shadcn, React Router, `env.ts`, lucide, sonner | the spec example built and run from the browser, statuses updating live |
+| 03 api | persistence, REST, SSE, serving. Also, moved from 01: Postgres in compose, pgx, goose, `migrate`, `/readyz`, `.env.example`, `just dev` | through the API: create and version a workflow, start a run, stream its events, inspect node runs. A published workflow answers at its own endpoint, with 400, 502 and 504 as problem details |
+| 04 graph-editor | build, edit, save and run in graph mode. Also, moved from 01: Tailwind 4 and shadcn, React Router, `env.ts`, lucide, sonner; from 03: openapi-fetch, and the upstream library | the spec example built and run from the browser, statuses updating live |
 | 05 page-mode | step builder over the same definition | the same example built in page mode; switching modes keeps the definition intact |
 | 06 hardening | credentials, limits, images, observability | credentials encrypted at rest and redacted everywhere; distroless image; traces on runs |
 | 07 tests-and-catalogue | dry-run; test cases; import upstreams from OpenAPI; per-workflow caller keys | a workflow's tests pass in dry-run without calling anything external; each served workflow has its own caller key |
