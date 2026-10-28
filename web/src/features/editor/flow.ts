@@ -84,6 +84,12 @@ export function toFlow(definition: Definition): Flow {
       // React Flow draws a node at a size it's given rather than measuring it.
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
+      // And it keeps a node's handle positions only when the node says it
+      // was measured. Every edit draws new node objects, so without this,
+      // each one wiped every node's handles and blinked all the edges off
+      // until React Flow measured them again: every key typed in a step's
+      // settings.
+      measured: { width: NODE_WIDTH, height: NODE_HEIGHT },
       data: { index: i },
     };
   });
