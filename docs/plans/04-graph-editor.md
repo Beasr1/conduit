@@ -289,7 +289,9 @@ Found along the way:
 - [ ] Nodes, edges, forms, the workflow's settings (input schema, output).
       So far the canvas draws the draft, and nodes can be dragged,
       connected (a cycle refused as you drop it), deleted and added. The
-      forms are next.
+      forms are next. Plan 11's brief applies to them: text on screen
+      says "step"; a step's name and the look wait for 11, and building
+      from the keyboard for page mode (05).
 - [ ] Save with `If-Match`, problems on fields, publish.
 
 **Phase C: runs**

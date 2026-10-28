@@ -74,6 +74,7 @@ resolve, but their claims weren't re-read.
 | Context files at all | ICLR 2026 paper: no significant gain, >20% more cost ✓ [27] | keep CLAUDE.md minimal; the substance lives in docs read on demand |
 | gnata | created 2026-03-10 ✓, ported with AI, pre-1.0, breaking changes in 0.6.0 ✓ | the alternatives are stale (blues/jsonata-go targets JSONata 1.5.4). Pin it exact, wrap it, golden-test it |
 | No Redis in v1 | the spec lists it | nothing in v1 needs it; agreed as D7 |
+| Lists of looks to avoid are review questions, not rules (design.md) | the design skill design.md started from [37] treats its list as rules | a list everyone follows becomes a template of its own (decided 2026-10-28) |
 
 ## gnata facts (checked ✓)
 
@@ -111,6 +112,26 @@ Zustand 5.0.15 · Tailwind 4.3.3 · Zod 4.6.7 · react-hook-form 7.90.0 ·
 Vitest 5.0.5 · MSW 3.0.3 · Playwright 1.64.1 · ESLint 10.13.0 ·
 Prettier 3.9.10 · pnpm 12.14.0 · openapi-typescript 7.13.0 ·
 openapi-fetch 0.17.0 · shadcn 4.22.1
+
+## Design (2026-10-28)
+
+design.md began from a public design skill for coding agents [37], read at
+commit ea10b21 and rewritten around the corrections made that day:
+function before looks, a designer's questions before any drawing, options
+shown rendered, and lists of looks to avoid kept as questions. Its floor is
+WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
+
+| Rule | Backed by |
+|---|---|
+| 4.5:1 for text; 3:1 for large text, controls and diagrams | WCAG 1.4.3 and 1.4.11, AA ✓ |
+| Colour is never the only signal | 1.4.1, A ✓ |
+| Focus visible and not hidden | 2.4.7 and 2.4.11, AA ✓ |
+| Everything from the keyboard | 2.1.1, A ✓ |
+| Or another view that does it all: page mode, for the canvas | conformance requirement 5.2.1 allows "a conforming alternate version", one that "provides all of the same information and functionality" and can be reached from the other ✓ |
+| Clicks for anything dragged | 2.5.7, AA ✓. React Flow's `connectOnClick` defaults to `true` (its 12.12.0 types) ✓ |
+| 24 px targets, or spaced apart | 2.5.8, AA ✓. React Flow's stylesheet draws handles 6 px wide ✓ |
+| 320 px wide without sideways scrolling; the canvas exempt | 1.4.10, AA, and its exception for "parts of the content which require two-dimensional layout" ✓ |
+| Motion off under `prefers-reduced-motion` | 2.3.3, AAA ✓; held although it's above AA |
 
 ## Links
 
@@ -150,6 +171,8 @@ openapi-fetch 0.17.0 · shadcn 4.22.1
 34. https://docs.github.com/en/actions/reference/security/secure-use
 35. https://github.com/golangci/golangci-lint/tree/main/docs/content/docs/welcome/install
 36. https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+37. https://github.com/anthropics/claude-plugins-official/tree/ea10b213686c90bb1984b2016937310e05336cf3/plugins/frontend-design
+38. https://www.w3.org/TR/WCAG22/
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

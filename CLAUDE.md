@@ -12,8 +12,8 @@ docs/plans/04-graph-editor.md; the bigger picture is docs/plans/README.md.
 ## Read before working
 
 - docs/working-style/how-i-like-to-work.md: how we work. Binding.
-- docs/working-style/go.md, web.md, repo.md: read the one for the area you
-  touch.
+- docs/working-style/go.md, web.md, design.md, repo.md: read the one for
+  the area you touch. design.md is for anything a user sees.
 - docs/plans/: what's being built, the decisions, current status.
 
 ## Hard rules

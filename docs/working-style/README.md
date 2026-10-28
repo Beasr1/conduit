@@ -9,6 +9,7 @@ for the area you're touching.
 | how-i-like-to-work.md | collaboration: git, planning, asking, verification, communication, wrap-ups |
 | go.md | `server/` code |
 | web.md | `web/` code |
+| design.md | how `web/` looks, reads and moves: when to design, what to ask first, showing options, the accessibility floor |
 | repo.md | layout, just, pinned versions, CI, config, docs |
 | sources.md | where each rule came from and how it held up against outside sources |
 

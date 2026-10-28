@@ -11,9 +11,10 @@ lives as a row in 00-roadmap.md.
 | 02 | 02-engine.md | workflow model, validation, scheduler, upstream caller, JSONata | done |
 | 03 | 03-api.md | persistence, REST, live run events, serving published workflows | done 2026-10-27 |
 | 04 | 04-graph-editor.md | build, save and run workflows in graph mode | accepted 2026-10-28; phase A committed, phase B in progress |
-| 05 | page-mode | step-by-step builder over the same definition | not started |
+| 05 | page-mode | the advanced view: steps in order, a card each with its data in and out; keyboard-first | not started |
 | 06 | hardening | credentials, limits, images, observability | not started |
 | 07 | tests-and-catalogue | dry-run; test cases; the upstream library, filled by OpenAPI import; per-workflow caller keys | not started |
 | 08 | 08-ai-authoring.md | spec in, draft workflow out; people review and publish | direction; shapes v1 seams; comes last of all |
 | 09 | later | Redis cache, cron triggers, durable runs, loops; other step types (database, queue, script, SOAP/XML, gRPC) | parked |
 | 10 | jsonata-editing | a JSONata language package for CodeMirror 6, then the editor uses it; comes after 04 and before 08 | not started |
+| 11 | 11-visual-design.md | the look: calm, precise and simple, with the emphasis on the canvas and the data | brief taken 2026-10-28; starts when 04 is done, before 05 and 10 |

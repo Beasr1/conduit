@@ -1,6 +1,7 @@
 # Web style
 
-For `web/`. Code only; how we work is in how-i-like-to-work.md.
+For `web/`. Code only; how we work is in how-i-like-to-work.md, and how
+the app looks, reads and moves is in design.md.
 
 Built from what worked in earlier React codebases, minus what went wrong in
 them (sources.md).
@@ -110,6 +111,8 @@ the API is `/api` on the page's own origin.
 - Graph mode and page mode edit the same definition. Page mode is a
   constrained view: ordered pages, and the nodes on a page run in
   parallel. A definition that doesn't fit page mode opens in graph mode.
+  That last rule is open again: page mode is now also the keyboard way to
+  build, so every definition may have to fit (roadmap, 05).
 - Node positions live in the definition's optional `ui` block, and nodes
   are draggable. The editor places a node that has no position (in a
   definition made through the API, or one just added), and the next save
