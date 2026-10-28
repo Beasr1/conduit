@@ -151,6 +151,9 @@ the API is `/api` on the page's own origin.
   one MSW server, `renderAt` for a component, `renderRoutes` for a route
   tree such as the app's, and fixtures.
 - MSW handlers and fixtures are typed from `src/gen`.
+- A test that renders the canvas calls `shimReactFlow()`
+  (`src/test/react-flow.ts`): jsdom does no layout, and React Flow measures
+  nodes before it draws edges.
 - A test fails on any console warning or error it logs
   (`src/test/console.ts`). That's how React, React Router and Base UI
   report misuse. Vitest would only print it, and hides passing tests'

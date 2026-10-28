@@ -8,7 +8,9 @@ import { routes } from "@/router";
 export function Component() {
   const signOut = useSignOut();
   return (
-    <div className="flex min-h-svh flex-col">
+    // The window's height exactly, with main scrolling inside it, so a page
+    // can fill what's left, as the editor's canvas does.
+    <div className="flex h-svh flex-col">
       <header className="flex items-center justify-between gap-4 border-b px-6 py-3">
         <Link to={routes.workflows()} className="font-heading font-semibold">
           Conduit
@@ -25,7 +27,7 @@ export function Component() {
           </Button>
         </div>
       </header>
-      <main className="flex-1 p-6">
+      <main className="min-h-0 flex-1 overflow-auto p-6">
         <Outlet />
       </main>
     </div>

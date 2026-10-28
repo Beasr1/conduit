@@ -287,6 +287,7 @@ Found along the way:
 - [x] `ui` in `schema/workflow.yaml`.
 - [x] `toFlow`, placing nodes that have no position, and their tests.
 - [ ] Nodes, edges, forms, the workflow's settings (input schema, output).
+      So far the canvas draws a saved workflow, read-only.
 - [ ] Save with `If-Match`, problems on fields, publish.
 
 **Phase C: runs**
@@ -413,7 +414,19 @@ Decided while building, without a question (each can be overruled):
   no node isn't drawn but is listed, so the problems panel can offer to
   remove it; an unknown kind draws as an `unknown` node.
 - **@dagrejs/dagre stays at 3.1.1**: 3.1.2 and 3.1.3 were under five days
-  old when it was added.
+  old when it was added. zustand is 5.0.16, six days old when added.
+- **The editor's store is made once**, from the revision the page loaded,
+  with the editor keyed by workflow id, so a refetch never touches the
+  draft.
+- **React Flow follows the system's colour mode**, as the rest of the app
+  does.
+- **The shell is the window's height**, and `main` scrolls inside it, so the
+  canvas can fill what's left of the page.
+- **Canvas tests run in jsdom with a small shim** (`src/test/react-flow.ts`)
+  for what React Flow measures with. React Flow's own guide prefers a
+  browser for this, so the canvas's look is checked in Chromium: the spec
+  example drew four nodes and four edges through nginx, light and dark, with
+  no console errors.
 
 ## Out of scope
 

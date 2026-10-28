@@ -2,41 +2,9 @@ import { expect, test } from "vitest";
 
 import { type Flow, NODE_HEIGHT, toFlow } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
+import { specExample as spec } from "@/test/fixtures";
 
-type Definition = components["schemas"]["Definition"];
 type NodeKind = components["schemas"]["NodeKind"];
-
-// The roadmap's example: user, then orders and prefs side by side, then crm.
-const spec: Definition = {
-  nodes: [
-    {
-      id: "user",
-      kind: "http",
-      request: { method: "GET", url: "https://users.example.com/v1/users" },
-    },
-    {
-      id: "orders",
-      kind: "http",
-      request: { method: "GET", url: "https://orders.example.com/v1/orders" },
-    },
-    {
-      id: "prefs",
-      kind: "http",
-      request: { method: "GET", url: "https://prefs.example.com/v1/prefs" },
-    },
-    {
-      id: "crm",
-      kind: "http",
-      request: { method: "POST", url: "https://crm.example.com/v1/contacts" },
-    },
-  ],
-  edges: [
-    { from: "user", to: "orders" },
-    { from: "user", to: "prefs" },
-    { from: "orders", to: "crm" },
-    { from: "prefs", to: "crm" },
-  ],
-};
 
 function at(flow: Flow, id: string) {
   const node = flow.nodes.find((n) => n.id === id);

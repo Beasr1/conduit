@@ -81,6 +81,9 @@ export function toFlow(definition: Definition): Flow {
       id: key,
       type: kind === "http" || kind === "transform" ? kind : "unknown",
       position: positions.get(key) ?? { x: 0, y: 0 },
+      // React Flow draws a node at a size it's given rather than measuring it.
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
       data: { index: i },
     };
   });

@@ -1,3 +1,6 @@
+/* React Flow's styles go in the base layer, below Tailwind's utilities, so a
+   class on a node or the canvas wins over them. */
+@import "@xyflow/react/dist/style.css" layer(base);
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
