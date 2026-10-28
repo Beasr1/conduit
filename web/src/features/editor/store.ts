@@ -2,7 +2,8 @@ import type { XYPosition } from "@xyflow/react";
 import { createContext, useContext } from "react";
 import { createStore, type StoreApi, useStore } from "zustand";
 
-import { move, settle } from "@/features/editor/edits";
+import { move, renameNode, settle } from "@/features/editor/edits";
+import { toFlow } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 
 type Definition = components["schemas"]["Definition"];
@@ -21,6 +22,8 @@ export interface EditorState {
   moving: Record<string, XYPosition>;
   selected: Selection;
   edit: (change: (draft: Definition) => Definition) => void;
+  // rename changes a node's id, and the selection follows it.
+  rename: (index: number, id: string) => void;
   drag: (key: string, at: XYPosition) => void;
   drop: (to: Record<string, XYPosition>) => void;
   pick: (
@@ -40,8 +43,26 @@ export function createEditorStore(draft: Definition): EditorStore {
     moving: {},
     selected: { nodes: [], edges: [] },
     // Every edit settles the draft first, so nothing placed automatically
-    // moves under the user's hands.
-    edit: (change) => set((s) => ({ draft: change(settle(s.draft)) })),
+    // moves under the user's hands. An edit that changes nothing, such as a
+    // form leaving a field as it was, leaves the draft alone, settling
+    // included.
+    edit: (change) =>
+      set((s) => {
+        const settled = settle(s.draft);
+        const draft = change(settled);
+        if (draft === settled) return s;
+        return { draft, selected: kept(s.selected, draft) };
+      }),
+    rename: (index, id) =>
+      set((s) => {
+        const settled = settle(s.draft);
+        const draft = renameNode(settled, index, id);
+        if (draft === settled) return s;
+        const from = toFlow(settled).nodes[index]?.id;
+        const to = toFlow(draft).nodes[index]?.id ?? "";
+        const nodes = s.selected.nodes.map((key) => (key === from ? to : key));
+        return { draft, selected: kept({ ...s.selected, nodes }, draft) };
+      }),
     drag: (key, at) => set((s) => ({ moving: { ...s.moving, [key]: at } })),
     // A key with "#" in it is a node whose id is missing or shared. Its place
     // can't be stored by id, so the layout goes on placing it.
@@ -65,6 +86,24 @@ export function createEditorStore(draft: Definition): EditorStore {
         return { selected: { ...s.selected, [kind]: [...on] } };
       }),
   }));
+}
+
+// kept is the part of a selection the draft still has: a deleted node drops
+// out of it, and so does an edge whose end was renamed.
+function kept(selected: Selection, draft: Definition): Selection {
+  const flow = toFlow(draft);
+  const nodes = selected.nodes.filter((key) =>
+    flow.nodes.some((n) => n.id === key),
+  );
+  const edges = selected.edges.filter((key) =>
+    flow.edges.some((e) => e.id === key),
+  );
+  if (
+    nodes.length === selected.nodes.length &&
+    edges.length === selected.edges.length
+  )
+    return selected;
+  return { nodes, edges };
 }
 
 export const EditorContext = createContext<EditorStore | null>(null);

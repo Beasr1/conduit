@@ -4,10 +4,13 @@ import {
   addNode,
   canConnect,
   connect,
+  mentions,
   move,
   NODE_ID,
   removeEdges,
   removeNodes,
+  renameNode,
+  updateNode,
 } from "@/features/editor/edits";
 import type { components } from "@/gen/schema";
 import { specExample as spec } from "@/test/fixtures";
@@ -87,6 +90,68 @@ test("removing one of two nodes that share an id keeps the id's edges", () => {
   const after = removeNodes(draft, [1]);
   expect(after.nodes).toHaveLength(2);
   expect(after.edges).toEqual(draft.edges);
+});
+
+test("an update that changes nothing gives back the same draft", () => {
+  expect(updateNode(spec, 3, (n) => ({ ...n }))).toBe(spec);
+  const after = updateNode(spec, 3, (n) => ({ ...n, id: "contacts" }));
+  expect(after.nodes[3]?.id).toBe("contacts");
+  expect(spec.nodes[3]?.id).toBe("crm");
+});
+
+test("renaming a node takes its edges and position with it", () => {
+  const placed = move(spec, { user: { x: 1, y: 2 } });
+  const after = renameNode(placed, 0, "person");
+  expect(after.nodes[0]?.id).toBe("person");
+  expect(after.edges).toEqual([
+    { from: "person", to: "orders" },
+    { from: "person", to: "prefs" },
+    { from: "orders", to: "crm" },
+    { from: "prefs", to: "crm" },
+  ]);
+  expect(after.ui?.positions).toEqual({ person: { x: 1, y: 2 } });
+});
+
+test("renaming one of two nodes that share an id leaves the id's edges", () => {
+  const draft: Definition = {
+    nodes: [
+      { id: "a", kind: "transform", expr: "1" },
+      { id: "a", kind: "transform", expr: "2" },
+      { id: "b", kind: "transform", expr: "3" },
+    ],
+    edges: [{ from: "a", to: "b" }],
+  };
+  const after = renameNode(draft, 1, "c");
+  expect(after.nodes.map((n) => n.id)).toEqual(["a", "c", "b"]);
+  expect(after.edges).toEqual(draft.edges);
+});
+
+test("mentions finds every place that still reads a node by its id", () => {
+  const draft: Definition = {
+    nodes: [
+      {
+        id: "crm",
+        kind: "http",
+        request: {
+          method: "POST",
+          url: "https://crm.example.com/{{ nodes.user.body.id }}",
+          headers: { "X-User": "{{ nodes.user.body.name }}" },
+          body: "nodes.users.body",
+        },
+      },
+      { id: "merge", kind: "transform", expr: "nodes.user.body" },
+    ],
+    edges: [{ from: "crm", to: "merge", when: "nodes.user.status = 200" }],
+    output: "nodes.merge.body",
+  };
+  expect(mentions(draft, "user")).toEqual([
+    "crm's URL",
+    "crm's headers",
+    "merge's expression",
+    "the condition on the edge from crm to merge",
+  ]);
+  expect(mentions(draft, "merge")).toEqual(["the workflow's output"]);
+  expect(mentions(draft, "a(b")).toEqual([]);
 });
 
 test.each([

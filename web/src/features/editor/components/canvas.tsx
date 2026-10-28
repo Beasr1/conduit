@@ -1,5 +1,12 @@
-import { Background, Controls, Panel, ReactFlow } from "@xyflow/react";
-import { useMemo } from "react";
+import {
+  Background,
+  Controls,
+  Panel,
+  ReactFlow,
+  useReactFlow,
+  useStore,
+} from "@xyflow/react";
+import { useEffect, useMemo } from "react";
 
 import { AddNodeDialog } from "@/features/editor/components/add-node-dialog";
 import { nodeTypes } from "@/features/editor/components/nodes";
@@ -9,8 +16,17 @@ import {
   removeEdges,
   removeNodes,
 } from "@/features/editor/edits";
-import { type FlowEdge, type FlowNode, toFlow } from "@/features/editor/flow";
+import {
+  type FlowEdge,
+  type FlowNode,
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  toFlow,
+} from "@/features/editor/flow";
 import { useEditor } from "@/features/editor/store";
+
+// The room kept between a picked step and the canvas's edge.
+const MARGIN = 24;
 
 // Canvas draws the draft and turns what's done on it into edits of the
 // draft: a drag, a new edge, a deletion. React Flow keeps nothing of its own.
@@ -88,6 +104,9 @@ export function Canvas() {
         )
       }
       deleteKeyCode={["Backspace", "Delete"]}
+      // A drag moves a step without picking it. Picking opens the step's
+      // settings, which narrows the canvas under the drag.
+      selectNodesOnDrag={false}
       colorMode="system"
       fitView
     >
@@ -97,6 +116,41 @@ export function Canvas() {
         <AddNodeDialog kind="http" />
         <AddNodeDialog kind="transform" />
       </Panel>
+      <KeepPickedInView />
     </ReactFlow>
   );
+}
+
+// KeepPickedInView pans the canvas, as little as it takes, so the one step
+// picked stays in sight. Its settings open beside the canvas and narrow it,
+// which could otherwise hide the step being edited.
+function KeepPickedInView() {
+  const picked = useEditor((s) =>
+    s.selected.nodes.length === 1 && s.selected.edges.length === 0
+      ? s.selected.nodes[0]
+      : undefined,
+  );
+  const width = useStore((s) => s.width);
+  const height = useStore((s) => s.height);
+  const flow = useReactFlow();
+  useEffect(() => {
+    const node =
+      picked === undefined ? undefined : flow.getInternalNode(picked);
+    if (!node) return;
+    const { x, y, zoom } = flow.getViewport();
+    const at = node.internals.positionAbsolute;
+    // Bring the far edge in first, then the near one, so a step wider than
+    // the canvas shows its start.
+    const shift = (start: number, size: number, room: number) => {
+      let by = 0;
+      if (start + size > room - MARGIN) by = room - MARGIN - (start + size);
+      if (start + by < MARGIN) by = MARGIN - start;
+      return by;
+    };
+    const dx = shift(at.x * zoom + x, NODE_WIDTH * zoom, width);
+    const dy = shift(at.y * zoom + y, NODE_HEIGHT * zoom, height);
+    if (dx !== 0 || dy !== 0)
+      void flow.setViewport({ x: x + dx, y: y + dy, zoom });
+  }, [picked, width, height, flow]);
+  return null;
 }

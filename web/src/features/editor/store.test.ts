@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { connect } from "@/features/editor/edits";
+import { connect, removeNodes } from "@/features/editor/edits";
 import { toFlow } from "@/features/editor/flow";
 import { createEditorStore } from "@/features/editor/store";
 import { specExample } from "@/test/fixtures";
@@ -25,6 +25,32 @@ test("a new edge doesn't move a node that was placed automatically", () => {
   const before = placed(store.getState().draft);
   store.getState().edit((d) => connect(d, "user", "crm"));
   expect(placed(store.getState().draft)).toEqual(before);
+});
+
+// Selecting a step and leaving its fields as they were mustn't count as an
+// edit, or nothing could tell an untouched draft from a changed one.
+test("an edit that changes nothing leaves the draft alone", () => {
+  const store = createEditorStore(specExample);
+  store.getState().edit((d) => d);
+  expect(store.getState().draft).toBe(specExample);
+});
+
+test("a deleted node drops out of the selection", () => {
+  const store = createEditorStore(specExample);
+  store.getState().pick("nodes", [{ id: "crm", selected: true }]);
+  store.getState().edit((d) => removeNodes(d, [3]));
+  expect(store.getState().selected.nodes).toEqual([]);
+});
+
+test("a renamed node stays selected, under its new id", () => {
+  const store = createEditorStore(specExample);
+  store.getState().pick("nodes", [{ id: "user", selected: true }]);
+  store.getState().rename(0, "person");
+  expect(store.getState().selected.nodes).toEqual(["person"]);
+  expect(store.getState().draft.edges?.[0]).toEqual({
+    from: "person",
+    to: "orders",
+  });
 });
 
 test("selection follows what the canvas picks and unpicks", () => {

@@ -29,7 +29,7 @@ const HttpNode = memo(function HttpNode({ data }: NodeProps<FlowNode>) {
     <Frame id={node.id}>
       {node.request
         ? `${node.request.method} ${node.request.url || "(no URL yet)"}`
-        : "no request yet"}
+        : "No request yet"}
     </Frame>
   );
 });
@@ -39,14 +39,14 @@ const TransformNode = memo(function TransformNode({
 }: NodeProps<FlowNode>) {
   const node = useEditor((s) => s.draft.nodes[data.index]);
   if (!node) return null;
-  return <Frame id={node.id}>{node.expr || "no expression yet"}</Frame>;
+  return <Frame id={node.id}>{node.expr || "No expression yet"}</Frame>;
 });
 
 // A draft saved with problems can hold a kind the editor doesn't know.
 const UnknownNode = memo(function UnknownNode({ data }: NodeProps<FlowNode>) {
   const node = useEditor((s) => s.draft.nodes[data.index]);
   if (!node) return null;
-  return <Frame id={node.id}>unknown kind: {node.kind}</Frame>;
+  return <Frame id={node.id}>Unknown kind: {node.kind}</Frame>;
 });
 
 // At module scope: React Flow redraws every node when this object changes.

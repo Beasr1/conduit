@@ -14,15 +14,15 @@ function typeId(value: string) {
   fireEvent.change(screen.getByLabelText("Id"), { target: { value } });
 }
 
-test("adds a node under the id it's given, checking the id as it's typed", async () => {
+test("adds a step under the id it's given, checking the id as it's typed", async () => {
   renderAt(<Editor definition={specExample} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Add HTTP node" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add HTTP step" }));
 
   typeId("Fetch");
   expect(await screen.findByText(/^A lowercase letter/)).toBeTruthy();
   typeId("user");
   expect(
-    await screen.findByText("Another node already has this id."),
+    await screen.findByText("Another step already has this id."),
   ).toBeTruthy();
 
   typeId("notify");

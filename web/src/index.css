@@ -124,6 +124,15 @@
 }
 
 @layer base {
+  /* Base UI's select hides its list's scrollbar while its scroll arrows
+     show. It would add this rule as an inline <style>, which the page's CSP
+     refuses, so it lives here (main.tsx turns those elements off). */
+  .base-ui-disable-scrollbar {
+    scrollbar-width: none;
+  }
+  .base-ui-disable-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
   * {
     @apply border-border outline-ring/50;
   }

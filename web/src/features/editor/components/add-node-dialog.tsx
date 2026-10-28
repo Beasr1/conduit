@@ -30,7 +30,7 @@ type Node = components["schemas"]["Node"];
 
 const kinds = {
   http: {
-    label: "HTTP node",
+    label: "HTTP step",
     fresh: (id: string): Node => ({
       id,
       kind: "http",
@@ -38,7 +38,7 @@ const kinds = {
     }),
   },
   transform: {
-    label: "transform node",
+    label: "transform step",
     fresh: (id: string): Node => ({ id, kind: "transform", expr: "" }),
   },
 };
@@ -62,7 +62,7 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
         )
         .refine(
           (id) => !editor.getState().draft.nodes.some((n) => n.id === id),
-          "Another node already has this id.",
+          "Another step already has this id.",
         ),
     }),
   );
@@ -97,12 +97,14 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
       <DialogTrigger render={<Button variant="outline" size="sm" />}>
         Add {label}
       </DialogTrigger>
-      <DialogContent>
+      {/* nokey: Delete or Backspace on its buttons would otherwise reach
+          the canvas and delete what's selected behind the dialog. */}
+      <DialogContent className="nokey">
         <DialogHeader>
           <DialogTitle>Add {label}</DialogTitle>
           <DialogDescription>
-            Expressions read its result as nodes.&lt;id&gt;, so give it an id
-            that says what it does.
+            Other steps read its result as nodes.&lt;id&gt;.body, so give it an
+            id that says what it does.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={form.handleSubmit(onSubmit)} noValidate>

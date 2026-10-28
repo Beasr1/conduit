@@ -26,7 +26,12 @@ export default defineConfig([
     // styles, and no classes Tailwind can't generate or can't read.
     files: ["src/**/*.{ts,tsx}"],
     plugins: { shadcn },
-    rules: Object.fromEntries(tokenRules.map((rule) => [rule, "error"])),
+    rules: {
+      ...Object.fromEntries(tokenRules.map((rule) => [rule, "error"])),
+      // nokey isn't a style: it tells React Flow to leave alone the keys
+      // pressed inside an element.
+      "shadcn/no-unknown-classes": ["error", { allow: ["nokey"] }],
+    },
   },
   {
     // shadcn's generated components use arbitrary values of their own.

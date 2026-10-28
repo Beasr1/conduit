@@ -82,6 +82,78 @@ export function connect(d: Definition, from: string, to: string): Definition {
   return { ...d, edges: [...(d.edges ?? []), { from, to }] };
 }
 
+// updateNode puts what change makes of a node in its place. A change that
+// alters nothing gives back the draft itself, so the store can skip it.
+export function updateNode(
+  d: Definition,
+  index: number,
+  change: (n: Node) => Node,
+): Definition {
+  const before = d.nodes[index];
+  if (!before) return d;
+  const after = change(before);
+  if (JSON.stringify(after) === JSON.stringify(before)) return d;
+  return { ...d, nodes: d.nodes.with(index, after) };
+}
+
+// renameNode gives a node a new id. Its edges and position go with it,
+// unless another node still has the old id: they stay with that node, which
+// the canvas already draws them on. Expressions are text and keep the old
+// id; mentions finds them.
+export function renameNode(
+  d: Definition,
+  index: number,
+  to: string,
+): Definition {
+  const from = d.nodes[index]?.id;
+  if (from === undefined || from === to) return d;
+  const nodes = d.nodes.map((n, i) => (i === index ? { ...n, id: to } : n));
+  const renamed: Definition = { ...d, nodes };
+  if (nodes.some((n) => n.id === from)) return renamed;
+  if (d.edges)
+    renamed.edges = d.edges.map((e) => ({
+      ...e,
+      from: e.from === from ? to : e.from,
+      to: e.to === from ? to : e.to,
+    }));
+  if (d.ui?.positions?.[from]) {
+    const positions = Object.fromEntries(
+      Object.entries(d.ui.positions)
+        .filter(([id]) => id !== to)
+        .map(([id, p]) => [id === from ? to : id, p]),
+    );
+    renamed.ui = { ...d.ui, positions };
+  }
+  return renamed;
+}
+
+// mentions lists the places whose text reads a node's result as
+// nodes.<id>. It's a plain text match, since the browser doesn't parse
+// JSONata, so a mention inside a string literal counts too.
+export function mentions(d: Definition, id: string): string[] {
+  if (id === "") return [];
+  // A draft saved with problems can hold any id, so it's escaped.
+  const reads = new RegExp(
+    `\\bnodes\\.${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+  );
+  const found: string[] = [];
+  const check = (place: string, ...texts: (string | undefined)[]) => {
+    if (texts.some((t) => t !== undefined && reads.test(t))) found.push(place);
+  };
+  for (const n of d.nodes) {
+    const r = n.request;
+    check(`${n.id}'s URL`, r?.url);
+    check(`${n.id}'s headers`, ...Object.values(r?.headers ?? {}));
+    check(`${n.id}'s query`, ...Object.values(r?.query ?? {}));
+    check(`${n.id}'s body`, r?.body);
+    check(`${n.id}'s expression`, n.expr);
+  }
+  for (const e of d.edges ?? [])
+    check(`the condition on the edge from ${e.from} to ${e.to}`, e.when);
+  check("the workflow's output", d.output);
+  return found;
+}
+
 // removeEdges removes edges by their places in definition.edges.
 export function removeEdges(d: Definition, indexes: number[]): Definition {
   const gone = new Set(indexes);
