@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, test } from "vitest";
 
 import { Editor } from "@/features/editor/components/editor";
-import { StepPanel } from "@/features/editor/components/step-panel";
+import { SidePanel } from "@/features/editor/components/side-panel";
 import { createEditorStore, EditorContext } from "@/features/editor/store";
 import type { components } from "@/gen/schema";
 import { specExample } from "@/test/fixtures";
@@ -66,20 +66,25 @@ test("picking a step opens its settings, and Close puts them away", async () => 
 
 // The canvas deletes what's selected on Delete or Backspace pressed anywhere
 // but in a text field, which once took the step being edited with it.
-test("Delete and Backspace on the settings' buttons leave the step alone", async () => {
-  renderAt(<Editor definition={specExample} />);
-  await pick("crm");
-  const close = await screen.findByRole("button", { name: "Close" });
-  close.focus();
-  fireEvent.keyDown(close, { key: "Backspace" });
-  fireEvent.keyUp(close, { key: "Backspace" });
-  fireEvent.keyDown(close, { key: "Delete" });
-  fireEvent.keyUp(close, { key: "Delete" });
-  // React Flow deletes asynchronously: give it its turn first.
-  await new Promise((r) => setTimeout(r));
-  expect(screen.getByText("crm")).toBeTruthy();
-  expect(screen.getByRole("complementary", { name: "HTTP step" })).toBeTruthy();
-});
+test.each(["Close", "Add HTTP step"])(
+  "Delete and Backspace on the %s button leave the step alone",
+  async (button) => {
+    renderAt(<Editor definition={specExample} />);
+    await pick("crm");
+    const target = await screen.findByRole("button", { name: button });
+    target.focus();
+    for (const key of ["Backspace", "Delete"]) {
+      fireEvent.keyDown(target, { key });
+      fireEvent.keyUp(target, { key });
+    }
+    // React Flow deletes asynchronously: give it its turn first.
+    await new Promise((r) => setTimeout(r));
+    expect(screen.getByText("crm")).toBeTruthy();
+    expect(
+      screen.getByRole("complementary", { name: "HTTP step" }),
+    ).toBeTruthy();
+  },
+);
 
 test("the URL goes into the step as it's typed", async () => {
   renderAt(<Editor definition={specExample} />);
@@ -226,7 +231,7 @@ test("typing that leaves the step as it was changes nothing", async () => {
   store.getState().pick("nodes", [{ id: "crm", selected: true }]);
   renderAt(
     <EditorContext value={store}>
-      <StepPanel />
+      <SidePanel />
     </EditorContext>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Add header" }));

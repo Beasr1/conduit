@@ -129,8 +129,11 @@ the API is `/api` on the page's own origin.
   keeps a node's handle positions only when it says it was measured, and
   every edit draws new node objects; without it, every edit blinked the
   edges off.
-- Anything over the editor that takes keys (the step panel, a dialog)
-  carries React Flow's `nokey` class. React Flow deletes the selection on
+- The response card is the canvas's, not `toFlow`'s: it isn't a node of
+  the definition. Its `#response` key keeps it out of positions,
+  connections and deletion, and the selection keeps it through edits.
+- Anything over the editor that takes keys (the side panel, the toolbar, a
+  dialog) carries React Flow's `nokey` class. React Flow deletes the selection on
   Delete or Backspace anywhere but in a text field, buttons included.
 - Blocking cycles in the UI (`isValidConnection`) is only for UX. Server
   validation is the source of truth.

@@ -286,13 +286,14 @@ Found along the way:
 **Phase B: the editor** (in progress)
 - [x] `ui` in `schema/workflow.yaml`.
 - [x] `toFlow`, placing nodes that have no position, and their tests.
-- [ ] Nodes, edges, forms, the workflow's settings (input schema, output).
-      So far the canvas draws the draft; nodes can be dragged, connected
-      (a cycle refused as you drop it), deleted and added; and a picked
-      step's settings open beside the canvas (http and transform). An
-      edge's `when` and the workflow's settings are next. Plan 11's brief
-      applies: text on screen says "step"; a step's name and the look wait
-      for 11, and building from the keyboard for page mode (05).
+- [x] Nodes, edges, forms, the workflow's settings (input schema, output).
+      The canvas draws the draft; nodes can be dragged, connected (a cycle
+      refused as you drop it), deleted and added; a side panel edits what's
+      picked: a step (3c), a connection's condition, or the response card's
+      output and output schema; a button opens the workflow's settings,
+      the input schema (3d). Plan 11's brief applies: text on screen says
+      "step" and "connection"; a step's name and the look wait for 11, and
+      building from the keyboard for page mode (05).
 - [ ] Save with `If-Match`, problems on fields, publish.
 
 **Phase C: runs**
@@ -445,6 +446,14 @@ Decided with you:
   a rule that's easier to state, for one more step per join on the canvas.
   Transform steps stay optional, for a named combine or a reshape several
   steps share.
+- **The workflow's settings open behind a button**, in the side panel, so
+  the graph stays roomy (2026-10-28). The other option showed them
+  whenever nothing was picked, keeping the panel always open.
+- **The response is a card on the canvas** (2026-10-28), the last one,
+  holding the output and its schema, so the graph shows what goes back to
+  the caller. The other option kept the output only in the settings.
+- **On screen, an edge is a "connection"** (2026-10-28); the API and code
+  keep "edge". "Edge" and "link" were the other options.
 - **A step reads every earlier step by name** (2026-10-28), as the engine
   already does (`server/internal/engine/run.go:262`). Reading only what
   points into it would make the arrows carry the data, at the cost of long
@@ -524,9 +533,11 @@ overruling:
   picks on drag by default, which opened the panel mid-drag.
 - **Retry needs attempts**: Idempotent is disabled until attempts is a
   number from 2 to 5.
-- Deliberate TODOs for plan 10's JSONata editor:
-  `web/src/features/editor/components/http-step-form.tsx:122` and
-  `web/src/features/editor/components/transform-step-form.tsx:33`.
+- Deliberate TODOs for plan 10's JSONata editor, one per expression field:
+  - `web/src/features/editor/components/http-step-form.tsx:122`
+  - `web/src/features/editor/components/transform-step-form.tsx:33`
+  - `web/src/features/editor/components/connection-form.tsx:43`
+  - `web/src/features/editor/components/response-form.tsx:39`
 
 Found in Chromium while checking 3c, and fixed:
 - **Every edit blinked all the edges off.** React Flow keeps a node's
@@ -550,6 +561,30 @@ Found in Chromium while checking 3c, and fixed:
   popup, URL, rename on Enter (focus stays), header rows, retries, close and
   reopen with everything kept, light and dark, with no CSP violations and
   no console errors.
+
+Connections, the response and the workflow's settings (step 3d). The
+three choices below were yours (Decided with you); the rest were decided
+while building:
+- **One side panel shows one thing at a time**: the picked step, connection
+  or response card, or the workflow's settings. Opening the settings puts
+  away what was picked, and picking something closes them.
+- **A connection's condition applies as it's typed**; blank removes it. A
+  conditional connection shows a small "if" on the canvas, and what it
+  says stays in the panel, so the graph carries no code.
+- **The response card is drawn by the canvas, not `toFlow`**, since it
+  isn't a node of the definition. It sits after the rightmost step, level
+  with the middle, and moves when the steps do. Its `#response` key keeps
+  it out of positions, connections and deletion; it can be picked but not
+  dragged, and a drag that starts on it pans the canvas. It says which steps
+  the output reads, by the same plain text match as the rename warning.
+- **The schema fields count once their text is a JSON object**, as numbers
+  do: until then the stored schema stays and the field says why. Format
+  rewrites the text indented.
+- **The toolbar carries `nokey` too**: Backspace on a focused toolbar button
+  deleted the picked step, like the panel's buttons before 3c's fix.
+- Checked in Chromium through nginx: the card after crm, a connection's
+  "if", the output's "Reads user, crm", the settings' Format, Backspace on
+  the toolbar, light and dark, with no CSP violations and no console errors.
 
 ## Out of scope
 

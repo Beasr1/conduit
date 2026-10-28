@@ -8,6 +8,7 @@ import {
 } from "@xyflow/react";
 import { useEffect, useMemo } from "react";
 
+import { Button } from "@/components/ui/button";
 import { AddNodeDialog } from "@/features/editor/components/add-node-dialog";
 import { nodeTypes } from "@/features/editor/components/nodes";
 import {
@@ -21,6 +22,8 @@ import {
   type FlowNode,
   NODE_HEIGHT,
   NODE_WIDTH,
+  RESPONSE,
+  responseCard,
   toFlow,
 } from "@/features/editor/flow";
 import { useEditor } from "@/features/editor/store";
@@ -38,21 +41,21 @@ export function Canvas() {
   const drag = useEditor((s) => s.drag);
   const drop = useEditor((s) => s.drop);
   const pick = useEditor((s) => s.pick);
+  const openSettings = useEditor((s) => s.openSettings);
 
   const flow = useMemo(() => toFlow(draft), [draft]);
   // Only a node that's moving or selected gets a new object, so the rest
-  // aren't redrawn.
-  const nodes = useMemo(
-    () =>
-      flow.nodes.map((n): FlowNode => {
-        const at = moving[n.id];
-        const on = selected.nodes.includes(n.id);
-        return at || on
-          ? { ...n, position: at ?? n.position, selected: on }
-          : n;
-      }),
-    [flow, moving, selected.nodes],
-  );
+  // aren't redrawn. The response card comes last, after the steps.
+  const nodes = useMemo(() => {
+    const steps = flow.nodes.map((n): FlowNode => {
+      const at = moving[n.id];
+      const on = selected.nodes.includes(n.id);
+      return at || on ? { ...n, position: at ?? n.position, selected: on } : n;
+    });
+    const card = responseCard(flow.nodes);
+    const on = selected.nodes.includes(RESPONSE);
+    return [...steps, on ? { ...card, selected: true } : card];
+  }, [flow, moving, selected.nodes]);
   const edges = useMemo(
     () =>
       flow.edges.map((e): FlowEdge =>
@@ -112,9 +115,14 @@ export function Canvas() {
     >
       <Background />
       <Controls showInteractive={false} />
-      <Panel position="top-left" className="flex gap-2">
+      {/* nokey: Delete or Backspace on these buttons would otherwise delete
+          what's selected on the canvas. */}
+      <Panel position="top-left" className="nokey flex gap-2">
         <AddNodeDialog kind="http" />
         <AddNodeDialog kind="transform" />
+        <Button variant="outline" size="sm" onClick={openSettings}>
+          Workflow settings
+        </Button>
       </Panel>
       <KeepPickedInView />
     </ReactFlow>

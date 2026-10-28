@@ -4,6 +4,7 @@ import { toFlow } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 
 type Definition = components["schemas"]["Definition"];
+type Edge = components["schemas"]["Edge"];
 type Node = components["schemas"]["Node"];
 type Position = components["schemas"]["Position"];
 
@@ -96,6 +97,34 @@ export function updateNode(
   return { ...d, nodes: d.nodes.with(index, after) };
 }
 
+// updateEdge puts what change makes of an edge in its place, as updateNode
+// does for a node.
+export function updateEdge(
+  d: Definition,
+  index: number,
+  change: (e: Edge) => Edge,
+): Definition {
+  const before = d.edges?.[index];
+  if (!before) return d;
+  const after = change(before);
+  if (JSON.stringify(after) === JSON.stringify(before)) return d;
+  return { ...d, edges: (d.edges ?? []).with(index, after) };
+}
+
+// setField gives one of the workflow's own fields a value; undefined removes
+// it. A value it already has gives back the draft itself.
+export function setField<K extends "output" | "input_schema" | "output_schema">(
+  d: Definition,
+  key: K,
+  value: Definition[K],
+): Definition {
+  if (JSON.stringify(d[key]) === JSON.stringify(value)) return d;
+  const next = { ...d };
+  if (value === undefined) delete next[key];
+  else next[key] = value;
+  return next;
+}
+
 // renameNode gives a node a new id. Its edges and position go with it,
 // unless another node still has the old id: they stay with that node, which
 // the canvas already draws them on. Expressions are text and keep the old
@@ -132,13 +161,11 @@ export function renameNode(
 // JSONata, so a mention inside a string literal counts too.
 export function mentions(d: Definition, id: string): string[] {
   if (id === "") return [];
-  // A draft saved with problems can hold any id, so it's escaped.
-  const reads = new RegExp(
-    `\\bnodes\\.${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
-  );
+  const pattern = reading(id);
   const found: string[] = [];
   const check = (place: string, ...texts: (string | undefined)[]) => {
-    if (texts.some((t) => t !== undefined && reads.test(t))) found.push(place);
+    if (texts.some((t) => t !== undefined && pattern.test(t)))
+      found.push(place);
   };
   for (const n of d.nodes) {
     const r = n.request;
@@ -152,6 +179,22 @@ export function mentions(d: Definition, id: string): string[] {
     check(`the condition on the edge from ${e.from} to ${e.to}`, e.when);
   check("the workflow's output", d.output);
   return found;
+}
+
+// reads lists the nodes an expression reads as nodes.<id>, in the
+// definition's order, by the same plain text match.
+export function reads(d: Definition, text: string | undefined): string[] {
+  if (!text) return [];
+  const ids = [...new Set(d.nodes.map((n) => n.id))];
+  return ids.filter((id) => id !== "" && reading(id).test(text));
+}
+
+// reading matches text that reads a node's result as nodes.<id>. A draft
+// saved with problems can hold any id, so it's escaped.
+function reading(id: string): RegExp {
+  return new RegExp(
+    `\\bnodes\\.${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+  );
 }
 
 // removeEdges removes edges by their places in definition.edges.

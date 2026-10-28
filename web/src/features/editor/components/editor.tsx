@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { Canvas } from "@/features/editor/components/canvas";
-import { StepPanel } from "@/features/editor/components/step-panel";
+import { SidePanel } from "@/features/editor/components/side-panel";
 import { createEditorStore, EditorContext } from "@/features/editor/store";
 import type { components } from "@/gen/schema";
 
@@ -18,7 +18,7 @@ export function Editor({ definition }: { definition: Definition }) {
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border">
           <Canvas />
         </div>
-        <StepPanel />
+        <SidePanel />
       </div>
     </EditorContext>
   );

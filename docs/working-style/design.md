@@ -69,9 +69,10 @@ any checklist, this file included.
 
 ## Words
 
-- Name things the way users would. Text on screen says "step"; code, the
-  API and expressions say "node" (`nodes.crm.body`), and wherever an
-  expression is written, the screen explains that once.
+- Name things the way users would. Text on screen says "step" and
+  "connection"; code, the API and expressions say "node" and "edge"
+  (`nodes.crm.body`), and wherever an expression is written, the screen
+  explains that once.
 - "Upstream" means only the API a step calls. Direction in the graph is
   before and after: a step runs after another, and reads earlier steps.
   Docs and code comments say it the same way.

@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 
 import {
   fromPairs,
+  readSchema,
+  showSchema,
   toPairs,
   toRequest,
   toRequestValues,
@@ -40,6 +42,24 @@ test.each([
   ["-1", null],
 ])("%j reads as %j", (text, n) => {
   expect(whole(text, 1, 300000)).toBe(n);
+});
+
+test.each([
+  ["", {}],
+  ['{"type": "object"}', { schema: { type: "object" } }],
+  ["[]", { error: "A JSON Schema is an object, in { }." }],
+  ["null", { error: "A JSON Schema is an object, in { }." }],
+])("schema text %j reads as %j", (text, read) => {
+  expect(readSchema(text)).toEqual(read);
+});
+
+test("half-typed schema text says why it doesn't count yet", () => {
+  expect(readSchema('{"type":').error).toMatch(/^Not JSON yet: /);
+});
+
+test("a stored schema starts its field formatted", () => {
+  expect(showSchema({ type: "object" })).toBe('{\n  "type": "object"\n}');
+  expect(showSchema(undefined)).toBe("");
 });
 
 const request: Request = {

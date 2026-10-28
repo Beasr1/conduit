@@ -1,6 +1,12 @@
 import { expect, test } from "vitest";
 
-import { type Flow, NODE_HEIGHT, toFlow } from "@/features/editor/flow";
+import {
+  type Flow,
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  responseCard,
+  toFlow,
+} from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 import { specExample as spec } from "@/test/fixtures";
 
@@ -71,6 +77,37 @@ test("each node and edge is drawn, joined at named handles", () => {
     data: { index: 0 },
   });
   expect(flow.undrawn).toEqual([]);
+});
+
+test("a connection with a condition is labelled", () => {
+  const flow = toFlow({
+    ...spec,
+    edges: [{ from: "user", to: "orders", when: "nodes.user.status = 200" }],
+  });
+  expect(flow.edges[0]?.label).toBe("if");
+  expect(toFlow(spec).edges[0]).not.toHaveProperty("label");
+});
+
+test("the response card goes after the rightmost step, level with the middle", () => {
+  const { nodes } = toFlow({
+    ...spec,
+    ui: {
+      positions: {
+        user: { x: 0, y: 100 },
+        orders: { x: 300, y: 0 },
+        prefs: { x: 300, y: 200 },
+        crm: { x: 600, y: 100 },
+      },
+    },
+  });
+  const card = responseCard(nodes);
+  expect(card.position).toEqual({ x: 600 + NODE_WIDTH + 80, y: 100 });
+  expect(card).toMatchObject({
+    draggable: false,
+    connectable: false,
+    deletable: false,
+  });
+  expect(responseCard([]).position).toEqual({ x: 0, y: 0 });
 });
 
 test("a draft saved with problems still draws", () => {

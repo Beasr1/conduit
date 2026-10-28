@@ -14,13 +14,20 @@ type Definition = components["schemas"]["Definition"];
 // Every node is drawn at this size, so placing nodes and drawing them agree.
 export const NODE_WIDTH = 240;
 export const NODE_HEIGHT = 72;
+// The room between one rank of the layout and the next.
+const RANK_GAP = 80;
+
+// The response card's key. "#" can't appear in a node id, so the card is
+// never stored, connected or deleted as one.
+export const RESPONSE = "#response";
 
 // A node component finds what to draw through data.index, its place in
 // definition.nodes, and an edge's panel through its place in
-// definition.edges.
+// definition.edges. The response card isn't a node of the definition; its
+// index is -1.
 export type FlowNode = Node<
   { index: number },
-  "http" | "transform" | "unknown"
+  "http" | "transform" | "unknown" | "response"
 >;
 export type FlowEdge = Edge<{ index: number }>;
 
@@ -67,6 +74,8 @@ export function toFlow(definition: Definition): Flow {
       target,
       sourceHandle: "out",
       targetHandle: "in",
+      // A condition shows as a small label; what it says is in the panel.
+      ...(e.when ? { label: "if" } : {}),
       data: { index: i },
     });
   }
@@ -94,6 +103,34 @@ export function toFlow(definition: Definition): Flow {
     };
   });
   return { nodes, edges, undrawn };
+}
+
+// responseCard is the card that ends the graph: what the workflow answers.
+// It goes after the rightmost step, level with the middle of them all, and
+// can be picked but not dragged, connected or deleted. The canvas adds it,
+// since it isn't a node of the definition.
+export function responseCard(nodes: FlowNode[]): FlowNode {
+  const xs = nodes.map((n) => n.position.x);
+  const ys = nodes.map((n) => n.position.y);
+  const position =
+    nodes.length === 0
+      ? { x: 0, y: 0 }
+      : {
+          x: Math.max(...xs) + NODE_WIDTH + RANK_GAP,
+          y: (Math.min(...ys) + Math.max(...ys)) / 2,
+        };
+  return {
+    id: RESPONSE,
+    type: "response",
+    position,
+    width: NODE_WIDTH,
+    height: NODE_HEIGHT,
+    measured: { width: NODE_WIDTH, height: NODE_HEIGHT },
+    draggable: false,
+    connectable: false,
+    deletable: false,
+    data: { index: -1 },
+  };
 }
 
 // place gives each node the position the definition stores for it. The rest
@@ -130,7 +167,7 @@ function place(
 
 function layoutAll(keys: string[], edges: FlowEdge[]): Map<string, XYPosition> {
   const g = new Graph<GraphLabel, NodeLabel, EdgeLabel>();
-  g.setGraph({ rankdir: "LR", nodesep: 40, ranksep: 80 });
+  g.setGraph({ rankdir: "LR", nodesep: 40, ranksep: RANK_GAP });
   g.setDefaultEdgeLabel(() => ({}));
   for (const k of keys)
     g.setNode(k, { width: NODE_WIDTH, height: NODE_HEIGHT });

@@ -40,6 +40,31 @@ export function whole(
   return n >= min && n <= max ? n : null;
 }
 
+type Schema = Record<string, unknown>;
+
+// readSchema reads a JSON Schema typed as text: nothing for no text, and a
+// reason for text that isn't a JSON object yet.
+export function readSchema(text: string): { schema?: Schema; error?: string } {
+  if (text.trim() === "") return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (e) {
+    return { error: `Not JSON yet: ${e instanceof Error ? e.message : e}` };
+  }
+  if (!isObject(value)) return { error: "A JSON Schema is an object, in { }." };
+  return { schema: value };
+}
+
+// showSchema is a stored schema as the text its field starts with.
+export function showSchema(schema: Schema | undefined): string {
+  return schema === undefined ? "" : JSON.stringify(schema, null, 2);
+}
+
+function isObject(v: unknown): v is Schema {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 export const METHODS = [
   "GET",
   "HEAD",

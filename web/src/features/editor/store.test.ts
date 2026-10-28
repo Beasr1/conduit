@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import { connect, removeNodes } from "@/features/editor/edits";
 import { toFlow } from "@/features/editor/flow";
+import { RESPONSE } from "@/features/editor/flow";
 import { createEditorStore } from "@/features/editor/store";
 import { specExample } from "@/test/fixtures";
 
@@ -51,6 +52,23 @@ test("a renamed node stays selected, under its new id", () => {
     from: "person",
     to: "orders",
   });
+});
+
+test("opening the workflow's settings puts away what was picked, and a pick closes them", () => {
+  const store = createEditorStore(specExample);
+  store.getState().pick("nodes", [{ id: "crm", selected: true }]);
+  store.getState().openSettings();
+  expect(store.getState().selected).toEqual({ nodes: [], edges: [] });
+  expect(store.getState().settings).toBe(true);
+  store.getState().pick("edges", [{ id: "user->orders", selected: true }]);
+  expect(store.getState().settings).toBe(false);
+});
+
+test("the response card stays picked through edits", () => {
+  const store = createEditorStore(specExample);
+  store.getState().pick("nodes", [{ id: RESPONSE, selected: true }]);
+  store.getState().edit((d) => ({ ...d, output: "nodes.crm.body" }));
+  expect(store.getState().selected.nodes).toEqual([RESPONSE]);
 });
 
 test("selection follows what the canvas picks and unpicks", () => {

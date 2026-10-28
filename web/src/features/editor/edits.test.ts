@@ -7,9 +7,12 @@ import {
   mentions,
   move,
   NODE_ID,
+  reads,
   removeEdges,
   removeNodes,
   renameNode,
+  setField,
+  updateEdge,
   updateNode,
 } from "@/features/editor/edits";
 import type { components } from "@/gen/schema";
@@ -97,6 +100,29 @@ test("an update that changes nothing gives back the same draft", () => {
   const after = updateNode(spec, 3, (n) => ({ ...n, id: "contacts" }));
   expect(after.nodes[3]?.id).toBe("contacts");
   expect(spec.nodes[3]?.id).toBe("crm");
+});
+
+test("an edge's condition is set in its place; an unchanged edge changes nothing", () => {
+  expect(updateEdge(spec, 3, (e) => ({ ...e }))).toBe(spec);
+  const after = updateEdge(spec, 3, (e) => ({ ...e, when: "true" }));
+  expect(after.edges?.[3]).toEqual({ from: "prefs", to: "crm", when: "true" });
+  expect(spec.edges?.[3]?.when).toBeUndefined();
+});
+
+test("a workflow field is set, removed, and left alone when it's the same", () => {
+  const set = setField(spec, "output", "nodes.crm.body");
+  expect(set.output).toBe("nodes.crm.body");
+  expect(setField(set, "output", "nodes.crm.body")).toBe(set);
+  expect("output" in setField(set, "output", undefined)).toBe(false);
+  expect(setField(spec, "input_schema", undefined)).toBe(spec);
+});
+
+test("reads names the steps an expression reads, in the definition's order", () => {
+  expect(
+    reads(spec, '{ "c": nodes.crm.body, "u": nodes.user.body.id }'),
+  ).toEqual(["user", "crm"]);
+  expect(reads(spec, "nodes.users.body")).toEqual([]);
+  expect(reads(spec, undefined)).toEqual([]);
 });
 
 test("renaming a node takes its edges and position with it", () => {

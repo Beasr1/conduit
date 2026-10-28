@@ -3,7 +3,7 @@ import { createContext, useContext } from "react";
 import { createStore, type StoreApi, useStore } from "zustand";
 
 import { move, renameNode, settle } from "@/features/editor/edits";
-import { toFlow } from "@/features/editor/flow";
+import { RESPONSE, toFlow } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 
 type Definition = components["schemas"]["Definition"];
@@ -21,6 +21,11 @@ export interface EditorState {
   // only when it ends, rather than on every frame of it.
   moving: Record<string, XYPosition>;
   selected: Selection;
+  // Whether the workflow's own settings are open in the side panel. Opening
+  // them puts away what was picked, and picking something closes them.
+  settings: boolean;
+  openSettings: () => void;
+  closeSettings: () => void;
   edit: (change: (draft: Definition) => Definition) => void;
   // rename changes a node's id, and the selection follows it.
   rename: (index: number, id: string) => void;
@@ -42,6 +47,10 @@ export function createEditorStore(draft: Definition): EditorStore {
     draft,
     moving: {},
     selected: { nodes: [], edges: [] },
+    settings: false,
+    openSettings: () =>
+      set({ settings: true, selected: { nodes: [], edges: [] } }),
+    closeSettings: () => set({ settings: false }),
     // Every edit settles the draft first, so nothing placed automatically
     // moves under the user's hands. An edit that changes nothing, such as a
     // form leaving a field as it was, leaves the draft alone, settling
@@ -83,17 +92,19 @@ export function createEditorStore(draft: Definition): EditorStore {
           if (c.selected) on.add(c.id);
           else on.delete(c.id);
         }
-        return { selected: { ...s.selected, [kind]: [...on] } };
+        const settings = s.settings && !changes.some((c) => c.selected);
+        return { selected: { ...s.selected, [kind]: [...on] }, settings };
       }),
   }));
 }
 
 // kept is the part of a selection the draft still has: a deleted node drops
-// out of it, and so does an edge whose end was renamed.
+// out of it, and so does an edge whose end was renamed. The response card is
+// always there.
 function kept(selected: Selection, draft: Definition): Selection {
   const flow = toFlow(draft);
-  const nodes = selected.nodes.filter((key) =>
-    flow.nodes.some((n) => n.id === key),
+  const nodes = selected.nodes.filter(
+    (key) => key === RESPONSE || flow.nodes.some((n) => n.id === key),
   );
   const edges = selected.edges.filter((key) =>
     flow.edges.some((e) => e.id === key),
