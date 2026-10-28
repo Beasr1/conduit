@@ -118,6 +118,8 @@ the API is `/api` on the page's own origin.
   `memo` and keep handlers stable.
 - Read store slices through selectors. Never subscribe to the whole nodes
   array.
+- The first edit writes down where every node is drawn (`settle`), so a
+  node placed automatically never moves under the user.
 - Blocking cycles in the UI (`isValidConnection`) is only for UX. Server
   validation is the source of truth.
 - JSONata preview calls the server's preview endpoint. The `jsonata` npm

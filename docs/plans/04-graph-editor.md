@@ -287,7 +287,9 @@ Found along the way:
 - [x] `ui` in `schema/workflow.yaml`.
 - [x] `toFlow`, placing nodes that have no position, and their tests.
 - [ ] Nodes, edges, forms, the workflow's settings (input schema, output).
-      So far the canvas draws a saved workflow, read-only.
+      So far the canvas draws the draft, and nodes can be dragged,
+      connected (a cycle refused as you drop it), deleted and added. The
+      forms are next.
 - [ ] Save with `If-Match`, problems on fields, publish.
 
 **Phase C: runs**
@@ -427,6 +429,25 @@ Decided while building, without a question (each can be overruled):
   browser for this, so the canvas's look is checked in Chromium: the spec
   example drew four nodes and four edges through nginx, light and dark, with
   no console errors.
+- **The first edit settles the layout**: before any edit, each node placed
+  automatically gets the position it's drawn at written into the draft, so
+  nothing moves under the user. Found in the browser: the first drag of a
+  workflow made through the API sent the other nodes below the dragged one,
+  because they had become the ones without a position. A workflow that's only
+  looked at keeps none stored.
+- **A drag lives in the store until it ends**, then its rounded position
+  goes into the draft, rather than the draft changing on every frame.
+- **Adding a node asks for its id**, checked against the id pattern and the
+  other ids as it's typed, and puts the node in the middle of the view. An
+  http node starts as a `GET` with no URL and a transform with no
+  expression; the problems say so until they're filled in.
+- **Delete and Backspace delete** what's selected. A node whose id is
+  missing or shared can't be connected, since an edge names nodes by id.
+- **Editing was checked in Chromium**, through nginx: a drag stays where it
+  was dropped, a new edge appears, a cycle is refused, Backspace deletes the
+  selected edge only, and a node is added and deleted, with no console
+  errors. React Flow's drag doesn't run in jsdom, so these stay browser
+  checks until Phase E's Playwright test.
 
 ## Out of scope
 

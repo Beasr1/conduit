@@ -28,7 +28,7 @@ const HttpNode = memo(function HttpNode({ data }: NodeProps<FlowNode>) {
   return (
     <Frame id={node.id}>
       {node.request
-        ? `${node.request.method} ${node.request.url}`
+        ? `${node.request.method} ${node.request.url || "(no URL yet)"}`
         : "no request yet"}
     </Frame>
   );
