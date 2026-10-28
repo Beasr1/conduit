@@ -1,5 +1,5 @@
 import type { components } from "@/gen/schema";
-import { getJSON } from "@/lib/api";
+import { api, call } from "@/lib/api";
 
 export type Health = components["schemas"]["Health"];
 
@@ -12,5 +12,5 @@ export function fetchHealth({
 }: {
   signal: AbortSignal;
 }): Promise<Health> {
-  return getJSON<Health>("/healthz", signal);
+  return call((signal) => api.GET("/healthz", { signal }), signal);
 }

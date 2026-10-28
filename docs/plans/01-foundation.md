@@ -1,8 +1,9 @@
 # 01 — Foundation
 
-Status: done locally (2026-10-25). `just check` passes on this machine,
-golangci-lint included, and every gate has been seen failing. Left: seeing CI
-green on the next push, and turning on Dependabot alerts in GitHub.
+Status: done. `just check` passed locally on 2026-10-25, golangci-lint
+included, and every gate has been seen failing. CI went green on 2026-10-27,
+once a guardrail test that raced its timeout on CI's slower runners was
+fixed (plan 03). Left: turning on Dependabot alerts in GitHub (not checked).
 
 Scope change, 2026-10-25: the database pieces moved to 03 and the UI
 foundations to 04, because nothing uses them before then. Plan 01 is about

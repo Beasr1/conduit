@@ -1,7 +1,8 @@
 # 00 — Roadmap
 
 Status: proposed. Each decision's own status is in the table below; D2,
-D3, D4–D9, D12, D15, D16, D18 and D19 are decided. Updated 2026-10-27.
+D3, D4–D13, D15, D16, D18 and D19 are decided; D1, D14 and D17 are open.
+Updated 2026-10-28.
 
 ## Goal
 
@@ -223,10 +224,10 @@ Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
 | D7 | Redis | not in v1 | one process; Postgres holds the state | the spec's execution cache | accepted (diverges from spec) |
 | D8 | Run durability | in-process; interrupted runs marked failed | simple and honest | DBOS Transact Go, Temporal | accepted (2026-10-26, plan 03) |
 | D9 | Live updates | SSE | one-way, plain HTTP. `EventSource` can't send a bearer token, so the web app reads the stream with `fetch()` | WebSocket | accepted (2026-10-26, plan 03) |
-| D10 | Editor state | Zustand | what React Flow uses internally | Jotai | proposed |
-| D11 | Web router | React Router 8, data mode | familiar | TanStack Router | proposed |
+| D10 | Editor state | Zustand | what React Flow uses internally (12 still bundles zustand 4; 13 moves to 5) | Jotai | accepted (2026-10-28, plan 04) |
+| D11 | Web router | React Router 8, data mode | familiar | TanStack Router | accepted (2026-10-28, plan 04) |
 | D12 | v1 auth | one bearer token from env; listen on localhost by default | an open server that calls arbitrary URLs is an open proxy | user accounts | accepted |
-| D13 | Node kinds | `http` and `transform`; merge and branch are mappings and edge `when`s | fewer node types, same reach | dedicated merge, branch and filter nodes | proposed |
+| D13 | Node kinds | `http` and `transform`; merge and branch are mappings and edge `when`s | fewer node types, same reach | dedicated merge, branch and filter nodes | accepted (2026-10-28, plan 04) |
 | D14 | Upstream reuse | the library is a template; a node keeps its own copy; credentials are by reference | workflow versions stay immutable and self-contained | nodes reference live upstream records | proposed |
 | D15 | Host and CI | GitHub, Actions running `just check` | personal account | GitLab CI | accepted |
 | D16 | Commit trailer | none | one-line commits | Co-Authored-By | accepted |
@@ -305,12 +306,13 @@ can do.
 | 01 foundation | skeleton on both sides, `just`, CI, gates | `just check` green locally and in CI; `just dev` serves a page showing a green health badge |
 | 02 engine | definition types, validation, scheduler, upstream caller, transform | the spec example runs end to end in a test against `httptest` upstreams; `-race` clean; SSRF and guardrail tests pass |
 | 03 api | persistence, REST, SSE, serving. Also, moved from 01: Postgres in compose, pgx, goose, `migrate`, `/readyz`, `.env.example`, `just dev` | through the API: create and version a workflow, start a run, stream its events, inspect node runs. A published workflow answers at its own endpoint, with 400, 502 and 504 as problem details |
-| 04 graph-editor | build, edit, save and run in graph mode. Also, moved from 01: Tailwind 4 and shadcn, React Router, `env.ts`, lucide, sonner; from 03: openapi-fetch, and the upstream library | the spec example built and run from the browser, statuses updating live |
+| 04 graph-editor | build, edit, save and run in graph mode. Also, moved from 01: Tailwind 4 and shadcn, React Router, `env.ts`, lucide, toasts (shadcn's, not sonner: plan 04 answer 7); from 03: openapi-fetch | the spec example built and run from the browser, statuses updating live |
 | 05 page-mode | step builder over the same definition | the same example built in page mode; switching modes keeps the definition intact |
 | 06 hardening | credentials, limits, images, observability | credentials encrypted at rest and redacted everywhere; distroless image; traces on runs |
-| 07 tests-and-catalogue | dry-run; test cases; import upstreams from OpenAPI; per-workflow caller keys | a workflow's tests pass in dry-run without calling anything external; each served workflow has its own caller key |
+| 07 tests-and-catalogue | dry-run; test cases; the upstream library (moved from 04, plan 04 answer 2), filled by importing upstreams from OpenAPI; per-workflow caller keys | a workflow's tests pass in dry-run without calling anything external; each served workflow has its own caller key |
 | 08 ai-authoring | an agent turns a spec into a draft workflow with tests (08-ai-authoring.md) | the eval set passes at an agreed rate; a person publishes every draft |
 | 09 later | parked ideas | Redis response cache, cron triggers, durable runs, loops, import/export; other step types: database, queue and script plugins, SOAP/XML, gRPC (D18) |
+| 10 jsonata-editing | after 04: your own JSONata language package for CodeMirror 6, in its own repo and published, starting from gnata-sqlite's MIT grammar; the editor's textareas become CodeMirror (plan 04 answer 3) | expressions highlighted, completed (`input.`, `nodes.<id>.body`, `$` functions), checked by the server inline, and formatted in your style |
 
 ## Risks
 

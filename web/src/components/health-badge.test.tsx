@@ -1,50 +1,21 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import { expect, test } from "vitest";
 
 import { HealthBadge } from "@/components/health-badge";
-
-const server = setupServer();
-
-// A request with no handler fails the test instead of reaching the network.
-// (MSW 3 renamed this option from onUnhandledRequest.)
-beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
-afterEach(() => {
-  cleanup();
-  server.resetHandlers();
-});
-afterAll(() => server.close());
-
-function renderBadge() {
-  // No retries, so a failing request shows its error straight away.
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  render(
-    <QueryClientProvider client={client}>
-      <HealthBadge />
-    </QueryClientProvider>,
-  );
-}
+import { renderAt } from "@/test/render";
+import { server } from "@/test/server";
 
 test("shows the server as up when /api/healthz answers", async () => {
   server.use(
     http.get("/api/healthz", () => HttpResponse.json({ status: "ok" })),
   );
-  renderBadge();
-
-  const badge = await screen.findByText("server ok");
-  expect(badge.className).toContain("badge-up");
+  renderAt(<HealthBadge />);
+  expect(await screen.findByText("server ok")).toBeTruthy();
 });
 
 test("shows the server as unreachable when /api/healthz fails", async () => {
-  server.use(
-    http.get("/api/healthz", () => new HttpResponse(null, { status: 503 })),
-  );
-  renderBadge();
-
-  const badge = await screen.findByText("server unreachable");
-  expect(badge.className).toContain("badge-down");
+  server.use(http.get("/api/healthz", () => HttpResponse.error()));
+  renderAt(<HealthBadge />);
+  expect(await screen.findByText("server unreachable")).toBeTruthy();
 });

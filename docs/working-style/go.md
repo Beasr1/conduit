@@ -211,6 +211,9 @@ server/
   calls inside `internal/`.
 - Messages are lowercase events; data goes in attributes:
   `log.InfoContext(ctx, "node finished", "node", id, "status", st)`.
+- Error is for our bugs. A request whose client went away (its context
+  cancelled, as when a page is left mid-fetch) is logged at Info, and a
+  stream that ends that way isn't logged at all.
 - No secrets, tokens or upstream payloads in logs.
 
 ## Tests

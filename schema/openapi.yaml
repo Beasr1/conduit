@@ -6,9 +6,11 @@ info:
   title: Conduit API
   version: 0.1.0
 
-# Every operation needs the bearer token unless it says otherwise.
+# Every operation needs the bearer token, or the web app's session cookie,
+# unless it says otherwise.
 security:
   - bearer: []
+  - session: []
 
 paths:
   /healthz:
@@ -39,6 +41,41 @@ paths:
                 $ref: "#/components/schemas/Health"
         "503":
           $ref: "#/components/responses/Problem"
+
+  /v1/session:
+    post:
+      operationId: createSession
+      summary: Sign a browser in
+      description: Trades the API token for the session cookie the web app uses. Scripts, agents and served callers send the token as a bearer token instead.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignIn"
+      responses:
+        "204":
+          description: Signed in, for 12 hours.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteSession
+      summary: Sign a browser out
+      security: []
+      responses:
+        "204":
+          description: Signed out; the cookie is cleared.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
 
   /v1/workflows:
     get:
@@ -407,6 +444,11 @@ components:
       type: http
       scheme: bearer
       description: The server's one API token (CONDUIT_API_TOKEN).
+    session:
+      type: apiKey
+      in: cookie
+      name: __Host-conduit_session
+      description: The web app's session, set by POST /v1/session. A write made with it must come from the app's own pages (Sec-Fetch-Site same-origin), or it's refused with 403.
 
   parameters:
     WorkflowID:
@@ -485,6 +527,15 @@ components:
         next:
           type: string
           description: Pass as `before` for the next page. Absent on the last page.
+
+    SignIn:
+      type: object
+      required: [token]
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          description: The API token.
 
     CreateWorkflow:
       type: object

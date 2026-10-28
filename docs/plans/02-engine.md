@@ -1,7 +1,8 @@
 # 02 — Engine
 
-Status: built 2026-10-25. Every step is done, and `just check` passes
-locally, golangci-lint included.
+Status: done. Built 2026-10-25, with `just check` passing locally,
+golangci-lint included. CI went green on 2026-10-27, once the guardrail test
+stopped racing its timeout (plan 03).
 
 The six open questions were answered by going ahead with the
 recommendations: on 2026-10-25 the answer to "go with recommendations, or

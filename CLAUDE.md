@@ -4,10 +4,10 @@ No-code API orchestration. Users compose upstream API calls into a DAG,
 using a graph editor or a page-by-page builder, and map data between steps
 with JSONata. A Go engine runs it, fanning out in parallel.
 
-**Status: plan 03 is done (2026-10-27).** The server stores workflows and
-their revisions, runs them in the background with live events, and serves
-published ones at /serve/{slug}. Next is plan 04, the graph editor, not
-yet written. The bigger picture is docs/plans/README.md.
+**Status: plan 04, the graph editor, is under way; its phase A is built
+(2026-10-28).** The web app signs in with a session cookie, lists workflows
+and creates them; the editor itself is phase B. What is left is in
+docs/plans/04-graph-editor.md; the bigger picture is docs/plans/README.md.
 
 ## Read before working
 
@@ -93,5 +93,12 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`.
 - Everything the UI does goes through `schema/openapi.yaml`; no UI-only
   logic. Future agents (plan 08) use the same API.
 - TypeScript stays on 6.0.x until typescript-eslint supports 7.
-- npm packages younger than about a day are refused (pnpm's release-age
-  guard). Pick a slightly older version; don't turn the guard off.
+- npm packages younger than a day are refused (pnpm's release-age guard,
+  `minimumReleaseAge` in `web/pnpm-workspace.yaml`). It's set explicitly
+  because pnpm's own default isn't strict and let exact pins through. Pick
+  a slightly older version; don't turn the guard off.
+- Safari can't sign in over plain http. WebKit drops `Secure` cookies on
+  `127.0.0.1` and `localhost` alike, so use Chrome or Firefox with
+  `just dev` and `just up`; Safari works over https (plan 04, answer 8).
+- A web test fails on any console warning or error it logs
+  (`web/src/test/console.ts`). Fix the cause; don't silence the console.

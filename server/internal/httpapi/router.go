@@ -30,15 +30,18 @@ type Deps struct {
 
 // NewRouter returns the server's handler.
 func NewRouter(d Deps) http.Handler {
-	a := &api{store: d.Store, runner: d.Runner, log: d.Log, streams: make(chan struct{}, cmp.Or(d.MaxStreams, 256))}
+	a := &api{
+		store: d.Store, runner: d.Runner, log: d.Log, creds: newCredentials(d.Token),
+		streams: make(chan struct{}, cmp.Or(d.MaxStreams, 256)),
+	}
 	strict := gen.NewStrictHandlerWithOptions(a, nil, gen.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  a.requestError,
 		ResponseErrorHandlerFunc: a.answerError,
 	})
 	h := gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{
 		BaseRouter: http.NewServeMux(),
-		// Each wraps the one before, so the token is checked before the body.
-		Middlewares:      []gen.MiddlewareFunc{checkShape, requireToken(d.Token)},
+		// Each wraps the one before, so credentials are checked before the body.
+		Middlewares:      []gen.MiddlewareFunc{checkShape, authenticate(a.creds)},
 		ErrorHandlerFunc: a.requestError,
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +54,7 @@ type api struct {
 	store  *store.Store
 	runner *runner.Runner
 	log    *slog.Logger
+	creds  credentials
 	// streams holds a token for each open event stream. Each costs a
 	// connection and a goroutine for as long as its run goes on.
 	streams chan struct{}

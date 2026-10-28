@@ -6,13 +6,14 @@ lives as a row in 00-roadmap.md.
 
 | # | Plan | Goal | Status |
 |---|---|---|---|
-| 00 | 00-roadmap.md | scope, architecture, execution semantics, decisions, milestones | proposed; D1, D10, D11, D13, D14, D17 open |
-| 01 | 01-foundation.md | monorepo skeleton; every gate runs locally and in CI | done locally; CI green to see on the next push |
-| 02 | 02-engine.md | workflow model, validation, scheduler, upstream caller, JSONata | built; `just check` green locally |
+| 00 | 00-roadmap.md | scope, architecture, execution semantics, decisions, milestones | proposed; D1, D14, D17 open |
+| 01 | 01-foundation.md | monorepo skeleton; every gate runs locally and in CI | done |
+| 02 | 02-engine.md | workflow model, validation, scheduler, upstream caller, JSONata | done |
 | 03 | 03-api.md | persistence, REST, live run events, serving published workflows | done 2026-10-27 |
-| 04 | graph-editor | build, save and run workflows in graph mode | not started |
+| 04 | 04-graph-editor.md | build, save and run workflows in graph mode | accepted 2026-10-28; phase A built |
 | 05 | page-mode | step-by-step builder over the same definition | not started |
 | 06 | hardening | credentials, limits, images, observability | not started |
-| 07 | tests-and-catalogue | dry-run; test cases; OpenAPI import; per-workflow caller keys | not started |
+| 07 | tests-and-catalogue | dry-run; test cases; the upstream library, filled by OpenAPI import; per-workflow caller keys | not started |
 | 08 | 08-ai-authoring.md | spec in, draft workflow out; people review and publish | direction; shapes v1 seams |
 | 09 | later | Redis cache, cron triggers, durable runs, loops; other step types (database, queue, script, SOAP/XML, gRPC) | parked |
+| 10 | jsonata-editing | a JSONata language package for CodeMirror 6, then the editor uses it; comes after 04 | not started |

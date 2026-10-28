@@ -1,1 +1,6 @@
 saveExact: true
+# Refuse versions published less than a day ago. pnpm's built-in default is
+# the same 1440 minutes but not strict: when nothing older fits, it installs
+# the young version anyway, and an exact pin never has anything older that
+# fits. Setting it here makes it strict.
+minimumReleaseAge: 1440

@@ -1,4 +1,7 @@
 {
+  // Read by the shadcn CLI, which looks for the import alias here. The
+  // compiler uses tsconfig.app.json, which has the same paths.
+  "compilerOptions": { "paths": { "@/*": ["./src/*"] } },
   "files": [],
   "references": [
     { "path": "./tsconfig.app.json" },

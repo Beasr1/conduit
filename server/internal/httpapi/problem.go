@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,7 +56,15 @@ func (a *api) answerError(w http.ResponseWriter, r *http.Request, err error) {
 		}
 	}
 	if p == nil {
-		a.log.ErrorContext(r.Context(), "request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+		// A client that goes away mid-request cancels its context, and the
+		// work fails with it: no bug of ours. It still gets the 500 below,
+		// which no one reads; returning without one would send an empty 200
+		// if the connection were somehow still open.
+		if errors.Is(r.Context().Err(), context.Canceled) {
+			a.log.InfoContext(r.Context(), "request cancelled by the client", "method", r.Method, "path", r.URL.Path, "err", err)
+		} else {
+			a.log.ErrorContext(r.Context(), "request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+		}
 		p = &problem{status: http.StatusInternalServerError, code: "internal_error", detail: "Something went wrong on our side."}
 	}
 	writeProblem(w, p)
