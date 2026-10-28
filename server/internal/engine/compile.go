@@ -51,7 +51,7 @@ type node struct {
 
 	in        []int // edges into this node
 	out       []int // edges out of it
-	ancestors []int // every node upstream of it, in declaration order
+	ancestors []int // every node it runs after, directly or not, in declaration order
 }
 
 type param struct {

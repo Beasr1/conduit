@@ -63,6 +63,8 @@ resolve, but their claims weren't re-read.
 | goose; pgx without an ORM | familiar; goose 3.29.0 ✓, pgx 5.11.0 ✓ |
 | TanStack Query with key factories | TanStack docs [24] |
 | React Router | familiar. Contested, see below |
+| A step joins its own branches; no extra node for a join (plan 04, 2026-10-28) | Step Functions' Parallel state runs branches "as concurrently as possible, and wait[s] until all branches terminate", its output "an array with one element for each branch" ✓ [39]. n8n is the explicit alternative: its Merge node is how "you combine the separate streams back into one stream" ✓ [40] |
+| A step reads every earlier step by name, not only what's handed to it (plan 04, 2026-10-28) | Step Functions added variables on 22 Nov 2024 so a state can "assign data in one state and reference it in any subsequent steps", avoiding "the need to pass data through multiple intermediate states" ✓ [41] |
 
 ## Contested: kept anyway, revisit if it hurts
 
@@ -173,6 +175,9 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 36. https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 37. https://github.com/anthropics/claude-plugins-official/tree/ea10b213686c90bb1984b2016937310e05336cf3/plugins/frontend-design
 38. https://www.w3.org/TR/WCAG22/
+39. https://docs.aws.amazon.com/step-functions/latest/dg/state-parallel.html
+40. https://docs.n8n.io/flow-logic/merging/
+41. https://aws.amazon.com/blogs/compute/simplifying-developer-experience-with-variables-and-jsonata-in-aws-step-functions/
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

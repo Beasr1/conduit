@@ -123,11 +123,21 @@ the API is `/api` on the page's own origin.
   array.
 - The first edit writes down where every node is drawn (`settle`), so a
   node placed automatically never moves under the user.
+- An edit that changes nothing returns the draft itself, and the store
+  drops it. A form that applies as it's typed can then notify freely.
+- `toFlow` gives each node its fixed size as `measured` too. React Flow
+  keeps a node's handle positions only when it says it was measured, and
+  every edit draws new node objects; without it, every edit blinked the
+  edges off.
+- Anything over the editor that takes keys (the step panel, a dialog)
+  carries React Flow's `nokey` class. React Flow deletes the selection on
+  Delete or Backspace anywhere but in a text field, buttons included.
 - Blocking cycles in the UI (`isValidConnection`) is only for UX. Server
   validation is the source of truth.
-- JSONata preview calls the server's preview endpoint. The `jsonata` npm
-  package never runs in the browser, because preview results must match
-  what the engine does.
+- JSONata preview calls the server's preview endpoint, which simulates the
+  steps before the expression over their samples, or uses the last run's
+  responses. The `jsonata` npm package never runs in the browser, because
+  preview results must match what the engine does.
 - Each open run reads its event stream with one `fetch()` (D9), not
   `EventSource`, which hides a failed connection's status. Events update
   node status in the query cache.
@@ -141,6 +151,10 @@ the API is `/api` on the page's own origin.
   Enforce it with `@shadcn/lint`. Its token rules are off in
   `components/ui`, which the shadcn CLI writes.
 - Dark mode follows the system (`prefers-color-scheme`); there's no toggle.
+- The page's CSP refuses inline styles and eval. Base UI's own `<style>`
+  elements are off (`CSPProvider disableStyleElements` in `main.tsx`), so a
+  rule one of its parts needs goes in `index.css`; zod runs `jitless`.
+  jsdom has no CSP, so a violation only shows in the browser.
 - Add primitives with the shadcn CLI and then adapt them. Don't hand-roll
   them.
 - A link that looks like a button is a `Link` styled with

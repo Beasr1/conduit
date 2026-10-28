@@ -102,3 +102,7 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`.
   `just dev` and `just up`; Safari works over https (plan 04, answer 8).
 - A web test fails on any console warning or error it logs
   (`web/src/test/console.ts`). Fix the cause; don't silence the console.
+- The page's CSP (nginx) refuses inline styles and eval, and jsdom has no
+  CSP, so a violation shows only in a browser through `just up`. A rule a
+  Base UI part would inject as `<style>` goes in `web/src/index.css`
+  (web.md).

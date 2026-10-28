@@ -287,11 +287,12 @@ Found along the way:
 - [x] `ui` in `schema/workflow.yaml`.
 - [x] `toFlow`, placing nodes that have no position, and their tests.
 - [ ] Nodes, edges, forms, the workflow's settings (input schema, output).
-      So far the canvas draws the draft, and nodes can be dragged,
-      connected (a cycle refused as you drop it), deleted and added. The
-      forms are next. Plan 11's brief applies to them: text on screen
-      says "step"; a step's name and the look wait for 11, and building
-      from the keyboard for page mode (05).
+      So far the canvas draws the draft; nodes can be dragged, connected
+      (a cycle refused as you drop it), deleted and added; and a picked
+      step's settings open beside the canvas (http and transform). An
+      edge's `when` and the workflow's settings are next. Plan 11's brief
+      applies: text on screen says "step"; a step's name and the look wait
+      for 11, and building from the keyboard for page mode (05).
 - [ ] Save with `If-Match`, problems on fields, publish.
 
 **Phase C: runs**
@@ -299,8 +300,34 @@ Found along the way:
 - [ ] Run with an input, live statuses, node inspection, the run history.
 
 **Phase D: previews**
-- [ ] `POST /v1/preview`, with tests for each kind and the guardrails.
-- [ ] Preview beside each expression field.
+- [ ] Samples: an optional `sample` on http steps (`status`, `headers`,
+      `body`) and a sample input on the definition, in
+      `schema/workflow.yaml`. Real runs ignore them, as they ignore `ui`;
+      each is capped in size.
+- [ ] `POST /v1/preview` simulates: each http step's sample stands in for
+      its response, the transforms before the step are evaluated over
+      them, then the expression. The last run's real responses are the
+      other source. Tests for each kind and the guardrails.
+- [ ] Preview beside each expression field. An expression that reads
+      nothing in the samples, or reads the wrong type, is marked under its
+      field, using a JSON Schema the server infers from the samples.
+- [ ] The step panel shows what comes in, from the samples. A finished
+      step's response can be kept as its sample (after phase C).
+
+Samples, decided with you on 2026-10-28:
+- **A sample response** (example JSON), not a hand-written JSON Schema:
+  anyone can paste one, and it's enough to evaluate expressions over.
+- **Stored in the step, in the definition**, so revisions, dry runs (07)
+  and agents (08) share it. The field asks for made-up or redacted data,
+  since whatever is pasted stays in every revision.
+- **Arriving with previews**, which they exist to feed.
+- **The schema inferred from a sample is internal**: computed on the
+  server when needed, never stored, never shown. One sample can't show
+  what's optional, what an empty list holds, the type behind a `null`, or
+  a fixed set of values, so the inferred schema requires nothing and
+  allows extra fields. It can say a path isn't in the sample, never that a
+  response is wrong. Several kept samples could refine it; OpenAPI schemas
+  take over in 07.
 
 **Phase E: the browser test**
 - [ ] Playwright, the test upstream, and the Done flow.
@@ -404,6 +431,24 @@ Decided with you:
 - **The editor places a node that has no position**, never the server. Layout
   depends on how the browser draws a node, and one layout engine, not a
   second in Go, keeps every placement the same.
+- **The canvas reads in run order** (2026-10-28): arrows point the way data
+  and time go, so a step that stitches others' results sits after them,
+  and the response comes last. Drawing it as calls, the response first
+  with arrows to what it's built from, was the other option; it puts what
+  runs first at the far end, and plan 11's run playback needs run order.
+- **"Upstream" means only the API a step calls** (2026-10-28). Graph
+  direction is before and after (design.md, Words).
+- **A step joins its own branches** (2026-10-28). It can take several
+  arrows, waits for all of them, and stitches them in its own mapping: what
+  it receives is its parents' results keyed by name. Forcing every join
+  into a transform step, so a call takes one arrow, was the other option:
+  a rule that's easier to state, for one more step per join on the canvas.
+  Transform steps stay optional, for a named combine or a reshape several
+  steps share.
+- **A step reads every earlier step by name** (2026-10-28), as the engine
+  already does (`server/internal/engine/run.go:262`). Reading only what
+  points into it would make the arrows carry the data, at the cost of long
+  extra arrows; Step Functions moved the other way in 2024 (sources.md).
 
 Decided while building, without a question (each can be overruled):
 - **No `toDefinition`.** The draft is the one source: edits change it, and
@@ -451,10 +496,69 @@ Decided while building, without a question (each can be overruled):
   errors. React Flow's drag doesn't run in jsdom, so these stay browser
   checks until Phase E's Playwright test.
 
+The step's settings (step 3c), decided while building, each open to
+overruling:
+- **Picking one step opens its settings** in a panel beside the canvas,
+  which narrows it; Close or another pick puts them away. Text on screen
+  says "step" (plan 11).
+- **Changes apply as they're typed**, so the canvas follows; no Apply
+  button, the usual canvas-editor default. The id is the exception: it's
+  checked as typed and applied when the field is left or on Enter, since
+  edges and positions point at it. Its edges and position go with it, the
+  selection follows it, and a note lists where expressions still read the
+  old id, by plain text match.
+- **Numbers diverge from "parsed on blur"**: timeout and attempts count
+  once the text is a whole number in range, and until then the stored
+  value stays and the field says why. The field keeps its own text, so
+  nothing typed is eaten, and one path handles every field.
+- **The form is keyed by the step's place in the draft, not its id**
+  (the plan said `key={nodeId}`), so renaming doesn't remount it under the
+  cursor.
+- **An edit that changes nothing leaves the draft alone**, settling
+  included. A header row with no name yet, or a half-typed number, isn't an
+  edit, so nothing will ever take an untouched draft for a changed one.
+- **Header and query rows** are keyed by their field-array id. A row without
+  a name isn't written; a repeated name is marked, and the first counts.
+- **Picking a step pans the canvas as little as it takes** to keep that step
+  in sight once the panel narrows it. **A drag no longer picks**: React Flow
+  picks on drag by default, which opened the panel mid-drag.
+- **Retry needs attempts**: Idempotent is disabled until attempts is a
+  number from 2 to 5.
+- Deliberate TODOs for plan 10's JSONata editor:
+  `web/src/features/editor/components/http-step-form.tsx:122` and
+  `web/src/features/editor/components/transform-step-form.tsx:33`.
+
+Found in Chromium while checking 3c, and fixed:
+- **Every edit blinked all the edges off.** React Flow keeps a node's
+  handle positions only when the node object says it was measured, and
+  every edit draws new node objects. Typing seven characters into a URL
+  made seven frames with no edges. `toFlow` now gives each node its
+  measured size, which is fixed. True since 3a for drags and connections,
+  which hid it. A rename still blinks the renamed step's own edges for a
+  frame: to React Flow, a new id is a new node.
+- **Delete or Backspace on a button in the panel deleted the step being
+  edited**, and the same on the add-step dialog's buttons (since 3b). React
+  Flow takes those keys anywhere but in text fields; both now carry its
+  `nokey` class, which a jsdom test pins.
+- **Two CSP violations.** Base UI's select added an inline `<style>`
+  (`style-src 'self'` refused it); `CSPProvider disableStyleElements` in
+  `main.tsx` turns those off, and the rule lives in `index.css`. zod's
+  probe for `new Function` was reported although zod catches the refusal;
+  `z.config({ jitless: true })` skips it. jsdom has no CSP, so only the
+  browser shows these.
+- Checked in Chromium through nginx after the fixes: pick, the method
+  popup, URL, rename on Enter (focus stays), header rows, retries, close and
+  reopen with everything kept, light and dark, with no CSP violations and
+  no console errors.
+
 ## Out of scope
 
 - **Page mode** (05). The editor's model stays the definition, so 05 adds a
   second view of it.
+- **What a step hands on, and what comes in with its shape** (raised
+  2026-10-28): an optional mapping for what a step gives the steps after it,
+  and the panel and cards showing its parents' results as they arrive. For
+  page mode (05) or typed contracts (07); not decided.
 - **Credentials** (06). Until then a secret header is typed into the node
   and stored in the definition, as the API stores it today.
 - **Rewriting references** when a node is renamed.
@@ -525,14 +629,14 @@ Decided while building, without a question (each can be overruled):
    Evaluated over that, the preview shows `{ "email": "ada@example.com" }`.
    The question is who puts that document together:
    - a) The browser. It already has the last run, to show its results, so
-     it builds the document from it, with only the nodes upstream of the
-     one being edited, and sends it with the expression. The server just
+     it builds the document from it, with only the nodes that run before
+     the one being edited, and sends it with the expression. The server just
      evaluates. The same endpoint also takes sample data typed by hand, so
      a preview works before anything has run.
    - b) The server. The browser sends the expression, the run's id and the
-     node's id; the server loads the run, picks the upstream nodes, builds
-     the document and evaluates. The "which nodes are upstream" logic
-     lives only on the server, but a preview needs a run first.
+     node's id; the server loads the run, picks the nodes that ran before
+     it, builds the document and evaluates. The "which nodes come before"
+     logic lives only on the server, but a preview needs a run first.
 
    Either way, stored responses have secrets redacted and bodies capped at
    256 KiB, so a preview can differ from a run on exactly those.
@@ -585,7 +689,7 @@ Decided while building, without a question (each can be overruled):
 | 1 | Where the browser keeps the token | **d, an `HttpOnly` session cookie**: signed, expiring, `Secure`, `SameSite=Strict`, set by a sign-in endpoint; an `Origin` check on writes; the bearer token stays for scripts, agents and served callers. This revisits plan 03's answer 5 ("no cookies"), which was about the event stream; the stream works with the cookie too |
 | 2 | The upstream library | **07**, with the OpenAPI import. D14 stays proposed until then |
 | 3 | Expression fields | **plain textareas in 04**, with a Format button on the JSON fields (run input, schemas). Your own JSONata support (highlighting, completion, inline errors from the server, formatting in your style) becomes **plan 10**, after 04: a CodeMirror 6 language package in its own repo, published under your npm scope, starting from gnata-sqlite's MIT grammar (its notice kept), which is derived from the same parser the server uses. CodeMirror replaces the textareas when it lands |
-| 4 | A preview's document | **a, the browser builds it**: from the last run, or from sample data typed by hand, sent with the expression; the server only evaluates |
+| 4 | A preview's document | **a, the browser builds it**: from the last run, or from sample data typed by hand, sent with the expression; the server only evaluates. **Revised the same day**, when samples moved into the steps (phase D): the server simulates the steps before the expression over their samples, since that means evaluating transforms, and JSONata runs only on the server |
 | 5 | The browser test | **in `just check`**, with only the headless shell |
 | 6 | Problems as you type | **yes**, through `POST /v1/validate` a moment after each change |
 | 7 | Toasts | **shadcn's Toast**, on Base UI; no sonner |
