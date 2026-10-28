@@ -64,6 +64,9 @@ type Definition struct {
 
 	// OutputSchema A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet.
 	OutputSchema map[string]interface{} `json:"output_schema,omitempty"`
+
+	// UI How the editor draws the workflow. The engine ignores it.
+	UI *UI `json:"ui,omitempty"`
 }
 
 // Edge defines model for Edge.
@@ -116,6 +119,12 @@ type Node struct {
 // NodeKind defines model for NodeKind.
 type NodeKind string
 
+// Position A point on the canvas. A missing coordinate reads as 0.
+type Position struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
 // Retry Retries transport errors, timeouts, 429 and 5xx responses, with backoff and Retry-After honoured.
 type Retry struct {
 	// Attempts Total attempts, the first included.
@@ -123,4 +132,10 @@ type Retry struct {
 
 	// Idempotent The upstream treats repeats of this request as one, so a POST or PATCH may be retried too. They're then sent with an Idempotency-Key header.
 	Idempotent bool `json:"idempotent,omitempty"`
+}
+
+// UI defines model for UI.
+type UI struct {
+	// Positions Where each node sits on the editor's canvas, keyed by node id. A node without one is laid out by the editor; a position for a node that isn't in the workflow is ignored.
+	Positions map[string]Position `json:"positions,omitempty"`
 }

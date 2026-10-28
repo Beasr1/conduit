@@ -36,6 +36,33 @@ components:
           type: object
           additionalProperties: true
           description: A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet.
+        ui:
+          $ref: "#/components/schemas/UI"
+          description: How the editor draws the workflow. The engine ignores it.
+          x-go-type-skip-optional-pointer: false
+
+    UI:
+      type: object
+      additionalProperties: false
+      properties:
+        positions:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Position"
+          description: Where each node sits on the editor's canvas, keyed by node id. A node without one is laid out by the editor; a position for a node that isn't in the workflow is ignored.
+
+    Position:
+      type: object
+      required: [x, y]
+      additionalProperties: false
+      description: A point on the canvas. A missing coordinate reads as 0.
+      properties:
+        x:
+          type: number
+          format: double
+        y:
+          type: number
+          format: double
 
     Node:
       type: object

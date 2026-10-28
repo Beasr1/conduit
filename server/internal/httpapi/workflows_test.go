@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
+	"github.com/Beasr1/conduit/server/internal/workflow"
 )
 
 const validDef = `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'ok': true }"}], "output": "nodes.a.body"}`
@@ -115,6 +116,11 @@ func TestCreateWorkflow_Refusals(t *testing.T) {
 			"request": {"method": "GET", "url": "https://x.example/", "timeout_ms": 1.5}}]}}`,
 			422, "invalid_request", "/definition/nodes/0/request/timeout_ms invalid_type",
 		},
+		{
+			"a position that isn't one", `{"slug": "x", "name": "x", "definition": {"nodes": [{"id": "a", "kind": "transform", "expr": "1"}],
+			"ui": {"positions": {"a": {"x": "120", "y": 0, "z": 1}}}}}`,
+			422, "invalid_request", "/definition/ui/positions/a/x invalid_type, /definition/ui/positions/a/z unknown_field",
+		},
 		{"not JSON", `{"slug": `, 400, "invalid_json", ""},
 		{"too large", `{"slug": "` + strings.Repeat("x", maxBody) + `"}`, 413, "too_large", ""},
 	}
@@ -172,6 +178,26 @@ func TestGetWorkflow(t *testing.T) {
 		if p := problemOf(t, r); r.status != http.StatusNotFound || p.Code != "not_found" {
 			t.Errorf("GET %s = %d %+v", id, r.status, p)
 		}
+	}
+}
+
+// The editor's positions are stored with the revision and come back as they
+// were sent. A definition without them comes back without a ui block.
+func TestGetWorkflow_KeepsPositions(t *testing.T) {
+	t.Parallel()
+	placed := create(t, `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "ui": {"positions": {"a": {"x": 120.5, "y": -40}}}}`)
+	r := call(t, http.MethodGet, "/v1/workflows/"+placed.Workflow.ID, "")
+	var got gen.WorkflowRevision
+	if err := json.Unmarshal(r.body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if ui := got.Revision.Definition.UI; ui == nil || ui.Positions["a"] != (workflow.Position{X: 120.5, Y: -40}) {
+		t.Errorf("positions = %+v; body %s", ui, r.body)
+	}
+
+	r = call(t, http.MethodGet, "/v1/workflows/"+create(t, validDef).Workflow.ID, "")
+	if strings.Contains(string(r.body), `"ui"`) {
+		t.Errorf("a definition without positions gained a ui block: %s", r.body)
 	}
 }
 

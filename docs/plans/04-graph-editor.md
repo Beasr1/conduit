@@ -2,8 +2,8 @@
 
 Status: accepted 2026-10-28, with all seven questions answered (Answers, at
 the end); D10, D11 and D13 accepted with it, and D14 waits for 07. Phase A
-is built, not yet committed (Phase A, as built). Building it raised
-question 8, since answered.
+is committed (69bb36e), and Phase B is in progress. Building Phase A
+raised question 8, since answered.
 
 ## Goal
 
@@ -39,9 +39,14 @@ Also seen:
 
 **Server:**
 - **`ui` in the definition** (`schema/workflow.yaml`): each node's position,
-  `{"positions": {"<id>": [x, y]}}`. Optional. A position for a node that
-  doesn't exist is ignored rather than reported: it harms nothing, and the
-  editor never writes one.
+  `{"positions": {"<id>": {"x": 120, "y": 40}}}`. Optional. A position for a
+  node that doesn't exist is ignored rather than reported: it harms nothing,
+  and the editor never writes one. The server stores positions and never
+  computes one. Planned as `[x, y]`; built as `{x, y}`, your call in Phase B,
+  because Go and TypeScript both type it exactly and the request shape check
+  reports a wrong or extra field with its pointer. Dropped and then restored
+  in Phase B: in a graph editor, the arrangement is part of what the user
+  built.
 - **`POST /v1/preview`**: evaluate one expression, template or condition
   against a document, through `internal/transform` with its guardrails on,
   and answer with the value or the error. This is D6: the browser never
@@ -66,9 +71,11 @@ Also seen:
 
 **The model and the view.**
 - The definition from the API is the model. React Flow's nodes and edges
-  are a view of it, built by `toFlow(definition)` and turned back by
-  `toDefinition(nodes, edges)`: pure functions in `features/editor`, with
-  round-trip tests (web.md).
+  are a view of it, built by `toFlow(definition)`, a pure function in
+  `features/editor` (web.md). Nothing is read back from the canvas: an edit,
+  a new edge or the end of a drag changes the draft, and the view follows.
+  The plan also had a `toDefinition(nodes, edges)`; with edits going
+  straight into the draft, it had nothing to do, so Phase B dropped it.
 - One Zustand store per open editor holds the draft and the editor's state
   (selection, open panel). The saved revision stays in the query cache;
   it's never copied into the store.
@@ -80,9 +87,12 @@ Also seen:
   store, through a selector. Every handle has an id, since an edge names
   the handle it joins. Derived nodes are never mirrored into state by an
   effect, which loops when its input is a fresh `[]` on every render.
-- Positions come from `ui.positions`. Without them the editor lays the
-  graph out left to right (library: see Dependencies), and the next save
-  writes them.
+- Positions come from `ui.positions`, and nodes are draggable. A node
+  without a position, in a definition made through the API or one just
+  added, is placed by the editor, left to right (library: see
+  Dependencies), and the next save writes where it went. A drag moves the
+  node on the canvas as it happens, and writes its position into the draft
+  when it ends.
 - Node ids are the names expressions use (`nodes.fetch_user.body`), so the
   editor asks for one, suggests one from the node's label, and checks it
   against the definition's id pattern as it's typed. Renaming a node warns
@@ -176,7 +186,7 @@ a session cookie that scripts can't read (answer 1):
 
 | Layer | What | How |
 |---|---|---|
-| Pure functions | `toFlow`/`toDefinition`, layout of a definition without `ui`, pointer → field, the stream parser | Vitest |
+| Pure functions | `toFlow`, placing nodes that have no position, pointer → field, the stream parser | Vitest |
 | Components | the editor renders the spec example; adding a node; connecting two; a save that comes back with problems | Vitest, Testing Library, MSW handlers typed from `src/gen` |
 | The flow | Done, above | Playwright against `just dev`'s pieces: Postgres, the server, the built web app, and a small test upstream. The server runs with `CONDUIT_ALLOW_PRIVATE_NETWORKS=true`, so it can reach the test upstream on loopback |
 
@@ -204,7 +214,7 @@ checked again when it's added.
 | @hookform/resolvers | 6.0.0 | 2026-10-19 | MIT | Zod schemas in react-hook-form |
 | openapi-fetch | 0.17.0 | 2026-02-11 | MIT | a client typed from `src/gen`; released with openapi-typescript 7.13.0. `parseAs: "stream"` hands back the event stream's body unread |
 | eventsource-parser | 4.1.2 | 2026-10-12 | MIT | the event-stream format by the spec's rules, in 1.9 kB gzip with no dependencies, so we don't keep our own. Reconnecting stays ours |
-| @dagrejs/dagre | 3.1.1 | 2026-08-08 | MIT | layout for a definition without `ui`; React Flow's guide: "If you need to organize your flows into a tree, we highly recommend dagre". 16 kB gzip |
+| @dagrejs/dagre | 3.1.1 | 2026-08-08 | MIT | placing nodes that have no position; React Flow's guide: "If you need to organize your flows into a tree, we highly recommend dagre". 16 kB gzip |
 | @playwright/test | 1.64.1 | 2026-10-14 | Apache-2.0 | the browser test (web.md) |
 | prettier-plugin-tailwindcss | 0.8.1 | 2026-07-15 | MIT | class order; needs `tailwindStylesheet` for Tailwind 4 |
 
@@ -273,9 +283,9 @@ Found along the way:
 - [x] Sign-in, sign-out, and the `401` path in the app.
 - [x] The workflow list: list, create, open.
 
-**Phase B: the editor**
-- [ ] `ui` in `schema/workflow.yaml`.
-- [ ] `toFlow`/`toDefinition`, the layout, and their tests.
+**Phase B: the editor** (in progress)
+- [x] `ui` in `schema/workflow.yaml`.
+- [x] `toFlow`, placing nodes that have no position, and their tests.
 - [ ] Nodes, edges, forms, the workflow's settings (input schema, output).
 - [ ] Save with `If-Match`, problems on fields, publish.
 
@@ -380,6 +390,31 @@ tried.
   refuses any cookie write that isn't `same-origin`. Ours stays, being the
   stricter.
 
+## Phase B, as built (so far)
+
+Decided with you:
+- **Positions are stored**, in the definition's `ui` block, as `{x, y}`. Not
+  storing them was tried first, then reversed: in a graph editor, the
+  arrangement is part of what the user built.
+- **The editor places a node that has no position**, never the server. Layout
+  depends on how the browser draws a node, and one layout engine, not a
+  second in Go, keeps every placement the same.
+
+Decided while building, without a question (each can be overruled):
+- **No `toDefinition`.** The draft is the one source: edits change it, and
+  `toFlow` redraws. A drag moves the node as it happens and writes its
+  position when it ends.
+- **Every node is drawn 240 by 72**, so placement and drawing agree.
+- **Nodes without a position are laid out with dagre, then put below the
+  placed ones**, so a node an agent or a script adds never lands on one
+  somebody placed.
+- **A draft saved with problems still draws.** A repeated or empty id gets a
+  `#<index>` key, which no valid id can clash with; an edge whose end names
+  no node isn't drawn but is listed, so the problems panel can offer to
+  remove it; an unknown kind draws as an `unknown` node.
+- **@dagrejs/dagre stays at 3.1.1**: 3.1.2 and 3.1.3 were under five days
+  old when it was added.
+
 ## Out of scope
 
 - **Page mode** (05). The editor's model stays the definition, so 05 adds a
@@ -401,7 +436,9 @@ tried.
   stays.
 - **Deleting workflows.** The API has no delete yet.
 - **Dry-run and test cases** (07), **AI authoring** (08).
-- **A code editor for expressions**: plan 10 (answer 3).
+- **A code editor for expressions**: plan 10 (answer 3), which now comes
+  before 08. Each expression field is a plain textarea whose component says
+  plan 10 replaces it.
 
 ## Open questions
 
@@ -568,5 +605,5 @@ Listed so each can be overruled:
 - **The session cookie is stateless** (an expiry and its HMAC), keyed from
   the API token, rather than a sessions table.
 - **The JSONata package is plan 10**, a new number after 09 rather than
-  renumbering 05–09.
+  renumbering 05–09. It has since moved up to come before 08.
 - **The release-age guard made strict**, as a change of its own.

@@ -46,6 +46,17 @@ func TestValidate_AcceptsSpecExample(t *testing.T) {
 	}
 }
 
+// Positions are the editor's business. One for a node that isn't in the
+// workflow is ignored, not reported.
+func TestValidate_IgnoresPositions(t *testing.T) {
+	t.Parallel()
+	d := decode(t, `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}],
+		"ui": {"positions": {"a": {"x": 0, "y": 0}, "gone": {"x": 120.5, "y": -40}}}}`)
+	if ps := Validate(d); len(ps) > 0 {
+		t.Fatalf("Validate() = %v, want no problems", ps)
+	}
+}
+
 func TestValidate_ReportsEachProblem(t *testing.T) {
 	t.Parallel()
 	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`

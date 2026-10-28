@@ -137,7 +137,7 @@ Small edits ("add a header to fetch_user") skip steps 2 and 3.
 | Drafts carry a `revision`, and writes send `If-Match` | small | an agent and a person can't overwrite each other |
 | Provenance per version: actor, on whose behalf, client, model, source spec | a few columns | audit; evals per model |
 | `input_schema` and `output_schema` per workflow | small | run validation, served APIs (03), workflows as agent tools |
-| Optional layout (`ui`); the editor lays out graphs without it | small | generated definitions render |
+| Optional layout (`ui`); the editor places nodes that have no position | small | generated definitions render |
 | Auth puts a principal in the request context (only one in v1) | none | scoped agent tokens |
 | Credentials only by ID; the API never returns secret values | already D14 | the model never sees secrets |
 | Per-node traces readable through the API | already in 03 | agents debug their own drafts |

@@ -104,14 +104,16 @@ the API is `/api` on the page's own origin.
 ## Editor (React Flow)
 
 - The workflow definition from the API is the model. React Flow nodes and
-  edges are a view of it. `toFlow(definition)` and `toDefinition(nodes,
-  edges)` are pure, tested functions in `features/editor`.
+  edges are a view of it, built by `toFlow(definition)`, a pure, tested
+  function in `features/editor`. Edits change the definition, and the view
+  follows; nothing is read back from the canvas.
 - Graph mode and page mode edit the same definition. Page mode is a
   constrained view: ordered pages, and the nodes on a page run in
   parallel. A definition that doesn't fit page mode opens in graph mode.
-- Node positions live in the definition's optional `ui` block. When it's
-  missing (an imported or generated definition), the editor lays the graph
-  out itself.
+- Node positions live in the definition's optional `ui` block, and nodes
+  are draggable. The editor places a node that has no position (in a
+  definition made through the API, or one just added), and the next save
+  writes it. The server stores positions and never computes one.
 - Define `nodeTypes` and `edgeTypes` at module scope. Wrap custom nodes in
   `memo` and keep handlers stable.
 - Read store slices through selectors. Never subscribe to the whole nodes
@@ -142,7 +144,7 @@ the API is `/api` on the page's own origin.
 
 ## Tests
 
-- Pure logic gets unit tests first: `toFlow`/`toDefinition`, the page-mode
+- Pure logic gets unit tests first: `toFlow`, the page-mode
   conversion, mapping helpers.
 - Component tests render with providers and MSW handlers. They assert what
   a user sees (roles, text), not the implementation. `src/test/` has the

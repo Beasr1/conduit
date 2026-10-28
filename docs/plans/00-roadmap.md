@@ -312,7 +312,7 @@ can do.
 | 07 tests-and-catalogue | dry-run; test cases; the upstream library (moved from 04, plan 04 answer 2), filled by importing upstreams from OpenAPI; per-workflow caller keys | a workflow's tests pass in dry-run without calling anything external; each served workflow has its own caller key |
 | 08 ai-authoring | an agent turns a spec into a draft workflow with tests (08-ai-authoring.md) | the eval set passes at an agreed rate; a person publishes every draft |
 | 09 later | parked ideas | Redis response cache, cron triggers, durable runs, loops, import/export; other step types: database, queue and script plugins, SOAP/XML, gRPC (D18) |
-| 10 jsonata-editing | after 04: your own JSONata language package for CodeMirror 6, in its own repo and published, starting from gnata-sqlite's MIT grammar; the editor's textareas become CodeMirror (plan 04 answer 3) | expressions highlighted, completed (`input.`, `nodes.<id>.body`, `$` functions), checked by the server inline, and formatted in your style |
+| 10 jsonata-editing | after 04 and before 08, moved up on 2026-10-28: your own JSONata language package for CodeMirror 6, in its own repo and published, starting from gnata-sqlite's MIT grammar; the editor's textareas become CodeMirror (plan 04 answer 3) | expressions highlighted, completed (`input.`, `nodes.<id>.body`, `$` functions), checked by the server inline, and formatted in your style |
 
 ## Risks
 

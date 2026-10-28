@@ -538,6 +538,19 @@ export interface components {
             /** @description A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source succeeded and this is true. Absent means true. */
             when?: string;
         };
+        /** @description A point on the canvas. A missing coordinate reads as 0. */
+        Position: {
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+        };
+        UI: {
+            /** @description Where each node sits on the editor's canvas, keyed by node id. A node without one is laid out by the editor; a position for a node that isn't in the workflow is ignored. */
+            positions?: {
+                [key: string]: components["schemas"]["Position"];
+            };
+        };
         /** @description A workflow. A node runs once its parents have finished and at least one edge into it was taken. */
         Definition: {
             nodes: components["schemas"]["Node"][];
@@ -552,6 +565,8 @@ export interface components {
             output_schema?: {
                 [key: string]: unknown;
             };
+            /** @description How the editor draws the workflow. The engine ignores it. */
+            ui?: components["schemas"]["UI"];
         };
     };
     responses: {

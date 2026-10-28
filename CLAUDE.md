@@ -4,9 +4,9 @@ No-code API orchestration. Users compose upstream API calls into a DAG,
 using a graph editor or a page-by-page builder, and map data between steps
 with JSONata. A Go engine runs it, fanning out in parallel.
 
-**Status: plan 04, the graph editor, is under way; its phase A is built
-(2026-10-28).** The web app signs in with a session cookie, lists workflows
-and creates them; the editor itself is phase B. What is left is in
+**Status: plan 04, the graph editor, is under way: phase A is committed,
+phase B is in progress (2026-10-28).** The web app signs in with a session
+cookie, lists workflows and creates them; phase B builds the editor itself. What is left is in
 docs/plans/04-graph-editor.md; the bigger picture is docs/plans/README.md.
 
 ## Read before working
