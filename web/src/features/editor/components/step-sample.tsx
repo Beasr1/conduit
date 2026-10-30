@@ -211,7 +211,7 @@ function sampleOf(n: Node | undefined, status?: number): Sample | undefined {
 }
 
 // withSample gives one of a step's responses its sample, or none.
-function withSample(
+export function withSample(
   n: Node,
   status: number | undefined,
   sample: Sample | undefined,

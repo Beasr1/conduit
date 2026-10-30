@@ -161,6 +161,9 @@ the API is `/api` on the page's own origin.
 - Each open run reads its event stream with one `fetch()` (D9), not
   `EventSource`, which hides a failed connection's status. Events update
   node status in the query cache.
+- The run the canvas shows is the store's, by its id; the run itself is the
+  query cache's, and its stream is a query that ends with the run. How a
+  step went is said in words with a mark, never by colour alone.
 
 ## Components and styling
 

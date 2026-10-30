@@ -382,7 +382,7 @@ test("typing that leaves the step as it was changes nothing", async () => {
   store.getState().pick("nodes", [{ id: "crm", selected: true }]);
   renderAt(
     <EditorContext value={store}>
-      <SidePanel />
+      <SidePanel workflow="wf-1" />
     </EditorContext>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Add header" }));

@@ -32,6 +32,8 @@ import {
   useProblemCount,
   useProblems,
 } from "@/features/editor/hooks/use-problems";
+import { useRunSteps } from "@/features/editor/hooks/use-runs";
+import { takenOf } from "@/features/editor/runs";
 import { useEditor } from "@/features/editor/store";
 
 // The room kept between a picked step and the canvas's edge.
@@ -64,8 +66,10 @@ export function Canvas() {
     return [...steps, on ? { ...card, selected: true } : card];
   }, [flow, moving, selected.nodes]);
   // A connection with problems is drawn in the problem colour, and its label
-  // says so in words too.
+  // says so in words too. While a run is shown, one the run didn't take is
+  // dashed, and its name says whether the run took it.
   const troubled = useProblems((p) => p.on === "connection");
+  const steps = useRunSteps();
   const edges = useMemo(() => {
     const wrong = new Set(
       troubled.map((f) => (f.place.on === "connection" ? f.place.index : -1)),
@@ -73,19 +77,30 @@ export function Canvas() {
     return flow.edges.map((e): FlowEdge => {
       const on = selected.edges.includes(e.id);
       const bad = e.data !== undefined && wrong.has(e.data.index);
-      if (!on && !bad) return e;
+      const line = e.data && draft.edges?.[e.data.index];
+      const taken =
+        steps && line
+          ? takenOf(line.on, steps(line.from), steps(line.to))
+          : undefined;
+      if (!on && !bad && taken === undefined) return e;
+      const classes = [bad && "problem", taken === false && "untaken"]
+        .filter(Boolean)
+        .join(" ");
       return {
         ...e,
         selected: on,
+        ...(classes ? { className: classes } : {}),
         ...(bad
+          ? { label: e.label ? `${String(e.label)} · problem` : "problem" }
+          : {}),
+        ...(line && taken !== undefined
           ? {
-              className: "problem",
-              label: e.label ? `${String(e.label)} · problem` : "problem",
+              ariaLabel: `Connection from ${line.from} to ${line.to}, ${taken ? "taken" : "not taken"} in this run`,
             }
           : {}),
       };
     });
-  }, [flow, selected.edges, troubled]);
+  }, [flow, selected.edges, troubled, steps, draft]);
   const settingsProblems = useProblemCount((p) => p.on === "settings");
 
   return (
@@ -169,6 +184,9 @@ export function Canvas() {
         >
           Workflow settings
           {settingsProblems > 0 && <ProblemMark count={settingsProblems} />}
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => openPanel("runs")}>
+          Runs
         </Button>
       </Panel>
       <KeepPickedInView />

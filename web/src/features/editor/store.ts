@@ -27,11 +27,16 @@ export interface EditorState {
   part: string;
   setPart: (part: string) => void;
   // What the side panel shows while nothing is picked: the workflow's own
-  // settings, or the list of problems. Opening one puts away what was
-  // picked, and picking something closes it.
-  panel: "settings" | "problems" | undefined;
-  openPanel: (panel: "settings" | "problems") => void;
+  // settings, the list of problems, or its runs. Opening one puts away what
+  // was picked, and picking something closes it.
+  panel: "settings" | "problems" | "runs" | undefined;
+  openPanel: (panel: "settings" | "problems" | "runs") => void;
   closePanel: () => void;
+  // The run the canvas shows, by its id, while it shows one. The run itself
+  // is the query cache's.
+  run: string | undefined;
+  showRun: (id: string) => void;
+  closeRun: () => void;
   // show picks one step, connection or the response card, as a click on the
   // canvas would, opens a step on part, its request unless told, and closes
   // the panel.
@@ -62,6 +67,9 @@ export function createEditorStore(draft: Definition): EditorStore {
     panel: undefined,
     openPanel: (panel) => set({ panel, selected: { nodes: [], edges: [] } }),
     closePanel: () => set({ panel: undefined }),
+    run: undefined,
+    showRun: (run) => set({ run }),
+    closeRun: () => set({ run: undefined }),
     show: (kind, key, part = "request") =>
       set({
         panel: undefined,

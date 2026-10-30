@@ -46,7 +46,7 @@ export function Editor({
           <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border">
             <Canvas />
           </div>
-          <SidePanel />
+          <SidePanel workflow={workflow.id} />
         </div>
       </Checked>
     </EditorContext>

@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HttpStepForm } from "@/features/editor/components/http-step-form";
 import { ProblemMark } from "@/features/editor/components/problem-mark";
 import { StepIdField } from "@/features/editor/components/step-id-field";
+import { RunSent } from "@/features/editor/components/step-run";
 import {
   AddResponse,
   StepOutput,
@@ -92,6 +93,7 @@ export function StepSettings({ index }: { index: number }) {
           {/* Each stays mounted while hidden, so what's typed survives a
               switch. */}
           <TabsContent value="request" keepMounted>
+            <RunSent index={index} />
             <HttpStepForm index={index} />
           </TabsContent>
           <TabsContent value="2xx" keepMounted>

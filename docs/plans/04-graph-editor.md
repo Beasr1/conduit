@@ -5,8 +5,8 @@ the end); D10, D11 and D13 accepted with it, and D14 waits for 07. Phase A
 is committed (69bb36e), and so is Phase B, its last step in eabb7b6. Phase D
 now comes before C: its samples, previews, outputs by status and a step's
 blocks are committed (f9e7484, e98e50a, 2026-10-30), and its API's answers
-are planned for after C. Building Phase A raised question 8, since
-answered.
+are planned for after C. Phase C, runs, is built, not yet committed
+(2026-10-30). Building Phase A raised question 8, since answered.
 
 ## Goal
 
@@ -506,10 +506,63 @@ Done means the steps above, `just check` green, and your 404 example
 clicked through: user's 404 block opens its tab, Connect to joins it to
 create_user, and the line opens its condition.
 
-**Phase C: runs** (after D)
-- [ ] `lib/events.ts` and its tests.
-- [ ] Run with an input, live statuses, node inspection (a step's last
-      response in its Preview tab, beside its sample), the run history.
+**Phase C: runs** (after D; detailed 2026-10-30, late night, from wireframes; built, not yet committed)
+- [x] A test upstream, `server/cmd/testupstream`: a small server answering
+      known requests, a user by id or a 404, orders, preferences, a contact
+      created with 201, a slow answer and a failing one, so runs repeat
+      exactly. `just upstream` runs it on 127.0.0.1:8090, and `just dev`
+      starts it too, the server allowed to call it (private networks and
+      port 8090, in dev only).
+- [x] `lib/events.ts` and its tests: a run's event stream read with
+      `fetch()`, parsed as the WHATWG spec says, resumed with
+      `Last-Event-ID` after a dropped connection, and stopped at the `run`
+      event or a `204`. Events update the run in the query cache.
+- [x] Run, beside Save: it asks for an input, the sample input to start,
+      saves unsaved changes first, since a run needs a revision, and shows
+      a `400` under the input. It's off while a newer revision exists.
+- [x] The run bar, above the canvas: the run, its revision, how it went and
+      how long it took; Runs, the history (the editor's runs and callers'
+      alike), and Close run. It says when the draft has moved on from the
+      revision that ran.
+- [x] Statuses on the canvas: each step's request block says how it ended,
+      in words and a mark (running, retrying, ✓ 201, ✗ timeout, skipped),
+      and the response it got is marked. A line taken is solid, one not
+      taken dashed.
+- [x] A step's real data in its tabs: Request shows what it sent, above the
+      preview of what it would; the tab of the response it got shows what
+      came back beside its sample, with Keep as sample. A failed or skipped
+      step says why. The response card shows what the run answered.
+- [x] Failing tests first; Chromium through nginx (the CSP, runs that
+      fail) and through `just dev` with the test upstream (runs that
+      succeed), light and dark.
+- [x] Docs: web.md, Phase C as built.
+
+Decided with you on 2026-10-30 (late night), from wireframes:
+- **A run shows on the canvas, with a run bar.** A page of its own per run,
+  a read-only copy of the graph, was the other option: two views of one
+  graph to keep in step.
+- **A step's real data shows in its blocks' tabs**: what it sent in
+  Request, what it got in that response's tab, beside the sample. A Run tab
+  of its own while a run is shown was the other.
+- **Runs call a local test upstream** while we build and check them. A
+  public test API was the other: nothing to build, but checks would need
+  the internet and couldn't make an answer slow or fail on cue.
+
+Decided while drafting, yours to overrule:
+1. **The run shown is the editor's**, by its id; the run itself lives in
+   the query cache, which its events update (web.md: server data never
+   goes in the store).
+2. **A line counts as taken** when its step answered on its response and
+   the step it leads to ran. The server doesn't say which lines it took,
+   so a line whose condition failed, into a step another line took it to,
+   shows as taken. Telling it exactly needs the engine to record taken
+   lines: a TODO, at `web/src/features/editor/runs.ts:96`.
+3. **Keep as sample** copies the run's body and headers into that
+   response's sample, and for 2xx its status too.
+4. **Runs lists the workflow's latest 50 runs**, newest first; more pages
+   come later.
+5. **`just up` stays as production is**: its server can't call private
+   addresses, so runs there reach only public APIs.
 
 Samples and previews, decided with you on 2026-10-30:
 - **They come before runs.** You couldn't tell what a request could be
@@ -640,6 +693,16 @@ Decided while drafting, yours to overrule:
    running.
 3. **An answer's schema stays on the card**: it's the contract a caller is
    promised, while the body is the step's.
+4. **The editor tells; the person configuring merges** (your question,
+   2026-10-30). Most answers have one line in and need no merger. For a
+   merger's lines, the editor says from the graph whether they can come
+   together in one run: never, when they rest on different responses of
+   one step before them (user's 2xx, and create_user reached only through
+   its 404); maybe, through parallel branches or a condition it can't
+   judge. It offers a start to the merger's JSONata, whichever ran or both
+   side by side, and the answer's preview shows every way in. Merging by
+   itself, such as a deep merge of objects, would pick the shape for you:
+   the unclear contract this avoids.
 
 Open: what the API answers when a run takes no line into the card (Logic
 Apps answers 502, "even if the workflow finishes successfully"; 200 with
@@ -649,7 +712,7 @@ can lead to an answer (the "failed" output left open with outputs); the
 names in the definition, settled when it's built.
 
 **Phase E: the browser test**
-- [ ] Playwright, the test upstream, and the Done flow.
+- [ ] Playwright, against the test upstream (built in C), and the Done flow.
 - [ ] web.md corrected; CLAUDE.md, repo.md and the roadmap updated.
 
 Each phase ends with `just check` green and is committed on its own.
@@ -893,6 +956,9 @@ overruling:
   edits a request body, a transform's expression, a connection's condition
   and the output, so one TODO covers all four:
   - `web/src/features/editor/components/mapping-field.tsx:110`
+- Deliberate TODO for exact taken lines in a run (Phase C, decided while
+  drafting, 2):
+  - `web/src/features/editor/runs.ts:96`
 
 Found in Chromium while checking 3c, and fixed:
 - **Every edit blinked all the edges off.** React Flow keeps a node's
@@ -1234,6 +1300,63 @@ Seen, not fixed:
   were so before; the editor at narrow widths is plan 11's.
 - A new step lands in the middle of the view, so a connection to it can
   run behind another step. Placement is plan 11's too.
+
+## Phase C, as built
+
+The steps of "Phase C: runs" (2026-10-30, late night). The five drafting
+decisions held. Decided while building:
+- **The test upstream** answers `GET /users/{id}` (a user for 1 to 9, a 404
+  for any other), `POST /users` (201), `GET /orders` by `?user_id`,
+  `GET /prefs/{id}`, `POST /contacts` (201), `GET /slow?ms=` and
+  `GET /status/{code}`. `just upstream` runs it; `just dev` starts it, and
+  lets that one server process call it: private networks allowed, and port
+  8090 added to 80 and 443.
+- **A run's stream is a query of its own** (`useFollowRun`), which ends when
+  the run does. TanStack aborts it once nothing shows the run, and it
+  neither retries nor refetches on focus, since `followRun` reconnects by
+  itself. Each node event updates the run's live map in the cache; the
+  `run` event fetches the run again, which then has every step's request
+  and response.
+- **A step's status** is what the server recorded, once it has; else its
+  last event; else "waiting" while the run goes on, and "not run" once it
+  ended. In words: "201, 140 ms"; "done, 3 ms" for a transform; "failed:
+  503"; "failed: timeout, after 3 attempts"; "retrying, attempt 2";
+  "running"; "skipped"; "cancelled". A mark goes with each, and the running
+  one spins only where motion is allowed.
+- **The run bar sits in the header**, which knows the revision the draft
+  builds on: "Run of revision 3, started 10:46:38 PM: succeeded in 14 ms",
+  the time in the browser's own format, then ". The draft has changed
+  since." once it has. It's a status region,
+  so a screen reader hears the run end.
+- **Run is beside Save**, and off while a newer revision exists. Its input
+  starts as the sample input, and a `400`'s problems show under it, each
+  at its pointer.
+- **Runs is on the canvas's toolbar too**, so the history opens with no run
+  shown. Each run says when it started, its revision, how it went, and
+  "run here" or "called at its URL".
+- **Keep as sample** keeps the headers as recorded, content-length and date
+  included, and the status for 2xx. A body cut at 256 KiB can't be kept.
+- **A line's name says whether the run took it**, as dashes alone aren't a
+  signal; the response card says how the run went, and its panel what the
+  run answered.
+- **Checked**: 282 web tests (14 for the stream reader, 16 for statuses,
+  5 for the run's screens), the test upstream's own tests, lint, the
+  build; 13 mutations, each caught (one after its test was given two data
+  lines, so a CRLF read as two line ends shows). Chromium through `just
+  dev` with the test upstream, light and dark, on a `pw-runs` workflow: a
+  run on user 7 (user 200, orders 200, create_user skipped, its line
+  dashed); user's Request and 2xx tabs with what it sent and got, and Keep
+  as sample; a run on user 99 (user 404, create_user 201, orders skipped);
+  the response card; the runs list; Close run. No console warnings or
+  errors. Chromium through nginx, light and dark: the same workflow's run
+  fails at user, as the server there may not call loopback, and reads
+  "failed: no answer" with the reason; the steps after say "cancelled". No
+  CSP violations and no console problems.
+
+Seen, not fixed:
+- A call the SSRF guard refuses reads "failed: no answer", where "blocked"
+  is truer; the reason beside it says so.
+- Keep as sample keeps headers a sample doesn't need, such as date.
 
 ## Out of scope
 

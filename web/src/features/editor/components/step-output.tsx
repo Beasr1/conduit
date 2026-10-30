@@ -10,6 +10,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { StepConnections } from "@/features/editor/components/step-connections";
 import { StepResponse } from "@/features/editor/components/step-response";
+import { RunGot } from "@/features/editor/components/step-run";
 import { StepSample } from "@/features/editor/components/step-sample";
 import { addOutput } from "@/features/editor/edits";
 import { whole } from "@/features/editor/fields";
@@ -30,9 +31,17 @@ export function StepOutput({
   index: number;
   status?: number;
 }) {
+  const [kept, setKept] = useState(0);
   return (
     <div className="flex flex-col gap-5">
-      <StepSample index={index} status={status} />
+      <RunGot
+        index={index}
+        status={status}
+        kept={() => setKept((n) => n + 1)}
+      />
+      {/* Keyed by the times a run's answer was kept, so its fields show
+          the sample they were given rather than what was typed before. */}
+      <StepSample key={kept} index={index} status={status} />
       <StepConnections index={index} on={status} />
       <StepResponse index={index} />
     </div>

@@ -4,12 +4,16 @@ import {
   Position,
   useUpdateNodeInternals,
 } from "@xyflow/react";
+import { CheckIcon } from "lucide-react";
 import { memo, type ReactNode, useEffect } from "react";
 
 import { ProblemMark } from "@/features/editor/components/problem-mark";
+import { RunMark } from "@/features/editor/components/step-run";
 import { reads } from "@/features/editor/edits";
 import { type FlowNode, handlesOf } from "@/features/editor/flow";
 import { atStep, useProblemCount } from "@/features/editor/hooks/use-problems";
+import { useRun, useStepRun } from "@/features/editor/hooks/use-runs";
+import { runSaid } from "@/features/editor/runs";
 import { useEditor } from "@/features/editor/store";
 
 // Frame is a step's request block, and the inside of a step that has no
@@ -40,7 +44,9 @@ function Frame({
         </span>
         {problems > 0 && <ProblemMark count={problems} />}
       </span>
-      <span className="truncate text-xs text-muted-foreground">{children}</span>
+      <span className="truncate text-xs text-muted-foreground [&_svg]:size-3 [&_svg]:shrink-0">
+        {children}
+      </span>
     </div>
   );
 }
@@ -77,22 +83,41 @@ const HttpNode = memo(function HttpNode({ id, data }: NodeProps<FlowNode>) {
   const update = useUpdateNodeInternals();
   const handles = outputs.join(" ");
   useEffect(() => update(id), [update, id, handles]);
+  // While a run is shown, the request block says how the step went, and
+  // the response it got is marked.
+  const run = useStepRun(node?.id ?? "");
+  const got =
+    run?.state !== "succeeded" || run.status === undefined
+      ? undefined
+      : run.status >= 200 && run.status <= 299
+        ? "2xx"
+        : String(run.status);
   if (!node) return null;
   return (
     <Card problems={problems}>
       <Frame id={node.id} problems={problems} part="request">
-        {node.request
-          ? `${node.request.method} ${node.request.url || "(no URL yet)"}`
-          : "No request yet"}
+        {run ? (
+          <RunMark run={run} />
+        ) : node.request ? (
+          `${node.request.method} ${node.request.url || "(no URL yet)"}`
+        ) : (
+          "No request yet"
+        )}
       </Frame>
       <div className="flex w-18 shrink-0 flex-col border-l font-mono text-xs">
         {outputs.map((o) => (
           <div
             key={o}
             data-part={o}
-            className="relative flex flex-1 items-center border-b px-2.5"
+            className="relative flex flex-1 items-center gap-1 border-b px-2.5 [&_svg]:size-3"
           >
             {o}
+            {o === got && (
+              <>
+                <CheckIcon aria-hidden />
+                <span className="sr-only">, the response it got</span>
+              </>
+            )}
             <Handle type="source" position={Position.Right} id={o} />
           </div>
         ))}
@@ -112,11 +137,12 @@ const TransformNode = memo(function TransformNode({
 }: NodeProps<FlowNode>) {
   const node = useEditor((s) => s.draft.nodes[data.index]);
   const problems = useProblemCount(atStep(data.index));
+  const run = useStepRun(node?.id ?? "");
   if (!node) return null;
   return (
     <Card problems={problems}>
       <Frame id={node.id} problems={problems}>
-        {node.expr || "No expression yet"}
+        {run ? <RunMark run={run} /> : node.expr || "No expression yet"}
       </Frame>
       <Handle type="source" position={Position.Right} id="out" />
     </Card>
@@ -148,6 +174,11 @@ const ResponseNode = memo(function ResponseNode() {
     return read.length === 0 ? "Reads no step" : `Reads ${read.join(", ")}`;
   });
   const problems = useProblemCount((p) => p.on === "response");
+  // While a run is shown, the card says how it went instead.
+  const run = useRun(
+    useEditor((s) => s.run),
+    (r) => `In this run: ${runSaid(r)}`,
+  ).data;
   return (
     <div
       data-problems={problems > 0 || undefined}
@@ -157,7 +188,9 @@ const ResponseNode = memo(function ResponseNode() {
         <span className="truncate text-sm font-medium">Response</span>
         {problems > 0 && <ProblemMark count={problems} />}
       </span>
-      <span className="truncate text-xs text-muted-foreground">{line}</span>
+      <span className="truncate text-xs text-muted-foreground">
+        {run ?? line}
+      </span>
     </div>
   );
 });

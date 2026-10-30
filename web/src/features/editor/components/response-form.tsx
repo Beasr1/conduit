@@ -3,6 +3,7 @@ import {
   JsonBlock,
   MappingField,
 } from "@/features/editor/components/mapping-field";
+import { RunAnswered } from "@/features/editor/components/step-run";
 import { reads, setField } from "@/features/editor/edits";
 import { useProblems } from "@/features/editor/hooks/use-problems";
 import { usePreview } from "@/features/editor/hooks/use-preview";
@@ -20,6 +21,7 @@ export function ResponseForm() {
   );
   return (
     <>
+      <RunAnswered />
       <MappingField
         id="response-output"
         label="Output"

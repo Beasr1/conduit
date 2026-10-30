@@ -4,6 +4,7 @@ import {
   Skipped,
 } from "@/features/editor/components/mapping-field";
 import { StepConnections } from "@/features/editor/components/step-connections";
+import { RunGave } from "@/features/editor/components/step-run";
 import { parents, updateNode } from "@/features/editor/edits";
 import { atStep, useProblems } from "@/features/editor/hooks/use-problems";
 import { usePreview } from "@/features/editor/hooks/use-preview";
@@ -20,6 +21,7 @@ export function TransformStepForm({ index }: { index: number }) {
   const problems = useProblems(atStep(index, "expr"));
   return (
     <>
+      <RunGave index={index} />
       <MappingField
         id="step-expr"
         label="Expression"

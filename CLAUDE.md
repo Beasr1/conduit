@@ -11,8 +11,9 @@ a session cookie, lists workflows and creates them, and edits, checks, saves
 and publishes one in graph mode, previewing what each step reads and sends
 over sample data, and branching on the status a step gets back. A step is
 drawn as its request and a block per response, and a click opens that part.
-What is left is in docs/plans/04-graph-editor.md; the bigger picture is
-docs/plans/README.md.
+Phase C is built too, not yet committed: runs, started with an input and
+followed live on the canvas. What is left is in docs/plans/04-graph-editor.md;
+the bigger picture is docs/plans/README.md.
 
 ## Read before working
 
@@ -62,9 +63,10 @@ just                list recipes
 just setup          create .env; install the pinned golangci-lint (.tools/bin) and web dependencies
 just db-up          Postgres on 127.0.0.1:5432; db-reset deletes it and starts afresh
 just migrate        apply migrations; `just migrate status` lists them
-just dev            Postgres, the server and the web app together; Ctrl-C stops them
+just dev            Postgres, the server, the web app and the test upstream together; Ctrl-C stops them
 just dev-server     API server on http://127.0.0.1:8080, after db-up and migrate
 just dev-web        web app on http://127.0.0.1:5173; /api is proxied to the server
+just upstream       the test upstream on http://127.0.0.1:8090, to try runs against
 just check          the gate: format, lint, race tests, coverage floors, typecheck, build, stale generated code
 just fmt            apply formatting: gofumpt + goimports, Prettier
 just test           Go and web tests
@@ -85,6 +87,9 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`.
   `server/.env` for the server. `just setup` makes both from their
   `.env.example`. Store and HTTP tests need Postgres: `just test` and
   `just check` start it.
+- `just dev` lets its server call private networks and port 8090, so runs
+  reach the test upstream. `just up` is as production is: runs there reach
+  only public addresses on 80 and 443.
 - One server per database. At startup a server marks every run still
   running as failed (D8), so `just dev` and `just up`, which share the
   compose Postgres, shouldn't run at once, and a deploy must stop the old

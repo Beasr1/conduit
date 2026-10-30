@@ -6,6 +6,7 @@ import { ConnectionForm } from "@/features/editor/components/connection-form";
 import { JsonField } from "@/features/editor/components/json-field";
 import { ProblemList } from "@/features/editor/components/problem-list";
 import { ResponseForm } from "@/features/editor/components/response-form";
+import { RunList } from "@/features/editor/components/run-list";
 import { StepSettings } from "@/features/editor/components/step-panel";
 import { RESPONSE, toFlow } from "@/features/editor/flow";
 import { useEditor } from "@/features/editor/store";
@@ -17,8 +18,8 @@ const stepTitles: Record<string, string> = {
 
 // SidePanel holds the settings of what's picked on the canvas, one thing at a
 // time: a step, a connection or the response, or else the workflow's own
-// settings or the list of problems, once they're opened.
-export function SidePanel() {
+// settings, the list of problems or its runs, once they're opened.
+export function SidePanel({ workflow }: { workflow: string }) {
   const draft = useEditor((s) => s.draft);
   const selected = useEditor((s) => s.selected);
   const panel = useEditor((s) => s.panel);
@@ -60,6 +61,10 @@ export function SidePanel() {
   } else if (panel === "problems") {
     title = "Problems";
     body = <ProblemList />;
+    close = closePanel;
+  } else if (panel === "runs") {
+    title = "Runs";
+    body = <RunList workflow={workflow} />;
     close = closePanel;
   } else if (node === RESPONSE) {
     title = "Response";

@@ -139,6 +139,11 @@
     --xy-edge-stroke: var(--destructive);
     --xy-edge-label-color: var(--destructive);
   }
+  /* A connection the run shown didn't take is dashed. Its name says so in
+     words too, for a screen reader. */
+  .react-flow__edge.untaken .react-flow__edge-path {
+    stroke-dasharray: 4 4;
+  }
   * {
     @apply border-border outline-ring/50;
   }

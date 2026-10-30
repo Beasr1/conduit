@@ -19,6 +19,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { RunBar } from "@/features/editor/components/run-bar";
+import { RunButton } from "@/features/editor/components/run-dialog";
 import {
   CheckContext,
   CheckingContext,
@@ -205,6 +207,13 @@ export function EditorHeader({
         >
           {save.isPending ? "Saving…" : "Save"}
         </Button>
+        <RunButton
+          workflow={workflow.id}
+          disabled={save.isPending || newer}
+          revision={async () =>
+            dirty ? (await saveDraft(base))?.revision : base
+          }
+        />
         <Button
           disabled={live || save.isPending || publish.isPending || newer}
           onClick={() => void publishDraft()}
@@ -212,6 +221,7 @@ export function EditorHeader({
           {publish.isPending ? "Publishing…" : live ? "Published" : "Publish"}
         </Button>
       </div>
+      <RunBar moved={(revision) => dirty || revision !== base} />
 
       <Dialog
         open={refused && !dismissed}
