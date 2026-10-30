@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import {
   addNode,
+  addOutput,
   canConnect,
   connect,
   mentions,
@@ -10,6 +11,7 @@ import {
   reads,
   removeEdges,
   removeNodes,
+  removeOutput,
   renameNode,
   setField,
   updateEdge,
@@ -36,6 +38,43 @@ test("connect adds the edge and leaves the draft it was given alone", () => {
   const after = connect(spec, "user", "crm");
   expect(after.edges).toContainEqual({ from: "user", to: "crm" });
   expect(spec).toEqual(before);
+});
+
+// user answers 2xx or 404, and orders follows the 2xx.
+const branched: Definition = {
+  ...spec,
+  nodes: spec.nodes.map((n) =>
+    n.id === "user" ? { ...n, outputs: [{ status: 404 }, { status: 409 }] } : n,
+  ),
+};
+
+test("two steps are joined once per output", () => {
+  expect(canConnect(branched, "user", "orders", 404)).toBe(true);
+  const joined = connect(branched, "user", "orders", 404);
+  expect(joined.edges).toContainEqual({ from: "user", to: "orders", on: 404 });
+  expect(canConnect(joined, "user", "orders", 404)).toBe(false);
+  expect(canConnect(joined, "user", "orders")).toBe(false);
+});
+
+test("an output is added at the end, and removed with its connections", () => {
+  const user = branched.nodes.findIndex((n) => n.id === "user");
+  const added = addOutput(branched, user, 500);
+  expect(added.nodes[user]?.outputs?.map((o) => o.status)).toEqual([
+    404, 409, 500,
+  ]);
+  const removed = removeOutput(
+    connect(connect(added, "user", "crm", 404), "user", "crm", 409),
+    user,
+    404,
+  );
+  expect(removed.nodes[user]?.outputs?.map((o) => o.status)).toEqual([
+    409, 500,
+  ]);
+  expect(removed.edges?.filter((e) => e.from === "user")).toEqual([
+    { from: "user", to: "orders" },
+    { from: "user", to: "prefs" },
+    { from: "user", to: "crm", on: 409 },
+  ]);
 });
 
 test("a node is added where it was put, at a whole position", () => {

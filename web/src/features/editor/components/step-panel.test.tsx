@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { SidePanel } from "@/features/editor/components/side-panel";
 import { createEditorStore, EditorContext } from "@/features/editor/store";
 import type { components } from "@/gen/schema";
-import { renderEditor } from "@/test/editor";
+import { answerEditor, renderEditor } from "@/test/editor";
 import { specExample } from "@/test/fixtures";
 import { shimReactFlow } from "@/test/react-flow";
 import { renderAt } from "@/test/render";
@@ -86,17 +86,22 @@ test.each(["Close", "Add HTTP step"])(
   },
 );
 
-test("an HTTP step's Response tab says how the steps after it read it", async () => {
+test("an HTTP step's tabs are its blocks, and its 2xx says how the steps after read it", async () => {
   renderEditor(specExample);
   await pick("crm");
   const panel = await screen.findByRole("complementary", {
     name: "HTTP step",
   });
   const tab = (name: string) => within(panel).getByRole("tab", { name });
+  expect(
+    within(panel)
+      .getAllByRole("tab")
+      .map((t) => t.textContent),
+  ).toEqual(["Request", "2xx", "+ Response"]);
   expect(tab("Request").getAttribute("aria-selected")).toBe("true");
   type("Timeout (ms)", "30s");
 
-  fireEvent.click(tab("Response"));
+  fireEvent.click(tab("2xx"));
   expect(within(panel).queryByRole("textbox", { name: "URL" })).toBeNull();
   for (const part of ["status", "headers", "body"])
     expect(within(panel).getByText(`nodes.crm.${part}`)).toBeTruthy();
@@ -121,10 +126,104 @@ test("an arrow key moves to the other tab and opens it", async () => {
   expect(await screen.findByText("nodes.crm.status")).toBeTruthy();
 });
 
-test("the Response tab reads the step by the id it has now", async () => {
+// user answers 2xx or 404.
+const branched: Definition = {
+  ...specExample,
+  nodes: specExample.nodes.map((n) =>
+    n.id === "user" ? { ...n, outputs: [{ status: 404 }] } : n,
+  ),
+};
+
+test("a click on a block of a step opens that part of it", async () => {
+  renderEditor(branched);
+  const user = await screen.findByTestId("rf__node-user");
+  const opened = () =>
+    screen
+      .getAllByRole("tab")
+      .find((t) => t.getAttribute("aria-selected") === "true")?.textContent;
+
+  fireEvent.click(within(user).getByText("404"));
+  await screen.findByRole("complementary", { name: "HTTP step" });
+  expect(opened()).toBe("404");
+  expect(screen.getByRole("textbox", { name: "404 body" })).toBeTruthy();
+  fireEvent.click(within(user).getByText("2xx"));
+  expect(opened()).toBe("2xx");
+  fireEvent.click(within(user).getByText("+ Add"));
+  expect(opened()).toBe("+ Response");
+  // The rest of the step is its request: its id, method and URL.
+  fireEvent.click(within(user).getByText(/^GET/));
+  expect(opened()).toBe("Request");
+
+  // Picking another step opens its request, whatever was open before.
+  fireEvent.click(within(user).getByText("404"));
+  fireEvent.click(screen.getByText("crm"));
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Id" })).toHaveProperty(
+      "value",
+      "crm",
+    ),
+  );
+  expect(opened()).toBe("Request");
+});
+
+// point is the handle of a step's on the canvas: "in", or a response's.
+function point(step: HTMLElement, handle: string): Element {
+  const found = step.querySelector(
+    `.react-flow__handle[data-handleid="${handle}"]`,
+  );
+  if (!found) throw new Error(`no ${handle} point`);
+  return found;
+}
+
+// A click on a point opens its part, so it can't also start a connection
+// the way React Flow's click-to-connect does.
+test("clicking one point and then another opens each, and connects nothing", async () => {
+  renderEditor(branched);
+  const user = await screen.findByTestId("rf__node-user");
+  const crm = screen.getByTestId("rf__node-crm");
+  fireEvent.click(point(user, "404"));
+  expect(
+    (await screen.findByRole("tab", { name: "404" })).getAttribute(
+      "aria-selected",
+    ),
+  ).toBe("true");
+  fireEvent.click(point(crm, "in"));
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Id" })).toHaveProperty(
+      "value",
+      "crm",
+    ),
+  );
+  expect(
+    screen.getByRole("tab", { name: "Request" }).getAttribute("aria-selected"),
+  ).toBe("true");
+  // React Flow connects asynchronously: give it its turn first.
+  await new Promise((r) => setTimeout(r));
+  expect(document.querySelectorAll(".react-flow__edge")).toHaveLength(4);
+});
+
+// Each field is edited in one place: the call's form doesn't hold the body,
+// so editing the call leaves the body as it was set.
+test("editing the call leaves the request body as it was", async () => {
   renderEditor(specExample);
   await pick("crm");
-  fireEvent.click(await screen.findByRole("tab", { name: "Response" }));
+  fireEvent.change(
+    await screen.findByRole("textbox", { name: "Request body" }),
+    {
+      target: { value: "{ 'a': 1 }" },
+    },
+  );
+  type("URL", "https://crm.example.com/v2/contacts");
+  await reopen("crm");
+  expect(
+    await screen.findByRole("textbox", { name: "Request body" }),
+  ).toHaveProperty("value", "{ 'a': 1 }");
+});
+
+test("the 2xx tab reads the step by the id it has now", async () => {
+  renderEditor(specExample);
+  await pick("crm");
+  fireEvent.click(await screen.findByRole("tab", { name: "2xx" }));
   const id = screen.getByLabelText("Id");
   type("Id", "contacts");
   fireEvent.blur(id);
@@ -258,7 +357,12 @@ test("a transform's expression goes into the step as it's typed", async () => {
   await pick("merge");
   await screen.findByRole("complementary", { name: "Transform step" });
   type("Expression", "nodes.user.body");
-  expect(await screen.findByText("nodes.user.body")).toBeTruthy();
+  // On the canvas, which shows what the step holds.
+  expect(
+    await within(screen.getByTestId("rf__node-merge")).findByText(
+      "nodes.user.body",
+    ),
+  ).toBeTruthy();
 });
 
 test("a transform step says how the steps after it read its value", async () => {
@@ -273,6 +377,7 @@ test("a transform step says how the steps after it read its value", async () => 
 // Looking at a step, or typing what doesn't count yet, mustn't count as
 // changing it: nothing could tell an untouched draft from a changed one.
 test("typing that leaves the step as it was changes nothing", async () => {
+  answerEditor();
   const store = createEditorStore(specExample);
   store.getState().pick("nodes", [{ id: "crm", selected: true }]);
   renderAt(
@@ -283,9 +388,10 @@ test("typing that leaves the step as it was changes nothing", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Add header" }));
   type("Header 1 value", "no name yet");
   type("Timeout (ms)", "30s");
-  for (const label of ["Id", "URL", "Body", "Attempts"]) {
-    fireEvent.focus(screen.getByLabelText(label));
-    fireEvent.blur(screen.getByLabelText(label));
+  for (const label of ["Id", "URL", "Attempts"]) {
+    // By role, which skips the hidden tabs, as a screen reader does.
+    fireEvent.focus(screen.getByRole("textbox", { name: label }));
+    fireEvent.blur(screen.getByRole("textbox", { name: label }));
   }
   expect(store.getState().draft).toBe(specExample);
 });

@@ -42,23 +42,50 @@ export function whole(
 
 type Schema = Record<string, unknown>;
 
-// readSchema reads a JSON Schema typed as text: nothing for no text, and a
-// reason for text that isn't a JSON object yet.
-export function readSchema(text: string): { schema?: Schema; error?: string } {
+// What a JSON field's text reads as: a value once it's whole, nothing for
+// no text, and a reason for text that doesn't count yet.
+interface Read<T> {
+  value?: T;
+  error?: string;
+}
+
+// readJSON reads any JSON value typed as text, null included.
+export function readJSON(text: string): Read<unknown> {
   if (text.trim() === "") return {};
-  let value: unknown;
   try {
-    value = JSON.parse(text);
+    return { value: JSON.parse(text) };
   } catch (e) {
     return { error: `Not JSON yet: ${e instanceof Error ? e.message : e}` };
   }
-  if (!isObject(value)) return { error: "A JSON Schema is an object, in { }." };
-  return { schema: value };
 }
 
-// showSchema is a stored schema as the text its field starts with.
-export function showSchema(schema: Schema | undefined): string {
-  return schema === undefined ? "" : JSON.stringify(schema, null, 2);
+// readSchema reads a JSON Schema typed as text, which is an object.
+export function readSchema(text: string): Read<Schema> {
+  const { value, error } = readJSON(text);
+  if (error !== undefined) return { error };
+  if (value === undefined) return {};
+  if (!isObject(value)) return { error: "A JSON Schema is an object, in { }." };
+  return { value };
+}
+
+// readHeaders reads a sample's headers typed as text: an object whose
+// values are text.
+export function readHeaders(text: string): Read<Record<string, string>> {
+  const { value, error } = readJSON(text);
+  if (error !== undefined) return { error };
+  if (value === undefined) return {};
+  if (
+    !isObject(value) ||
+    Object.values(value).some((v) => typeof v !== "string")
+  )
+    return { error: "Headers are names and text, in { }." };
+  return { value: value as Record<string, string> }; // every value checked above
+}
+
+// showJSON is a stored value as the text its field starts with: indented,
+// or nothing when there's none.
+export function showJSON(value: unknown): string {
+  return value === undefined ? "" : JSON.stringify(value, null, 2);
 }
 
 function isObject(v: unknown): v is Schema {
@@ -91,7 +118,6 @@ export interface RequestValues {
   url: string;
   headers: Pair[];
   query: Pair[];
-  body: string;
   timeout: string;
   attempts: string;
   idempotent: boolean;
@@ -113,7 +139,6 @@ export const requestSchema = z.object({
   url: z.string(),
   headers: rows("Another header has this name."),
   query: rows("Another parameter has this name."),
-  body: z.string(),
   timeout: z
     .string()
     .refine((t) => whole(t, 1, MAX_TIMEOUT_MS) !== null, TIMEOUT_RULE),
@@ -132,7 +157,6 @@ export function toRequestValues(r: Request | undefined): RequestValues {
     url: r?.url ?? "",
     headers: toPairs(r?.headers),
     query: toPairs(r?.query),
-    body: r?.body ?? "",
     timeout: r?.timeout_ms === undefined ? "" : String(r.timeout_ms),
     attempts: r?.retry ? String(r.retry.attempts) : "",
     idempotent: r?.retry?.idempotent ?? false,
@@ -142,7 +166,8 @@ export function toRequestValues(r: Request | undefined): RequestValues {
 // toRequest is the request the form says. A number typed as text counts once
 // it's a whole number in range; until then the stored one stays, and the
 // form says what's wrong. Nothing typed is eaten on the way, since the field
-// keeps its own text.
+// keeps its own text. The body isn't the form's: it's edited in Preview, and
+// the stored one stays.
 export function toRequest(r: Request | undefined, v: RequestValues): Request {
   const timeout = whole(v.timeout, 1, MAX_TIMEOUT_MS);
   const attempts = whole(v.attempts, MIN_ATTEMPTS, MAX_ATTEMPTS);
@@ -152,7 +177,6 @@ export function toRequest(r: Request | undefined, v: RequestValues): Request {
     url: v.url,
     headers: fromPairs(v.headers),
     query: fromPairs(v.query),
-    body: v.body === "" ? undefined : v.body,
     timeout_ms: timeout === null ? r?.timeout_ms : timeout,
     retry:
       attempts === null

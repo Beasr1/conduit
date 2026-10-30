@@ -1,64 +1,56 @@
-import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
-
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
-import { Textarea } from "@/components/ui/textarea";
 import { JsonField } from "@/features/editor/components/json-field";
-import { setField } from "@/features/editor/edits";
-import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
+import {
+  JsonBlock,
+  MappingField,
+} from "@/features/editor/components/mapping-field";
+import { reads, setField } from "@/features/editor/edits";
+import { useProblems } from "@/features/editor/hooks/use-problems";
+import { usePreview } from "@/features/editor/hooks/use-preview";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 
-// ResponseForm edits what the workflow answers: its output, built from the
-// steps' results, and the schema that output should match.
+// ResponseForm edits what the workflow answers: its output, between the data
+// it reads and the answer it makes, simulated over the samples, and the
+// schema that output should match.
 export function ResponseForm() {
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
-  const [defaultValues] = useState(() => ({
-    output: editor.getState().draft.output ?? "",
-  }));
-  const form = useForm<{ output: string }>({ defaultValues });
-  useEffect(
-    () =>
-      form.subscribe({
-        formState: { values: true },
-        callback: ({ values }) =>
-          edit((d) =>
-            setField(
-              d,
-              "output",
-              values.output.trim() === "" ? undefined : values.output,
-            ),
-          ),
-      }),
-    [form, edit],
+  const preview = usePreview();
+  const problems = useProblems(
+    (p) => p.on === "response" && p.field === "output",
   );
-  const found = useProblems((p) => p.on === "response" && p.field === "output");
-
   return (
     <>
-      <Field data-invalid={found.length > 0}>
-        <FieldLabel htmlFor="response-output">Output</FieldLabel>
-        {/* TODO(plan 10): a JSONata editor replaces this textarea. */}
-        <Textarea
-          id="response-output"
-          className="min-h-32 font-mono"
-          spellCheck={false}
-          placeholder='{ "user": nodes.user.body }'
-          aria-invalid={found.length > 0}
-          {...form.register("output")}
-        />
-        <FieldError errors={asErrors(found)} />
-        <FieldDescription>
-          JSONata over every step that succeeded, read by name, such as
-          nodes.crm.body. Its value is what the workflow answers; empty answers
-          null.
-        </FieldDescription>
-      </Field>
+      <MappingField
+        id="response-output"
+        label="Output"
+        description={
+          <>
+            JSONata over every step that succeeded, read by name, such as{" "}
+            <span className="font-mono">nodes.crm.body</span>. Its value is what
+            the workflow answers; empty answers null.
+          </>
+        }
+        placeholder='{ "user": nodes.user.body }'
+        initial={editor.getState().draft.output ?? ""}
+        apply={(text) =>
+          edit((d) =>
+            setField(d, "output", text.trim() === "" ? undefined : text),
+          )
+        }
+        problems={problems}
+        preview={preview}
+        open={(of) => reads(of, of.output)}
+        result={(p) => (
+          <>
+            <h3 className="font-medium">It answers</h3>
+            {p.gives === undefined ? (
+              <p className="text-muted-foreground">Nothing.</p>
+            ) : (
+              <JsonBlock value={p.gives} />
+            )}
+          </>
+        )}
+      />
       <JsonField
         id="response-schema"
         label="Output schema"

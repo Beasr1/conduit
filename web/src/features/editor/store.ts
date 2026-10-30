@@ -3,7 +3,7 @@ import { createContext, useContext } from "react";
 import { createStore, type StoreApi, useStore } from "zustand";
 
 import { move, renameNode, settle } from "@/features/editor/edits";
-import { RESPONSE, toFlow } from "@/features/editor/flow";
+import { handlesOf, RESPONSE, toFlow } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 
 type Definition = components["schemas"]["Definition"];
@@ -21,6 +21,11 @@ export interface EditorState {
   // only when it ends, rather than on every frame of it.
   moving: Record<string, XYPosition>;
   selected: Selection;
+  // The part of the one step picked that its panel opens on: "request", a
+  // response by its block ("2xx", "404"), or "add", adding one. A click on
+  // a block opens its part, and picking another step opens its request.
+  part: string;
+  setPart: (part: string) => void;
   // What the side panel shows while nothing is picked: the workflow's own
   // settings, or the list of problems. Opening one puts away what was
   // picked, and picking something closes it.
@@ -28,8 +33,9 @@ export interface EditorState {
   openPanel: (panel: "settings" | "problems") => void;
   closePanel: () => void;
   // show picks one step, connection or the response card, as a click on the
-  // canvas would, and closes the panel.
-  show: (kind: keyof Selection, key: string) => void;
+  // canvas would, opens a step on part, its request unless told, and closes
+  // the panel.
+  show: (kind: keyof Selection, key: string, part?: string) => void;
   edit: (change: (draft: Definition) => Definition) => void;
   // rename changes a node's id, and the selection follows it.
   rename: (index: number, id: string) => void;
@@ -51,16 +57,19 @@ export function createEditorStore(draft: Definition): EditorStore {
     draft,
     moving: {},
     selected: { nodes: [], edges: [] },
+    part: "request",
+    setPart: (part) => set({ part }),
     panel: undefined,
     openPanel: (panel) => set({ panel, selected: { nodes: [], edges: [] } }),
     closePanel: () => set({ panel: undefined }),
-    show: (kind, key) =>
+    show: (kind, key, part = "request") =>
       set({
         panel: undefined,
         selected: {
           nodes: kind === "nodes" ? [key] : [],
           edges: kind === "edges" ? [key] : [],
         },
+        part,
       }),
     // Every edit settles the draft first, so nothing placed automatically
     // moves under the user's hands. An edit that changes nothing, such as a
@@ -71,7 +80,7 @@ export function createEditorStore(draft: Definition): EditorStore {
         const settled = settle(s.draft);
         const draft = change(settled);
         if (draft === settled) return s;
-        return { draft, selected: kept(s.selected, draft) };
+        return { draft, ...kept(s, draft) };
       }),
     rename: (index, id) =>
       set((s) => {
@@ -81,7 +90,10 @@ export function createEditorStore(draft: Definition): EditorStore {
         const from = toFlow(settled).nodes[index]?.id;
         const to = toFlow(draft).nodes[index]?.id ?? "";
         const nodes = s.selected.nodes.map((key) => (key === from ? to : key));
-        return { draft, selected: kept({ ...s.selected, nodes }, draft) };
+        return {
+          draft,
+          ...kept({ ...s, selected: { ...s.selected, nodes } }, draft),
+        };
       }),
     drag: (key, at) => set((s) => ({ moving: { ...s.moving, [key]: at } })),
     // A key with "#" in it is a node whose id is missing or shared. Its place
@@ -103,16 +115,23 @@ export function createEditorStore(draft: Definition): EditorStore {
           if (c.selected) on.add(c.id);
           else on.delete(c.id);
         }
-        const panel = changes.some((c) => c.selected) ? undefined : s.panel;
-        return { selected: { ...s.selected, [kind]: [...on] }, panel };
+        const picked = changes.some((c) => c.selected);
+        return {
+          selected: { ...s.selected, [kind]: [...on] },
+          panel: picked ? undefined : s.panel,
+          part: picked ? "request" : s.part,
+        };
       }),
   }));
 }
 
 // kept is the part of a selection the draft still has: a deleted node drops
 // out of it, and so does an edge whose end was renamed. The response card is
-// always there.
-function kept(selected: Selection, draft: Definition): Selection {
+// always there. A step whose open response was removed opens on its request.
+function kept(
+  { selected, part }: Pick<EditorState, "selected" | "part">,
+  draft: Definition,
+): Pick<EditorState, "selected" | "part"> {
   const flow = toFlow(draft);
   const nodes = selected.nodes.filter(
     (key) => key === RESPONSE || flow.nodes.some((n) => n.id === key),
@@ -120,12 +139,21 @@ function kept(selected: Selection, draft: Definition): Selection {
   const edges = selected.edges.filter((key) =>
     flow.edges.some((e) => e.id === key),
   );
+  const index = flow.nodes.find((n) => n.id === nodes[0])?.data.index;
+  const node = index === undefined ? undefined : draft.nodes[index];
+  const open =
+    !node ||
+    part === "request" ||
+    part === "add" ||
+    handlesOf(node).includes(part)
+      ? part
+      : "request";
   if (
     nodes.length === selected.nodes.length &&
     edges.length === selected.edges.length
   )
-    return selected;
-  return { nodes, edges };
+    return { selected, part: open };
+  return { selected: { nodes, edges }, part: open };
 }
 
 export const EditorContext = createContext<EditorStore | null>(null);

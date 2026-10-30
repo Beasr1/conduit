@@ -41,12 +41,20 @@ export function SidePanel() {
   if (panel === "settings") {
     title = "Workflow settings";
     body = (
-      <JsonField
-        id="workflow-input-schema"
-        label="Input schema"
-        field="input_schema"
-        description="A JSON Schema the run's input must match. A served workflow answers input that doesn't with 400."
-      />
+      <>
+        <JsonField
+          id="workflow-input-schema"
+          label="Input schema"
+          field="input_schema"
+          description="A JSON Schema the run's input must match. A served workflow answers input that doesn't with 400."
+        />
+        <JsonField
+          id="workflow-sample-input"
+          label="Sample input"
+          field="sample_input"
+          description="A made-up input, as JSON, that previews read as the run's input. It's saved in every revision, so make it up or redact it. Runs ignore it."
+        />
+      </>
     );
     close = closePanel;
   } else if (panel === "problems") {

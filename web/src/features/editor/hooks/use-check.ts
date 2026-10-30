@@ -1,15 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
+import { PAUSE_MS, useStill } from "@/features/editor/hooks/use-still";
 import type { Check } from "@/features/editor/problems";
 import type { components } from "@/gen/schema";
 import { api, call } from "@/lib/api";
 
 type Definition = components["schemas"]["Definition"];
-
-// How long the draft stands still before it's checked: one check a pause,
-// not one a key.
-const PAUSE_MS = 500;
 
 export const checkKeys = {
   all: ["check"] as const,
@@ -21,11 +18,7 @@ export const checkKeys = {
 // check that came back stands until a newer one does, starting with the
 // revision the editor opened.
 export function useCheck(draft: Definition, opened: Check) {
-  const [still, setStill] = useState(draft);
-  useEffect(() => {
-    const wait = setTimeout(() => setStill(draft), PAUSE_MS);
-    return () => clearTimeout(wait);
-  }, [draft]);
+  const still = useStill(draft, PAUSE_MS);
   const query = useQuery({
     queryKey: checkKeys.of(still),
     queryFn: ({ signal }) => check(still, signal),

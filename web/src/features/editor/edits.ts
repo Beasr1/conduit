@@ -60,13 +60,21 @@ export function settle(d: Definition): Definition {
   return move(d, Object.fromEntries(unplaced.map((n) => [n.id, n.position])));
 }
 
-// canConnect says whether an edge may be drawn from one node to another: not
-// to itself, not twice, and not closing a cycle. It's only for feel; the
-// server's validation still decides.
-export function canConnect(d: Definition, from: string, to: string): boolean {
+// canConnect says whether an edge may be drawn from one node, leaving from
+// its output on (2xx when there's none), to another: not to itself, not
+// twice from the same output, and not closing a cycle. It's only for feel;
+// the server's validation still decides.
+export function canConnect(
+  d: Definition,
+  from: string,
+  to: string,
+  on?: number,
+): boolean {
   if (from === to) return false;
-  if ((d.edges ?? []).some((e) => e.from === from && e.to === to)) return false;
-  return !reaches(d, to, from);
+  const twice = (d.edges ?? []).some(
+    (e) => e.from === from && e.to === to && e.on === on,
+  );
+  return !twice && !reaches(d, to, from);
 }
 
 // reaches reports whether edges lead from one node to another.
@@ -85,8 +93,48 @@ function reaches(d: Definition, from: string, to: string): boolean {
   return false;
 }
 
-export function connect(d: Definition, from: string, to: string): Definition {
-  return { ...d, edges: [...(d.edges ?? []), { from, to }] };
+export function connect(
+  d: Definition,
+  from: string,
+  to: string,
+  on?: number,
+): Definition {
+  const edge = on === undefined ? { from, to } : { from, to, on };
+  return { ...d, edges: [...(d.edges ?? []), edge] };
+}
+
+// addOutput gives node index an output for status, after its others.
+export function addOutput(
+  d: Definition,
+  index: number,
+  status: number,
+): Definition {
+  return updateNode(d, index, (n) => ({
+    ...n,
+    outputs: [...(n.outputs ?? []), { status }],
+  }));
+}
+
+// removeOutput takes node index's output for status away, and with it the
+// edges that leave from it, as removing a node takes its edges.
+export function removeOutput(
+  d: Definition,
+  index: number,
+  status: number,
+): Definition {
+  const id = d.nodes[index]?.id;
+  const removed = updateNode(d, index, (n) => {
+    const next = { ...n };
+    const outputs = (n.outputs ?? []).filter((o) => o.status !== status);
+    if (outputs.length > 0) next.outputs = outputs;
+    else delete next.outputs;
+    return next;
+  });
+  if (!removed.edges) return removed;
+  return {
+    ...removed,
+    edges: removed.edges.filter((e) => e.from !== id || e.on !== status),
+  };
 }
 
 // updateNode puts what change makes of a node in its place. A change that
@@ -119,11 +167,9 @@ export function updateEdge(
 
 // setField gives one of the workflow's own fields a value; undefined removes
 // it. A value it already has gives back the draft itself.
-export function setField<K extends "output" | "input_schema" | "output_schema">(
-  d: Definition,
-  key: K,
-  value: Definition[K],
-): Definition {
+export function setField<
+  K extends "output" | "input_schema" | "output_schema" | "sample_input",
+>(d: Definition, key: K, value: Definition[K]): Definition {
   if (JSON.stringify(d[key]) === JSON.stringify(value)) return d;
   const next = { ...d };
   if (value === undefined) delete next[key];
@@ -193,6 +239,11 @@ export function reads(d: Definition, text: string | undefined): string[] {
   if (!text) return [];
   const ids = [...new Set(d.nodes.map((n) => n.id))];
   return ids.filter((id) => id !== "" && reading(id).test(text));
+}
+
+// parents lists the nodes with an edge into the node with id.
+export function parents(d: Definition, id: string | undefined): string[] {
+  return (d.edges ?? []).filter((e) => e.to === id).map((e) => e.from);
 }
 
 // reading matches text that reads a node's result as nodes.<id>. A draft

@@ -10,12 +10,13 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { setField } from "@/features/editor/edits";
 import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
-import { readSchema, showSchema } from "@/features/editor/fields";
+import { readJSON, readSchema, showJSON } from "@/features/editor/fields";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 
-// JsonField edits one of the workflow's JSON Schemas as text. The text counts
-// once it's a JSON object; until then the stored schema stays, and the field
-// says why. Nothing typed is eaten, since the field keeps its own text.
+// JsonField edits one of the workflow's JSON fields as text: a JSON Schema,
+// which counts once it's an object, or the sample input, which can be any
+// JSON. Until the text counts, the stored value stays and the field says
+// why. Nothing typed is eaten, since the field keeps its own text.
 export function JsonField({
   id,
   label,
@@ -24,15 +25,16 @@ export function JsonField({
 }: {
   id: string;
   label: string;
-  field: "input_schema" | "output_schema";
+  field: "input_schema" | "output_schema" | "sample_input";
   description: string;
 }) {
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
+  const read = field === "sample_input" ? readJSON : readSchema;
   const [text, setText] = useState(() =>
-    showSchema(editor.getState().draft[field]),
+    showJSON(editor.getState().draft[field]),
   );
-  const { schema, error } = readSchema(text);
+  const { value, error } = read(text);
   // The field's own check is about text that doesn't count yet; the
   // server's, about the schema the workflow holds.
   const found = useProblems(
@@ -42,8 +44,8 @@ export function JsonField({
 
   function change(next: string) {
     setText(next);
-    const read = readSchema(next);
-    if (read.error === undefined) edit((d) => setField(d, field, read.schema));
+    const { value, error } = read(next);
+    if (error === undefined) edit((d) => setField(d, field, value));
   }
 
   return (
@@ -54,8 +56,9 @@ export function JsonField({
           type="button"
           variant="ghost"
           size="xs"
-          disabled={schema === undefined}
-          onClick={() => setText(showSchema(schema))}
+          aria-label={`Format ${label.toLowerCase()}`}
+          disabled={value === undefined}
+          onClick={() => setText(showJSON(value))}
         >
           Format
         </Button>

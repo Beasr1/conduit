@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { StepBody } from "@/features/editor/components/step-body";
 import { updateNode } from "@/features/editor/edits";
 import {
   MAX_ATTEMPTS,
@@ -48,8 +48,10 @@ import {
 } from "@/features/editor/hooks/use-problems";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 
-// HttpStepForm edits an http step's request. Each change goes into the draft
-// as it's made, and the canvas follows.
+// HttpStepForm edits an http step's request: where it goes, what it
+// sends, and how. Each change goes into the draft as it's made, and the
+// canvas follows. The body isn't this form's: StepBody edits it, beside the
+// data it reads, so each field is edited in one place.
 export function HttpStepForm({ index }: { index: number }) {
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
@@ -81,14 +83,12 @@ export function HttpStepForm({ index }: { index: number }) {
   const found = {
     method: useProblems(atStep(index, "method")),
     url: useProblems(atStep(index, "url")),
-    body: useProblems(atStep(index, "body")),
     timeout: useProblems(atStep(index, "timeout")),
     attempts: useProblems(atStep(index, "attempts")),
     idempotent: useProblems(atStep(index, "idempotent")),
   };
   const said = {
     url: asErrors([...found.method, ...found.url]),
-    body: asErrors(found.body),
     timeout: errors.timeout ? [errors.timeout] : asErrors(found.timeout),
     attempts: errors.attempts ? [errors.attempts] : asErrors(found.attempts),
     idempotent: asErrors(found.idempotent),
@@ -158,21 +158,7 @@ export function HttpStepForm({ index }: { index: number }) {
         noun="Parameter"
         legend="Query"
       />
-      <Field data-invalid={said.body.length > 0}>
-        <FieldLabel htmlFor="step-body">Body</FieldLabel>
-        {/* TODO(plan 10): a JSONata editor replaces this textarea. */}
-        <Textarea
-          id="step-body"
-          className="min-h-24 font-mono"
-          spellCheck={false}
-          aria-invalid={said.body.length > 0}
-          {...form.register("body")}
-        />
-        <FieldError errors={said.body} />
-        <FieldDescription>
-          JSONata, sent as the JSON body. Empty sends none.
-        </FieldDescription>
-      </Field>
+      <StepBody index={index} />
       <div className="grid grid-cols-2 gap-3">
         <Field data-invalid={said.timeout.length > 0}>
           <FieldLabel htmlFor="step-timeout">Timeout (ms)</FieldLabel>

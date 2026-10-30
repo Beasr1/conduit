@@ -7,7 +7,7 @@ import { useEditor } from "@/features/editor/store";
 export function StepResponse({ index }: { index: number }) {
   const id = useEditor((s) => s.draft.nodes[index]?.id ?? "");
   const parts: [string, ReactNode][] = [
-    ["status", "The status code."],
+    ["status", "The status code, which says which response it was."],
     [
       "headers",
       <>
@@ -17,7 +17,10 @@ export function StepResponse({ index }: { index: number }) {
         .
       </>,
     ],
-    ["body", "The JSON body, or null if there's none."],
+    [
+      "body",
+      "The JSON body, or null if there's none, or, for a response besides 2xx, if it isn't JSON.",
+    ],
   ];
   return (
     <div className="flex flex-col gap-3 text-sm">
@@ -31,8 +34,8 @@ export function StepResponse({ index }: { index: number }) {
         ))}
       </dl>
       <p className="text-muted-foreground">
-        A status outside 2xx, or a body that isn&apos;t JSON, fails the step,
-        and with it the run.
+        A status the step has no response for, or a 2xx body that isn&apos;t
+        JSON, fails the step, and with it the run.
       </p>
     </div>
   );

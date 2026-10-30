@@ -1,8 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { removeEdges } from "@/features/editor/edits";
-import { RESPONSE, toFlow } from "@/features/editor/flow";
+import { handlesOf, RESPONSE, toFlow } from "@/features/editor/flow";
 import { useProblems } from "@/features/editor/hooks/use-problems";
-import type { Found, Place, StepField } from "@/features/editor/problems";
+import {
+  type Found,
+  type Place,
+  type StepField,
+  stepPartOf,
+} from "@/features/editor/problems";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 import type { components } from "@/gen/schema";
 
@@ -21,6 +26,8 @@ const fieldNames: Record<StepField, string> = {
   timeout: "Timeout",
   attempts: "Attempts",
   idempotent: "Idempotent",
+  sample: "2xx response",
+  outputs: "Responses",
 };
 
 const everywhere = () => true;
@@ -34,12 +41,15 @@ const fieldIds: Partial<Record<StepField, string>> = {
   timeout: "step-timeout",
   attempts: "step-attempts",
   idempotent: "step-idempotent",
+  sample: "step-sample-body",
+  outputs: "step-output-status",
   expr: "step-expr",
 };
 
 // fieldOf is the element a problem's field is drawn as, once its panel is
 // open: a header or parameter by its row, which the form draws in the
-// definition's order. A problem with no field goes to the step's first.
+// definition's order, and a response besides 2xx by its status, at its
+// sample's body. A problem with no field goes to the step's first.
 function fieldOf(
   place: Place,
   code: string,
@@ -54,6 +64,8 @@ function fieldOf(
         const part = code === "invalid_header_name" ? "name" : "value";
         if (row >= 0) return `step-${field}-${row}-${part}`;
       }
+      const status = statusOf(place, draft);
+      if (status !== undefined) return `step-sample-${status}-body`;
       return fieldIds[field ?? "id"] ?? "step-id";
     }
     case "connection":
@@ -61,7 +73,9 @@ function fieldOf(
     case "response":
       return place.field === "output" ? "response-output" : "response-schema";
     case "settings":
-      return "workflow-input-schema";
+      return place.field === "input_schema"
+        ? "workflow-input-schema"
+        : "workflow-sample-input";
     default:
       return undefined;
   }
@@ -126,8 +140,9 @@ function Entry({ found: { place, code, message } }: { found: Found }) {
     );
 
   // The canvas names a step or connection by its key, which toFlow gives
-  // it. It's worked out on a click, not on every draw. The cursor goes to
-  // the field once its panel is drawn.
+  // it. It's worked out on a click, not on every draw. A step opens on the
+  // part the problem is in, and the cursor goes to the field once its panel
+  // is drawn.
   function open() {
     const draft = editor.getState().draft;
     const flow = toFlow(draft);
@@ -138,7 +153,7 @@ function Entry({ found: { place, code, message } }: { found: Found }) {
     else if (place.on === "response") show("nodes", RESPONSE);
     else if (place.on === "step") {
       const key = flow.nodes[place.index]?.id;
-      if (key) show("nodes", key);
+      if (key) show("nodes", key, stepPartOf(place, draft));
     } else if (place.on === "connection") {
       const key = flow.edges.find((e) => e.data?.index === place.index)?.id;
       if (key) show("edges", key);
@@ -157,27 +172,43 @@ function Entry({ found: { place, code, message } }: { found: Found }) {
 }
 
 // drawn says whether the canvas draws a connection: both its ends name a
-// step.
+// step, and the first step has the output it leaves from.
 function drawn(draft: Definition, index: number): boolean {
   const e = draft.edges?.[index];
-  const named = (id: string | undefined) =>
-    !!id && draft.nodes.some((n) => n.id === id);
-  return named(e?.from) && named(e?.to);
+  const from = draft.nodes.find((n) => n.id === e?.from);
+  const to = draft.nodes.some((n) => n.id === e?.to);
+  return (
+    !!e &&
+    !!from &&
+    !!e.from &&
+    to &&
+    (!e.on || handlesOf(from).includes(String(e.on)))
+  );
+}
+
+// statusOf is the status of the response besides 2xx a problem is in, if
+// it's in one.
+function statusOf(place: Place, draft: Definition): number | undefined {
+  if (place.on !== "step" || place.output === undefined) return undefined;
+  return draft.nodes[place.index]?.outputs?.[place.output]?.status;
 }
 
 // Where says where a problem is, in the screen's words.
-function Where({ place, draft }: { place: Place; draft: Definition }) {
+export function Where({ place, draft }: { place: Place; draft: Definition }) {
   switch (place.on) {
     case "step": {
       const id = draft.nodes[place.index]?.id || "(no id)";
+      const status = statusOf(place, draft);
       const part =
         place.field === undefined
           ? undefined
-          : place.name === undefined
-            ? fieldNames[place.field]
-            : place.field === "headers"
-              ? `Request header “${place.name}”`
-              : `Query parameter “${place.name}”`;
+          : status !== undefined
+            ? `${status} response`
+            : place.name === undefined
+              ? fieldNames[place.field]
+              : place.field === "headers"
+                ? `Request header “${place.name}”`
+                : `Query parameter “${place.name}”`;
       return (
         <>
           <span className="font-mono">{id}</span>
@@ -189,8 +220,14 @@ function Where({ place, draft }: { place: Place; draft: Definition }) {
       const e = draft.edges?.[place.index];
       return (
         <>
-          Connection <span className="font-mono">{e?.from}</span> →{" "}
-          <span className="font-mono">{e?.to}</span>
+          Connection <span className="font-mono">{e?.from}</span>
+          {e?.on !== undefined && (
+            <>
+              {" "}
+              (<span className="font-mono">{e.on}</span>)
+            </>
+          )}{" "}
+          → <span className="font-mono">{e?.to}</span>
           {place.field === "when" && " · Condition"}
         </>
       );
@@ -200,7 +237,12 @@ function Where({ place, draft }: { place: Place; draft: Definition }) {
         <>Response · {place.field === "output" ? "Output" : "Output schema"}</>
       );
     case "settings":
-      return <>Workflow settings · Input schema</>;
+      return (
+        <>
+          Workflow settings ·{" "}
+          {place.field === "input_schema" ? "Input schema" : "Sample input"}
+        </>
+      );
     default:
       return <>Workflow</>;
   }

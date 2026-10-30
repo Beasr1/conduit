@@ -73,11 +73,62 @@ test("each node and edge is drawn, joined at named handles", () => {
     id: "user->orders",
     source: "user",
     target: "orders",
-    sourceHandle: "out",
+    sourceHandle: "2xx",
     targetHandle: "in",
     data: { index: 0 },
   });
   expect(flow.undrawn).toEqual([]);
+});
+
+test("a connection leaves from its output's handle, if its step has that output", () => {
+  const flow = toFlow({
+    nodes: [
+      {
+        id: "user",
+        kind: "http",
+        request: { method: "GET", url: "https://users.example.com/v1" },
+        outputs: [{ status: 404 }],
+      },
+      { id: "create", kind: "transform", expr: "1" },
+      { id: "log", kind: "transform", expr: "2" },
+    ],
+    edges: [
+      { from: "user", to: "create", on: 404 },
+      { from: "user", to: "log" },
+      { from: "create", to: "log" },
+      { from: "user", to: "log", on: 409 }, // user has no 409 output
+      { from: "create", to: "log", on: 404 }, // a transform has one output
+    ],
+  });
+  expect(flow.edges.map((e) => [e.id, e.sourceHandle])).toEqual([
+    ["user->create", "404"],
+    ["user->log", "2xx"],
+    ["create->log", "out"],
+  ]);
+  expect(flow.undrawn).toEqual([3, 4]);
+});
+
+test("a step grows to fit its outputs, a handle at least 24 px from the next", () => {
+  const step = (statuses: number[]) =>
+    toFlow({
+      nodes: [
+        {
+          id: "user",
+          kind: "http",
+          request: { method: "GET", url: "https://users.example.com/v1" },
+          outputs: statuses.map((status) => ({ status })),
+        },
+      ],
+    }).nodes[0];
+  expect(step([404])).toMatchObject({
+    height: NODE_HEIGHT,
+    measured: { height: NODE_HEIGHT },
+  });
+  // Four handles, each 1/5 of the way further down: 24 px apart.
+  expect(step([404, 409, 500])).toMatchObject({
+    height: 120,
+    measured: { height: 120 },
+  });
 });
 
 test("a connection with a condition is labelled", () => {

@@ -10,12 +10,39 @@ import type { Edge, Node, XYPosition } from "@xyflow/react";
 import type { components } from "@/gen/schema";
 
 type Definition = components["schemas"]["Definition"];
+type DefinitionNode = components["schemas"]["Node"];
 
-// Every node is drawn at this size, so placing nodes and drawing them agree.
+// Every node is drawn at this size, or taller to fit its outputs, so placing
+// nodes and drawing them agree.
 export const NODE_WIDTH = 240;
 export const NODE_HEIGHT = 72;
 // The room between one rank of the layout and the next.
 const RANK_GAP = 80;
+// The least distance between two handles' centres, so a 24 px circle around
+// each touches no other (design.md, the floor).
+const HANDLE_GAP = 24;
+
+// handlesOf is a node's outputs, as the ids of the handles its edges leave
+// from: an HTTP step's 2xx and each status it lists, or a transform's one.
+export function handlesOf(node: DefinitionNode): string[] {
+  return node.kind === "http"
+    ? ["2xx", ...(node.outputs ?? []).map((o) => String(o.status))]
+    : ["out"];
+}
+
+// onOf is the output an edge drawn from a handle leaves from, as the
+// definition names it: a status, or nothing for 2xx and a transform's one.
+export function onOf(handle: string | null | undefined): number | undefined {
+  const status = Number(handle);
+  return Number.isInteger(status) ? status : undefined;
+}
+
+// heightOf is how tall a node is drawn: an HTTP step's response blocks and
+// its + Add share its right side, each at least HANDLE_GAP tall, so the
+// handles on them are at least that far apart.
+function heightOf(node: DefinitionNode): number {
+  return Math.max(NODE_HEIGHT, (handlesOf(node).length + 1) * HANDLE_GAP);
+}
 
 // The response card's key. "#" can't appear in a node id, so the card is
 // never stored, connected or deleted as one.
@@ -34,8 +61,9 @@ export type FlowEdge = Edge<{ index: number }>;
 export interface Flow {
   nodes: FlowNode[];
   edges: FlowEdge[];
-  // Edges the canvas can't draw, because an end names no node: their
-  // places in definition.edges.
+  // Edges the canvas can't draw, because an end names no node, or the
+  // output it leaves from is one its step doesn't have: their places in
+  // definition.edges.
   undrawn: number[];
 }
 
@@ -49,10 +77,14 @@ export function toFlow(definition: Definition): Flow {
   // with one in it can't clash with another node's.
   const keys: string[] = [];
   const keyOf = new Map<string, string>(); // a node's id → the key of the first node with it
+  const nodeOf = new Map<string, DefinitionNode>(); // and that node
   for (const [i, n] of definition.nodes.entries()) {
     const key = n.id !== "" && !keyOf.has(n.id) ? n.id : `${n.id}#${i}`;
     keys.push(key);
-    if (n.id !== "" && !keyOf.has(n.id)) keyOf.set(n.id, key);
+    if (n.id !== "" && !keyOf.has(n.id)) {
+      keyOf.set(n.id, key);
+      nodeOf.set(n.id, n);
+    }
   }
 
   const edges: FlowEdge[] = [];
@@ -61,7 +93,14 @@ export function toFlow(definition: Definition): Flow {
   for (const [i, e] of (definition.edges ?? []).entries()) {
     const source = keyOf.get(e.from);
     const target = keyOf.get(e.to);
-    if (source === undefined || target === undefined) {
+    const handles = handlesOf(nodeOf.get(e.from) ?? { id: "", kind: "http" });
+    // No output, or 0 as the server reads it, is the first: 2xx.
+    const handle = e.on ? String(e.on) : (handles[0] ?? "");
+    if (
+      source === undefined ||
+      target === undefined ||
+      !handles.includes(handle)
+    ) {
       undrawn.push(i);
       continue;
     }
@@ -72,7 +111,7 @@ export function toFlow(definition: Definition): Flow {
       id: seen === 0 ? id : `${id}#${seen}`,
       source,
       target,
-      sourceHandle: "out",
+      sourceHandle: handle,
       targetHandle: "in",
       // A condition shows as a small label; what it says is in the panel.
       ...(e.when ? { label: "if" } : {}),
@@ -86,19 +125,20 @@ export function toFlow(definition: Definition): Flow {
     // The type says a kind is http or transform, but a draft saved with
     // problems can hold any string.
     const kind: string = n.kind;
+    const height = heightOf(n);
     return {
       id: key,
       type: kind === "http" || kind === "transform" ? kind : "unknown",
       position: positions.get(key) ?? { x: 0, y: 0 },
       // React Flow draws a node at a size it's given rather than measuring it.
       width: NODE_WIDTH,
-      height: NODE_HEIGHT,
+      height,
       // And it keeps a node's handle positions only when the node says it
       // was measured. Every edit draws new node objects, so without this,
       // each one wiped every node's handles and blinked all the edges off
       // until React Flow measured them again: every key typed in a step's
       // settings.
-      measured: { width: NODE_WIDTH, height: NODE_HEIGHT },
+      measured: { width: NODE_WIDTH, height },
       data: { index: i },
     };
   });
@@ -166,7 +206,7 @@ function place(
   const missing = keys.filter((k) => !positions.has(k));
   if (missing.length === 0) return positions;
 
-  const laidOut = layoutAll(keys, edges);
+  const laidOut = layoutAll(keys, definition.nodes.map(heightOf), edges);
   let below = 0;
   if (positions.size > 0) {
     const storedBottom = Math.max(...[...positions.values()].map((p) => p.y));
@@ -180,22 +220,28 @@ function place(
   return positions;
 }
 
-function layoutAll(keys: string[], edges: FlowEdge[]): Map<string, XYPosition> {
+// layoutAll lays out every node, keys[i] being heights[i] tall.
+function layoutAll(
+  keys: string[],
+  heights: number[],
+  edges: FlowEdge[],
+): Map<string, XYPosition> {
   const g = new Graph<GraphLabel, NodeLabel, EdgeLabel>();
   g.setGraph({ rankdir: "LR", nodesep: 40, ranksep: RANK_GAP });
   g.setDefaultEdgeLabel(() => ({}));
-  for (const k of keys)
-    g.setNode(k, { width: NODE_WIDTH, height: NODE_HEIGHT });
+  for (const [i, k] of keys.entries())
+    g.setNode(k, { width: NODE_WIDTH, height: heights[i] ?? NODE_HEIGHT });
   for (const e of edges)
     if (e.source !== e.target) g.setEdge(e.source, e.target);
   layout(g);
   // dagre places a node by its centre, and React Flow by its top-left corner.
   return new Map(
-    keys.map((k) => {
+    keys.map((k, i) => {
       const n = g.node(k);
+      const height = heights[i] ?? NODE_HEIGHT;
       return [
         k,
-        { x: (n.x ?? 0) - NODE_WIDTH / 2, y: (n.y ?? 0) - NODE_HEIGHT / 2 },
+        { x: (n.x ?? 0) - NODE_WIDTH / 2, y: (n.y ?? 0) - height / 2 },
       ];
     }),
   );

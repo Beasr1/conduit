@@ -27,9 +27,11 @@ export type StepField =
   | "body"
   | "timeout"
   | "attempts"
-  | "idempotent";
+  | "idempotent"
+  | "sample"
+  | "outputs";
 
-// The fields an HTTP step's Request tab holds.
+// The fields an HTTP step's Request tab holds: the call and its body.
 export const REQUEST_FIELDS: ReadonlySet<StepField | undefined> = new Set([
   "method",
   "url",
@@ -43,12 +45,20 @@ export const REQUEST_FIELDS: ReadonlySet<StepField | undefined> = new Set([
 
 // Place is where a problem is: in a step or a connection, by its place in
 // the definition; in the response card or the workflow's settings; or in the
-// workflow as a whole. A header's or query parameter's problem names it.
+// workflow as a whole. A header's or query parameter's problem names it, and
+// one in a response besides 2xx, or its sample, has the response's place in
+// the step's outputs.
 export type Place =
-  | { on: "step"; index: number; field?: StepField; name?: string }
-  | { on: "connection"; index: number; field?: "when" }
+  | {
+      on: "step";
+      index: number;
+      field?: StepField;
+      name?: string;
+      output?: number;
+    }
+  | { on: "connection"; index: number; field?: "when" | "on" }
   | { on: "response"; field: "output" | "output_schema" }
-  | { on: "settings"; field: "input_schema" }
+  | { on: "settings"; field: "input_schema" | "sample_input" }
   | { on: "workflow" };
 
 // A problem as the editor shows it: where it is in the draft as it is now,
@@ -64,12 +74,13 @@ export function placeOf(pointer: string): Place {
   const [top, i, ...rest] = tokens(pointer);
   if (top === "nodes" && isIndex(i)) return stepPlace(Number(i), rest);
   if (top === "edges" && isIndex(i))
-    return rest[0] === "when"
-      ? { on: "connection", index: Number(i), field: "when" }
+    return rest[0] === "when" || rest[0] === "on"
+      ? { on: "connection", index: Number(i), field: rest[0] }
       : { on: "connection", index: Number(i) };
   if (top === "output" || top === "output_schema")
     return { on: "response", field: top };
-  if (top === "input_schema") return { on: "settings", field: top };
+  if (top === "input_schema" || top === "sample_input")
+    return { on: "settings", field: top };
   return { on: "workflow" };
 }
 
@@ -87,8 +98,16 @@ const requestParts = new Map<string, StepField>([
 
 function stepPlace(index: number, [part, sub, name]: string[]): Place {
   const step = { on: "step", index } as const;
-  if (part === "id" || part === "kind" || part === "expr")
+  if (part === "id" || part === "kind" || part === "expr" || part === "sample")
     return { ...step, field: part };
+  if (part === "outputs")
+    return !isIndex(sub)
+      ? { ...step, field: "outputs" }
+      : {
+          ...step,
+          field: name === "sample" ? "sample" : "outputs",
+          output: Number(sub),
+        };
   if (part !== "request") return step;
   if (sub === "headers" || sub === "query")
     return name === undefined
@@ -100,6 +119,20 @@ function stepPlace(index: number, [part, sub, name]: string[]): Place {
       field: name === "idempotent" ? "idempotent" : "attempts",
     };
   return { ...step, field: requestParts.get(sub ?? "") ?? "request" };
+}
+
+// stepPartOf is the part of an HTTP step's panel a problem in it is on, as
+// the editor's store names parts: a response's, by its block, or adding
+// one, or else the request.
+export function stepPartOf(place: Place, draft: Definition): string {
+  if (place.on !== "step") return "request";
+  if (place.output !== undefined) {
+    const status = draft.nodes[place.index]?.outputs?.[place.output]?.status;
+    return status === undefined ? "add" : String(status);
+  }
+  if (place.field === "sample") return "2xx";
+  if (place.field === "outputs") return "add";
+  return "request";
 }
 
 // follow finds a place, found in one draft, in another. A step is followed
@@ -145,7 +178,7 @@ function find(
       const was = from.edges?.[place.index];
       if (!was) return undefined;
       const same = (e: Edge | undefined) =>
-        e?.from === was.from && e?.to === was.to;
+        e?.from === was.from && e?.to === was.to && e?.on === was.on;
       if (same(to.edges?.[place.index])) return place;
       const now = (to.edges ?? []).findIndex(same);
       return now < 0 ? undefined : { ...place, index: now };
@@ -169,6 +202,14 @@ function partOf(d: Definition, place: Place): unknown {
         case "kind":
         case "expr":
           return n?.[place.field];
+        case "sample":
+          return place.output === undefined
+            ? n?.sample
+            : n?.outputs?.[place.output]?.sample;
+        case "outputs":
+          return place.output === undefined
+            ? n?.outputs
+            : n?.outputs?.[place.output];
         case "request":
           return r;
         case "method":
@@ -190,7 +231,7 @@ function partOf(d: Definition, place: Place): unknown {
     }
     case "connection": {
       const e = d.edges?.[place.index];
-      return place.field === "when" ? e?.when : e;
+      return place.field === undefined ? e : e?.[place.field];
     }
     case "response":
     case "settings":
@@ -221,9 +262,28 @@ export function say(problem: ProblemError, of: Definition): string {
       return `The editor doesn't know steps of the kind “${kind}”.`;
     }
     case "not_allowed":
-      return place.on === "step" && place.field === "expr"
-        ? "An HTTP step sends a request, and has no expression."
-        : "A transform step has an expression, and sends no request.";
+      if (place.on === "connection")
+        return "A transform step has no responses for a connection to leave from.";
+      if (place.on === "step" && place.field === "expr")
+        return "An HTTP step sends a request, and has no expression.";
+      if (place.on === "step" && place.field === "sample")
+        return place.output === undefined
+          ? "A transform step's value comes from its expression, so it has no sample."
+          : "A response's sample takes the response's status.";
+      if (place.on === "step" && place.field === "outputs")
+        return "A transform step gives one value, so it has no other responses.";
+      return "A transform step has an expression, and sends no request.";
+    case "invalid_status":
+      return place.on === "step" && place.field === "outputs"
+        ? "A status from 300 to 599: 2xx is every HTTP step's."
+        : "A status from 200 to 299: this is the 2xx response.";
+    case "duplicate_output":
+      return "This step already has a response for that status.";
+    case "unknown_output": {
+      const edge =
+        place.on === "connection" ? of.edges?.[place.index] : undefined;
+      return `${edge?.from} has no ${edge?.on} response. Add one with + Add on the step, or draw the connection from another.`;
+    }
     case "invalid_method":
       return "Pick GET, HEAD, POST, PUT, PATCH or DELETE.";
     case "placeholder_in_host":
@@ -273,6 +333,10 @@ function required(place: Place): string | undefined {
       return "Pick a method.";
     case "url":
       return "Add a URL.";
+    case "sample":
+      return "Add the sample's body; null for none.";
+    case "outputs":
+      return "Give the response a status.";
     default:
       return undefined;
   }

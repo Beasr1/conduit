@@ -2,8 +2,10 @@ import { expect, test } from "vitest";
 
 import {
   fromPairs,
+  readHeaders,
+  readJSON,
   readSchema,
-  showSchema,
+  showJSON,
   toPairs,
   toRequest,
   toRequestValues,
@@ -46,7 +48,25 @@ test.each([
 
 test.each([
   ["", {}],
-  ['{"type": "object"}', { schema: { type: "object" } }],
+  ["null", { value: null }],
+  ["[1, 2]", { value: [1, 2] }],
+  ['"ada"', { value: "ada" }],
+])("JSON text %j reads as %j", (text, read) => {
+  expect(readJSON(text)).toEqual(read);
+});
+
+test.each([
+  ["", {}],
+  ['{"Content-Type": "text/csv"}', { value: { "Content-Type": "text/csv" } }],
+  ['{"x-count": 2}', { error: "Headers are names and text, in { }." }],
+  ["[]", { error: "Headers are names and text, in { }." }],
+])("header text %j reads as %j", (text, read) => {
+  expect(readHeaders(text)).toEqual(read);
+});
+
+test.each([
+  ["", {}],
+  ['{"type": "object"}', { value: { type: "object" } }],
   ["[]", { error: "A JSON Schema is an object, in { }." }],
   ["null", { error: "A JSON Schema is an object, in { }." }],
 ])("schema text %j reads as %j", (text, read) => {
@@ -57,9 +77,10 @@ test("half-typed schema text says why it doesn't count yet", () => {
   expect(readSchema('{"type":').error).toMatch(/^Not JSON yet: /);
 });
 
-test("a stored schema starts its field formatted", () => {
-  expect(showSchema({ type: "object" })).toBe('{\n  "type": "object"\n}');
-  expect(showSchema(undefined)).toBe("");
+test("a stored value starts its field formatted", () => {
+  expect(showJSON({ type: "object" })).toBe('{\n  "type": "object"\n}');
+  expect(showJSON(null)).toBe("null");
+  expect(showJSON(undefined)).toBe("");
 });
 
 const request: Request = {
@@ -87,9 +108,4 @@ test("a number counts once it's whole and in range, and until then the stored on
   expect(attempts("9")).toEqual(request.retry);
   expect(attempts("")).toBeUndefined();
   expect(attempts("2", false)).toEqual({ attempts: 2 });
-});
-
-test("an empty body sends none", () => {
-  const form = toRequestValues(request);
-  expect(toRequest(request, { ...form, body: "" }).body).toBeUndefined();
 });

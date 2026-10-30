@@ -10,6 +10,7 @@ import { renderAt } from "@/test/render";
 import { server } from "@/test/server";
 
 type Definition = components["schemas"]["Definition"];
+type Preview = components["schemas"]["Preview"];
 type Problem = components["schemas"]["Problem"];
 type ProblemError = components["schemas"]["ProblemError"];
 type Revision = components["schemas"]["Revision"];
@@ -48,6 +49,14 @@ function serveWorkflow(
     ),
     http.post("/api/v1/validate", () =>
       HttpResponse.json<Validation>({ problems: [] }),
+    ),
+    // A step's Preview tab asks as soon as the step is picked.
+    http.post("/api/v1/preview", () =>
+      HttpResponse.json<Preview>({
+        reads: { input: null, nodes: {} },
+        skipped: false,
+        problems: [],
+      }),
     ),
     http.put<PathParams, Definition, Problem | Revision>(
       "/api/v1/workflows/wf-1/draft",

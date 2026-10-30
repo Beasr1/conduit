@@ -1,41 +1,29 @@
-import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
-
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
-import { Textarea } from "@/components/ui/textarea";
+import { FieldError } from "@/components/ui/field";
+import { MappingField } from "@/features/editor/components/mapping-field";
 import { updateEdge } from "@/features/editor/edits";
 import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
+import { usePreview } from "@/features/editor/hooks/use-preview";
 import { useEditor, useEditorStore } from "@/features/editor/store";
+import type { components } from "@/gen/schema";
 
-// ConnectionForm edits a connection's condition, which goes into the draft
-// as it's typed. No text means the connection is always taken.
+type Preview = components["schemas"]["Preview"];
+
+// ConnectionForm edits a connection's condition between the data it reads
+// and whether a run takes the connection, simulated over the samples: what
+// its step and the steps before it got back, its step answering with the
+// response the connection leaves from; the condition, which goes into the
+// draft as it's typed; then whether it's taken. No text means it's taken
+// whenever its step answers that way.
 export function ConnectionForm({ index }: { index: number }) {
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
   const edge = useEditor((s) => s.draft.edges?.[index]);
-  const [defaultValues] = useState(() => ({
-    when: editor.getState().draft.edges?.[index]?.when ?? "",
-  }));
-  const form = useForm<{ when: string }>({ defaultValues });
-  useEffect(
-    () =>
-      form.subscribe({
-        formState: { values: true },
-        callback: ({ values }) =>
-          edit((d) =>
-            updateEdge(d, index, (e) => ({
-              ...e,
-              when: values.when.trim() === "" ? undefined : values.when,
-            })),
-          ),
-      }),
-    [form, edit, index],
+  const http = useEditor(
+    (s) =>
+      s.draft.nodes.find((n) => n.id === s.draft.edges?.[index]?.from)?.kind ===
+      "http",
   );
+  const preview = usePreview({ edge: index });
   const found = useProblems((p) => p.on === "connection" && p.index === index);
   const when = found.filter(
     (f) => f.place.on === "connection" && f.place.field === "when",
@@ -45,29 +33,67 @@ export function ConnectionForm({ index }: { index: number }) {
   return (
     <>
       <p className="text-sm">
-        From <span className="font-mono">{edge.from}</span> to{" "}
-        <span className="font-mono">{edge.to}</span>.
+        From <span className="font-mono">{edge.from}</span>
+        {http && (
+          <>
+            , on <span className="font-mono">{edge.on ?? "2xx"}</span>,
+          </>
+        )}{" "}
+        to <span className="font-mono">{edge.to}</span>.
       </p>
       <FieldError errors={asErrors(found.filter((f) => !when.includes(f)))} />
-      <Field data-invalid={when.length > 0}>
-        <FieldLabel htmlFor="connection-when">Condition</FieldLabel>
-        {/* TODO(plan 10): a JSONata editor replaces this textarea. */}
-        <Textarea
-          id="connection-when"
-          className="min-h-24 font-mono"
-          spellCheck={false}
-          placeholder={`nodes.${edge.from}.status = 200`}
-          aria-invalid={when.length > 0}
-          {...form.register("when")}
-        />
-        <FieldError errors={asErrors(when)} />
-        <FieldDescription>
-          JSONata over what {edge.from} and the steps before it returned.{" "}
-          {edge.to} runs only when this is true; empty means always. A step none
-          of whose connections is taken is skipped, and so are the steps that
-          wait only on it.
-        </FieldDescription>
-      </Field>
+      <MappingField
+        id="connection-when"
+        label="Condition"
+        description={
+          <>
+            JSONata over what {edge.from} and the steps before it got back.{" "}
+            {edge.to} runs only when this is true; empty means always. A step
+            none of whose connections is taken is skipped, and so are the steps
+            that wait only on it.
+          </>
+        }
+        placeholder={`nodes.${edge.from}.body.active = true`}
+        initial={editor.getState().draft.edges?.[index]?.when ?? ""}
+        apply={(text) =>
+          edit((d) =>
+            updateEdge(d, index, (e) => ({
+              ...e,
+              when: text.trim() === "" ? undefined : text,
+            })),
+          )
+        }
+        problems={when}
+        preview={preview}
+        open={(of) => [of.edges?.[index]?.from ?? ""]}
+        result={(p) => <Taken preview={p} from={edge.from} to={edge.to} />}
+      />
+    </>
+  );
+}
+
+// Taken says whether a run would take the connection, with these samples.
+function Taken({
+  preview,
+  from,
+  to,
+}: {
+  preview: Preview;
+  from: string;
+  to: string;
+}) {
+  return (
+    <>
+      <h3 className="font-medium">With these samples</h3>
+      <p>
+        {preview.skipped
+          ? `A run would skip ${from}, so it wouldn't take this connection.`
+          : preview.taken === undefined
+            ? "It can't tell yet: the problems above say why."
+            : preview.taken
+              ? `Taken, so ${to} runs.`
+              : `Not taken. ${to} runs only if another connection into it is.`}
+      </p>
     </>
   );
 }

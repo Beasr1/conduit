@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { connect, removeNodes } from "@/features/editor/edits";
+import { connect, removeNodes, removeOutput } from "@/features/editor/edits";
 import { toFlow } from "@/features/editor/flow";
 import { RESPONSE } from "@/features/editor/flow";
 import { createEditorStore } from "@/features/editor/store";
@@ -79,6 +79,44 @@ test("selection follows what the canvas picks and unpicks", () => {
   ]);
   store.getState().pick("nodes", [{ id: "user", selected: false }]);
   expect(store.getState().selected).toEqual({ nodes: ["crm"], edges: [] });
+});
+
+// user answers 2xx or 404.
+const branched = {
+  ...specExample,
+  nodes: specExample.nodes.map((n) =>
+    n.id === "user" ? { ...n, outputs: [{ status: 404 }] } : n,
+  ),
+};
+
+test("picking a step opens its request, whatever part of another was open", () => {
+  const store = createEditorStore(branched);
+  store.getState().pick("nodes", [{ id: "user", selected: true }]);
+  expect(store.getState().part).toBe("request");
+  store.getState().setPart("404");
+  store.getState().pick("nodes", [
+    { id: "user", selected: false },
+    { id: "crm", selected: true },
+  ]);
+  expect(store.getState().part).toBe("request");
+});
+
+test("removing the response open takes its step back to the request", () => {
+  const store = createEditorStore(branched);
+  store.getState().pick("nodes", [{ id: "user", selected: true }]);
+  store.getState().setPart("404");
+  store.getState().edit((d) => ({ ...d, output: "nodes.user.body" }));
+  expect(store.getState().part).toBe("404");
+  store.getState().edit((d) => removeOutput(d, 0, 404));
+  expect(store.getState().part).toBe("request");
+});
+
+test("showing where a problem is opens the part it's in", () => {
+  const store = createEditorStore(branched);
+  store.getState().show("nodes", "user", "404");
+  expect(store.getState().part).toBe("404");
+  store.getState().show("nodes", "crm");
+  expect(store.getState().part).toBe("request");
 });
 
 test("showing where a problem is picks only that, and puts the panel away", () => {

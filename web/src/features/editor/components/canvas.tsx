@@ -23,6 +23,7 @@ import {
   type FlowNode,
   NODE_HEIGHT,
   NODE_WIDTH,
+  onOf,
   RESPONSE,
   responseCard,
   toFlow,
@@ -46,6 +47,7 @@ export function Canvas() {
   const drag = useEditor((s) => s.drag);
   const drop = useEditor((s) => s.drop);
   const pick = useEditor((s) => s.pick);
+  const setPart = useEditor((s) => s.setPart);
   const openPanel = useEditor((s) => s.openPanel);
 
   const flow = useMemo(() => toFlow(draft), [draft]);
@@ -100,6 +102,17 @@ export function Canvas() {
         }
         if (picks.length > 0) pick("nodes", picks);
       }}
+      // A step's blocks each say which part of it they are, so a click on
+      // one, or on its point, opens that part. The click picks the step
+      // first, which opens its request.
+      onNodeClick={(event) => {
+        const block =
+          event.target instanceof Element
+            ? event.target.closest("[data-part]")
+            : null;
+        const part = block?.getAttribute("data-part");
+        if (part) setPart(part);
+      }}
       onNodeDragStop={(_event, _node, dragged) =>
         drop(Object.fromEntries(dragged.map((n) => [n.id, n.position])))
       }
@@ -107,14 +120,21 @@ export function Canvas() {
         const picks = changes.filter((c) => c.type === "select");
         if (picks.length > 0) pick("edges", picks);
       }}
+      // A click on a point opens its part, so it can't also start a
+      // connection: one is drawn by dragging, or made with Connect to in the
+      // panel of the response it leaves from.
+      connectOnClick={false}
       // A node keyed with "#" has a missing or shared id, which an edge
-      // can't name.
+      // can't name. An edge leaves from the output whose handle it's drawn
+      // from.
       isValidConnection={(c) =>
         !c.source.includes("#") &&
         !c.target.includes("#") &&
-        canConnect(draft, c.source, c.target)
+        canConnect(draft, c.source, c.target, onOf(c.sourceHandle))
       }
-      onConnect={(c) => edit((d) => connect(d, c.source, c.target))}
+      onConnect={(c) =>
+        edit((d) => connect(d, c.source, c.target, onOf(c.sourceHandle)))
+      }
       // Edges go first: removing nodes doesn't move the remaining edges, but
       // the indexes here are for the draft as it is now.
       onDelete={({ nodes: gone, edges: cut }) =>
@@ -183,7 +203,8 @@ function KeepPickedInView() {
       return by;
     };
     const dx = shift(at.x * zoom + x, NODE_WIDTH * zoom, width);
-    const dy = shift(at.y * zoom + y, NODE_HEIGHT * zoom, height);
+    const tall = node.measured.height ?? NODE_HEIGHT;
+    const dy = shift(at.y * zoom + y, tall * zoom, height);
     if (dx !== 0 || dy !== 0)
       void flow.setViewport({ x: x + dx, y: y + dy, zoom });
   }, [picked, width, height, flow]);

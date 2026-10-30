@@ -13,6 +13,7 @@ import {
   placeOf,
   problemsIn,
   say,
+  stepPartOf,
 } from "@/features/editor/problems";
 import type { components } from "@/gen/schema";
 import { specExample } from "@/test/fixtures";
@@ -62,9 +63,48 @@ test.each<[string, Place]>([
   ["/output", { on: "response", field: "output" }],
   ["/output_schema", { on: "response", field: "output_schema" }],
   ["/input_schema", { on: "settings", field: "input_schema" }],
+  ["/sample_input", { on: "settings", field: "sample_input" }],
+  ["/nodes/0/sample", { on: "step", index: 0, field: "sample" }],
+  ["/nodes/0/sample/body", { on: "step", index: 0, field: "sample" }],
+  ["/nodes/0/sample/headers/X Bad", { on: "step", index: 0, field: "sample" }],
+  ["/nodes/0/outputs", { on: "step", index: 0, field: "outputs" }],
+  [
+    "/nodes/0/outputs/1/status",
+    { on: "step", index: 0, field: "outputs", output: 1 },
+  ],
+  [
+    "/nodes/0/outputs/1/sample/body",
+    { on: "step", index: 0, field: "sample", output: 1 },
+  ],
+  ["/edges/0/on", { on: "connection", index: 0, field: "on" }],
   ["/ui/positions/user/x", { on: "workflow" }],
 ])("%j points at %j", (pointer, place) => {
   expect(placeOf(pointer)).toEqual(place);
+});
+
+// The part of a step's panel each place is on: user answers 2xx, 409 or 404.
+test.each<[string, string]>([
+  ["/nodes/0/request/url", "request"],
+  ["/nodes/0/request/body", "request"],
+  ["/nodes/0/id", "request"],
+  ["/nodes/0/sample/body", "2xx"],
+  ["/nodes/0/outputs/1/sample/body", "404"],
+  ["/nodes/0/outputs/0/status", "409"],
+  ["/nodes/0/outputs/5/status", "add"],
+  ["/nodes/0/outputs", "add"],
+  ["/edges/0/when", "request"],
+])("%j is on the step's %j", (pointer, part) => {
+  const draft: Definition = {
+    nodes: [
+      {
+        id: "user",
+        kind: "http",
+        request: { method: "GET", url: "https://users.example.com" },
+        outputs: [{ status: 409 }, { status: 404 }],
+      },
+    ],
+  };
+  expect(stepPartOf(placeOf(pointer), draft)).toBe(part);
 });
 
 test("a step's problem follows it when an earlier step goes", () => {
@@ -93,6 +133,56 @@ test("a connection's problem follows the steps it joins", () => {
   expect(
     follow({ on: "connection", index: 0 }, specExample, after),
   ).toBeUndefined();
+});
+
+// Two steps can be joined once per output, so a connection is followed by
+// the output it leaves from too.
+test("a connection's problem follows the output it leaves from", () => {
+  const twice: Definition = {
+    ...specExample,
+    nodes: specExample.nodes.map((n) =>
+      n.id === "user" ? { ...n, outputs: [{ status: 404 }] } : n,
+    ),
+    // user → orders from 2xx and from 404, with the same condition.
+    edges: [
+      ...(specExample.edges ?? []).map((e, i) =>
+        i === 0 ? { ...e, when: "x =" } : e,
+      ),
+      { from: "user", to: "orders", on: 404, when: "x =" },
+    ],
+  };
+  const after = removeEdges(twice, [0]);
+  expect(
+    follow({ on: "connection", index: 4, field: "when" }, twice, after),
+  ).toEqual({ on: "connection", index: 3, field: "when" });
+  // The one from 2xx is gone, and its problem doesn't move to the other.
+  expect(
+    follow({ on: "connection", index: 0, field: "when" }, twice, after),
+  ).toBeUndefined();
+});
+
+test("an output's problem goes once that output changes", () => {
+  const user = specExample.nodes.findIndex((n) => n.id === "user");
+  const listed = updateNode(specExample, user, (n) => ({
+    ...n,
+    outputs: [{ status: 404 }, { status: 404 }],
+  }));
+  const second: Place = {
+    on: "step",
+    index: user,
+    field: "outputs",
+    output: 1,
+  };
+  const changed = updateNode(listed, user, (n) => ({
+    ...n,
+    outputs: [{ status: 404 }, { status: 409 }],
+  }));
+  expect(follow(second, listed, changed)).toBeUndefined();
+  const sampled = updateNode(listed, user, (n) => ({
+    ...n,
+    outputs: [{ status: 404, sample: { body: null } }, { status: 404 }],
+  }));
+  expect(follow(second, listed, sampled)).toEqual(second);
 });
 
 // A problem is about what was there when the server looked. Once that
@@ -151,6 +241,7 @@ const broken: Definition = {
   edges: [
     { from: "a", to: "zz" },
     { from: "a", to: "a" },
+    { from: "a", to: "Bad", on: 409 },
   ],
 };
 
@@ -170,6 +261,48 @@ test.each([
   ],
   ["/edges/0/to", "unknown_node", "No step has the id “zz”."],
   ["/edges/1", "self_edge", "A step can't connect to itself."],
+  [
+    "/nodes/1/sample/status",
+    "invalid_status",
+    "A status from 200 to 299: this is the 2xx response.",
+  ],
+  ["/nodes/1/sample/body", "required", "Add the sample's body; null for none."],
+  [
+    "/nodes/1/outputs/0/status",
+    "invalid_status",
+    "A status from 300 to 599: 2xx is every HTTP step's.",
+  ],
+  ["/nodes/1/outputs/0/status", "required", "Give the response a status."],
+  [
+    "/nodes/1/outputs/1/status",
+    "duplicate_output",
+    "This step already has a response for that status.",
+  ],
+  [
+    "/nodes/1/outputs/0/sample/status",
+    "not_allowed",
+    "A response's sample takes the response's status.",
+  ],
+  [
+    "/nodes/0/outputs",
+    "not_allowed",
+    "A transform step gives one value, so it has no other responses.",
+  ],
+  [
+    "/edges/2/on",
+    "not_allowed",
+    "A transform step has no responses for a connection to leave from.",
+  ],
+  [
+    "/edges/2/on",
+    "unknown_output",
+    "a has no 409 response. Add one with + Add on the step, or draw the connection from another.",
+  ],
+  [
+    "/nodes/0/sample",
+    "not_allowed",
+    "A transform step's value comes from its expression, so it has no sample.",
+  ],
   [
     "/edges/0",
     "cycle",

@@ -44,8 +44,8 @@ test("a problem shows on its step, its field, its tab and in the list", async ()
   expect(within(panel).getByLabelText("URL").getAttribute("aria-invalid")).toBe(
     "true",
   );
-  // Seen from the Response tab, the Request tab still says it has one.
-  fireEvent.click(within(panel).getByRole("tab", { name: "Response" }));
+  // Seen from the 2xx tab, the Request tab still says it has one.
+  fireEvent.click(within(panel).getByRole("tab", { name: "2xx" }));
   expect(
     within(panel).getByRole("tab", { name: "Request (1 problem)" }),
   ).toBeTruthy();
@@ -161,4 +161,81 @@ test("a connection to a missing step can be removed from the list", async () => 
     within(list).getByRole("button", { name: "Remove connection" }),
   );
   expect(await within(list).findByText("No problems.")).toBeTruthy();
+});
+
+// One from a response its step doesn't have can't be drawn either.
+test("a connection from a response its step lacks can be removed from the list", async () => {
+  renderEditor(
+    {
+      ...specExample,
+      edges: [
+        ...(specExample.edges ?? []),
+        { from: "user", to: "crm", on: 409 },
+      ],
+    },
+    [
+      {
+        pointer: "/edges/4/on",
+        code: "unknown_output",
+        detail: "user has no 409 output",
+      },
+    ],
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "1 problem" }));
+  const list = await screen.findByRole("complementary", { name: "Problems" });
+  expect(within(list).getByText(/^Connection/).textContent).toBe(
+    "Connection user (409) → crm",
+  );
+  expect(
+    within(list).getByText(
+      "user has no 409 response. Add one with + Add on the step, or draw the connection from another.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(
+    within(list).getByRole("button", { name: "Remove connection" }),
+  );
+  expect(await within(list).findByText("No problems.")).toBeTruthy();
+});
+
+test("a problem in a response opens its tab, at its sample's body", async () => {
+  renderEditor(
+    {
+      ...specExample,
+      nodes: specExample.nodes.map((n) =>
+        n.id === "user"
+          ? {
+              ...n,
+              outputs: [
+                { status: 409 },
+                { status: 404, sample: { status: 404, body: null } },
+              ],
+            }
+          : n,
+      ),
+    },
+    [
+      {
+        pointer: "/nodes/0/outputs/1/sample/status",
+        code: "not_allowed",
+        detail: "an output's sample takes the output's status",
+      },
+    ],
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "1 problem" }));
+  const list = await screen.findByRole("complementary", { name: "Problems" });
+  fireEvent.click(
+    within(list).getByRole("button", { name: /^user · 404 response/ }),
+  );
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: "404 body" }),
+    ),
+  );
+  // The response says what's wrong, and the other doesn't.
+  const panel = screen.getByRole("tabpanel", { name: /^404/ });
+  expect(
+    within(panel).getAllByText(
+      "A response's sample takes the response's status.",
+    ),
+  ).toHaveLength(1);
 });
