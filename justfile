@@ -34,7 +34,7 @@ setup:
     @if golangci-lint version 2>/dev/null | grep -q "version {{golangci_version}} "; then echo "golangci-lint {{golangci_version}} already installed"; else curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b .tools/bin v{{golangci_version}}; fi
     cd web && corepack pnpm install --frozen-lockfile
 
-# run Postgres, the API server and the web app together; Ctrl-C stops them all
+# run Postgres, the API server, the web app and the test upstream together; Ctrl-C stops them all
 dev:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -42,7 +42,11 @@ dev:
     # `just up` use the same container.
     db_was_up=$({{compose}} ps --status running --quiet db)
     just db-up migrate
-    (cd server && {{load_env}} && exec go run ./cmd/conduit) &
+    (cd server && exec go run ./cmd/testupstream) &
+    upstream=$!
+    # The server may call the test upstream, on loopback port 8090: here, in
+    # development, and nowhere else.
+    (cd server && {{load_env}} && CONDUIT_ALLOW_PRIVATE_NETWORKS=true CONDUIT_UPSTREAM_PORTS=80,443,8090 exec go run ./cmd/conduit) &
     server=$!
     (cd web && exec corepack pnpm dev) &
     web=$!
@@ -56,15 +60,19 @@ dev:
     }
     trap cleanup EXIT
     trap 'exit "$status"' INT
-    # If either stops on its own, stop the other the way Ctrl-C would.
-    while kill -0 "$server" 2>/dev/null && kill -0 "$web" 2>/dev/null; do sleep 1; done
+    # If any of them stops on its own, stop the rest the way Ctrl-C would.
+    while kill -0 "$server" 2>/dev/null && kill -0 "$web" 2>/dev/null && kill -0 "$upstream" 2>/dev/null; do sleep 1; done
     status=1
-    echo "the server or the web app stopped, so dev is stopping the rest" >&2
+    echo "the server, the web app or the test upstream stopped, so dev is stopping the rest" >&2
     kill -INT 0
 
 # run the API server on http://127.0.0.1:8080, against the compose Postgres
 dev-server: db-up migrate
     cd server && {{load_env}} && go run ./cmd/conduit
+
+# run the test upstream on http://127.0.0.1:8090, to try runs against; `just dev` starts it too
+upstream:
+    cd server && go run ./cmd/testupstream
 
 # run the web app on http://127.0.0.1:5173, proxying /api to the server
 dev-web:
