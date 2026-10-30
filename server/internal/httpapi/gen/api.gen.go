@@ -268,6 +268,39 @@ type NodeRun struct {
 // NodeRunStatus defines model for NodeRun.Status.
 type NodeRunStatus string
 
+// Preview defines model for Preview.
+type Preview struct {
+	// Gives A transform step's value, or the workflow's output. Absent when it gave none.
+	Gives json.RawMessage `json:"gives,omitempty,omitzero"`
+
+	// Problems What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
+	Problems []ProblemError `json:"problems"`
+
+	// Reads The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples.
+	Reads json.RawMessage `json:"reads"`
+
+	// Sends An http step's request, as a run would send it. A part that didn't render is left out, and its problem says why.
+	Sends RenderedRequest `json:"sends,omitempty,omitzero"`
+
+	// Skipped A run would skip the step, or a connection's source, with these samples, as no connection into it is taken.
+	Skipped bool `json:"skipped"`
+
+	// Taken A connection's preview only, whether a run would take it with these samples.
+	Taken *bool `json:"taken,omitempty"`
+}
+
+// PreviewRequest defines model for PreviewRequest.
+type PreviewRequest struct {
+	// Definition A workflow. A node runs once its parents have finished and at least one edge into it was taken.
+	Definition externalRef0.Definition `json:"definition"`
+
+	// Edge The connection to preview, by its place in the definition's edges. Not with node.
+	Edge *int `json:"edge,omitempty"`
+
+	// Node The step to preview, by id. Absent, with no edge, means the workflow's output.
+	Node string `json:"node,omitempty,omitzero"`
+}
+
 // Problem defines model for Problem.
 type Problem struct {
 	// Code Our stable error code.
@@ -308,6 +341,15 @@ type Provenance struct {
 // Publish defines model for Publish.
 type Publish struct {
 	Revision int `json:"revision"`
+}
+
+// RenderedRequest An http step's request, as a run would send it. A part that didn't render is left out, and its problem says why.
+type RenderedRequest struct {
+	// Body The JSON body.
+	Body    json.RawMessage   `json:"body,omitempty,omitzero"`
+	Headers map[string]string `json:"headers"`
+	Method  string            `json:"method"`
+	URL     string            `json:"url,omitempty,omitzero"`
 }
 
 // Revision defines model for Revision.
@@ -515,6 +557,9 @@ type SaveDraftParams struct {
 // ServeWorkflowJSONRequestBody defines body for ServeWorkflow for application/json ContentType.
 type ServeWorkflowJSONRequestBody = ServeWorkflowJSONBody
 
+// PreviewDefinitionJSONRequestBody defines body for PreviewDefinition for application/json ContentType.
+type PreviewDefinitionJSONRequestBody = PreviewRequest
+
 // CreateSessionJSONRequestBody defines body for CreateSession for application/json ContentType.
 type CreateSessionJSONRequestBody = SignIn
 
@@ -544,6 +589,9 @@ type ServerInterface interface {
 	// ServeWorkflow Run a workflow's published revision and answer with its output
 	// (POST /serve/{slug})
 	ServeWorkflow(w http.ResponseWriter, r *http.Request, slug string)
+	// PreviewDefinition Preview what a step would read and send, or whether a connection is taken, over the samples
+	// (POST /v1/preview)
+	PreviewDefinition(w http.ResponseWriter, r *http.Request)
 	// ListRuns List runs, newest first
 	// (GET /v1/runs)
 	ListRuns(w http.ResponseWriter, r *http.Request, params ListRunsParams)
@@ -642,6 +690,20 @@ func (siw *ServerInterfaceWrapper) ServeWorkflow(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ServeWorkflow(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PreviewDefinition operation middleware
+func (siw *ServerInterfaceWrapper) PreviewDefinition(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PreviewDefinition(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1209,6 +1271,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{id}/revisions/{revision}", wrapper.GetRevision)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/publish", wrapper.PublishWorkflow)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/validate", wrapper.ValidateDefinition)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/preview", wrapper.PreviewDefinition)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/runs", wrapper.StartRun)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs", wrapper.ListRuns)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}", wrapper.GetRun)
@@ -1409,6 +1472,58 @@ func (response ServeWorkflow504ApplicationProblemPlusJSONResponse) VisitServeWor
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(504)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewDefinitionRequestObject struct {
+	Body *PreviewDefinitionJSONRequestBody
+}
+
+type PreviewDefinitionResponseObject interface {
+	VisitPreviewDefinitionResponse(w http.ResponseWriter) error
+}
+
+type PreviewDefinition200JSONResponse Preview
+
+func (response PreviewDefinition200JSONResponse) VisitPreviewDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewDefinition401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response PreviewDefinition401ApplicationProblemPlusJSONResponse) VisitPreviewDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewDefinition422ApplicationProblemPlusJSONResponse Problem
+
+func (response PreviewDefinition422ApplicationProblemPlusJSONResponse) VisitPreviewDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2316,6 +2431,9 @@ type StrictServerInterface interface {
 	// ServeWorkflow Run a workflow's published revision and answer with its output
 	// (POST /serve/{slug})
 	ServeWorkflow(ctx context.Context, request ServeWorkflowRequestObject) (ServeWorkflowResponseObject, error)
+	// PreviewDefinition Preview what a step would read and send, or whether a connection is taken, over the samples
+	// (POST /v1/preview)
+	PreviewDefinition(ctx context.Context, request PreviewDefinitionRequestObject) (PreviewDefinitionResponseObject, error)
 	// ListRuns List runs, newest first
 	// (GET /v1/runs)
 	ListRuns(ctx context.Context, request ListRunsRequestObject) (ListRunsResponseObject, error)
@@ -2476,6 +2594,37 @@ func (sh *strictHandler) ServeWorkflow(w http.ResponseWriter, r *http.Request, s
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ServeWorkflowResponseObject); ok {
 		if err := validResponse.VisitServeWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PreviewDefinition operation middleware
+func (sh *strictHandler) PreviewDefinition(w http.ResponseWriter, r *http.Request) {
+	var request PreviewDefinitionRequestObject
+
+	var body PreviewDefinitionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PreviewDefinition(ctx, request.(PreviewDefinitionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PreviewDefinition")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PreviewDefinitionResponseObject); ok {
+		if err := validResponse.VisitPreviewDefinitionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

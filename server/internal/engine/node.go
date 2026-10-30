@@ -1,11 +1,14 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"runtime/debug"
+	"slices"
 	"strings"
 
 	"github.com/Beasr1/conduit/server/internal/upstream"
@@ -77,7 +80,7 @@ func (r *run) exec(i int, parts []docPart) {
 	// keeps a slow condition off the scheduler.
 	self := append(parts[:len(parts):len(parts)], docPart{id: n.id, entry: o.entry})
 	if doc, err = document(r.input, self); err == nil {
-		o.taken, err = r.conditions(n, doc)
+		o.taken, err = r.conditions(n, doc, outputOf(o.result.HTTPStatus))
 	}
 	o.err = err
 }
@@ -85,54 +88,16 @@ func (r *run) exec(i int, parts []docPart) {
 func (r *run) call(i int, doc []byte) outcome {
 	n := &r.p.nodes[i]
 	var o outcome
-	fail := func(what string, err error) outcome {
-		o.err = fmt.Errorf("%s: %w", what, err)
+	req, errs := n.request(r.ctx, doc, r.id+":"+n.id)
+	if len(errs) > 0 {
+		o.err = fmt.Errorf("%s: %w", errs[0].part, errs[0].err)
 		return o
 	}
 
-	u, err := n.url.Render(r.ctx, doc, escapeURLValue)
-	if err != nil {
-		return fail("url", err)
-	}
-	if len(n.query) > 0 {
-		q := url.Values{}
-		for _, p := range n.query {
-			v, err := p.value.Render(r.ctx, doc, nil)
-			if err != nil {
-				return fail("query "+p.name, err)
-			}
-			q.Set(p.name, v)
-		}
-		sep := "?"
-		if strings.Contains(u, "?") {
-			sep = "&"
-		}
-		u += sep + q.Encode()
-	}
-	header := make(http.Header, len(n.headers)+1)
-	for _, p := range n.headers {
-		v, err := p.value.Render(r.ctx, doc, nil)
-		if err != nil {
-			return fail("header "+p.name, err)
-		}
-		header.Set(p.name, v)
-	}
-	var body []byte
-	if n.body != nil {
-		if body, err = n.body.Eval(r.ctx, doc); err != nil {
-			return fail("body", err)
-		}
-	}
-	// One key for every attempt, so the upstream can recognise a repeat.
-	if n.attempts > 1 && n.idempotent && (n.method == http.MethodPost || n.method == http.MethodPatch) &&
-		header.Get("Idempotency-Key") == "" {
-		header.Set("Idempotency-Key", r.id+":"+n.id)
-	}
-
-	o.result.Request = &SentRequest{Method: n.method, URL: u, Header: header, Body: body}
+	o.result.Request = req
 	o.result.Attempts = 1
 	res, err := r.e.client.Do(r.ctx, &upstream.Request{
-		Method: n.method, URL: u, Header: header, Body: body,
+		Method: req.Method, URL: req.URL, Header: req.Header, Body: req.Body,
 		Timeout: n.timeout, Attempts: n.attempts, Idempotent: n.idempotent,
 		OnRetry: func(attempt int) {
 			o.result.Attempts = attempt
@@ -142,14 +107,108 @@ func (r *run) call(i int, doc []byte) outcome {
 	if res != nil {
 		o.result.HTTPStatus, o.result.Header, o.result.Body = res.Status, res.Header, res.Body
 	}
-	if err != nil {
+	if err != nil && !n.answers(err) {
 		o.err = err
 		return o
 	}
 	if o.entry, err = httpEntry(res); err != nil {
-		return fail("response", err)
+		o.err = fmt.Errorf("response: %w", err)
 	}
 	return o
+}
+
+// answers says whether a failed call is an answer after all: a status the
+// node lists as one of its outputs.
+func (n *node) answers(err error) bool {
+	var ue *upstream.Error
+	return errors.As(err, &ue) && ue.Kind == upstream.KindStatus && slices.Contains(n.outputs, ue.Status)
+}
+
+// outputOf is the output an answer with this status comes out of: the
+// status itself, or 0 for 2xx, and for a transform's one output.
+func outputOf(status int) int {
+	if status >= 200 && status <= 299 {
+		return 0
+	}
+	return status
+}
+
+// partError is a part of a request that didn't render: which part, as a
+// run's error names it, where it sits below its node in the definition, and
+// why.
+type partError struct {
+	part    string // "url", "query q", "header X" or "body"
+	pointer string // "/request/url", "/request/query/q", …
+	err     error
+}
+
+// request renders node n's request over doc, as a run sends it. Every part
+// is rendered and each one that fails is reported, so a preview can show
+// them all, where a run stops at the first. key is the Idempotency-Key a
+// retried POST or PATCH carries. A part that didn't compile, which only a
+// preview's program can hold, is left out: its problem says why.
+func (n *node) request(ctx context.Context, doc []byte, key string) (*SentRequest, []partError) {
+	req := &SentRequest{Method: n.method, Header: make(http.Header, len(n.headers)+1)}
+	var errs []partError
+	fail := func(part, pointer string, err error) {
+		errs = append(errs, partError{part: part, pointer: pointer, err: err})
+	}
+
+	urlOK := false
+	if n.url != nil {
+		u, err := n.url.Render(ctx, doc, escapeURLValue)
+		if err != nil {
+			fail("url", "/request/url", err)
+		} else {
+			req.URL, urlOK = u, true
+		}
+	}
+	if len(n.query) > 0 {
+		q := url.Values{}
+		for _, p := range n.query {
+			if p.value == nil {
+				continue
+			}
+			v, err := p.value.Render(ctx, doc, nil)
+			if err != nil {
+				fail("query "+p.name, "/request/query/"+workflow.PointerToken(p.name), err)
+				continue
+			}
+			q.Set(p.name, v)
+		}
+		if urlOK && len(q) > 0 {
+			sep := "?"
+			if strings.Contains(req.URL, "?") {
+				sep = "&"
+			}
+			req.URL += sep + q.Encode()
+		}
+	}
+	for _, p := range n.headers {
+		if p.value == nil {
+			continue
+		}
+		v, err := p.value.Render(ctx, doc, nil)
+		if err != nil {
+			fail("header "+p.name, "/request/headers/"+workflow.PointerToken(p.name), err)
+			continue
+		}
+		req.Header.Set(p.name, v)
+	}
+	if n.body != nil {
+		body, err := n.body.Eval(ctx, doc)
+		if err != nil {
+			fail("body", "/request/body", err)
+		} else {
+			req.Body = body
+		}
+	}
+	// One key for every attempt, so the upstream can recognise a repeat.
+	if n.attempts > 1 && n.idempotent && (n.method == http.MethodPost || n.method == http.MethodPatch) &&
+		req.Header.Get("Idempotency-Key") == "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	return req, errs
 }
 
 // escapeURLValue escapes a placeholder's value for where it lands in a URL,
@@ -191,23 +250,33 @@ func (r *run) transform(n *node, doc []byte) outcome {
 	if err != nil {
 		return outcome{err: fmt.Errorf("expr: %w", err)}
 	}
-	entry := append(append([]byte(`{"body":`), v...), '}')
-	return outcome{result: NodeResult{Body: v}, entry: entry}
+	return outcome{result: NodeResult{Body: v}, entry: bodyEntry(v)}
 }
 
-func (r *run) conditions(n *node, doc []byte) ([]bool, error) {
+// bodyEntry is a transform node's part of the data document: its value, as
+// its body.
+func bodyEntry(v json.RawMessage) json.RawMessage {
+	return append(append([]byte(`{"body":`), v...), '}')
+}
+
+// conditions decides which of n's edges are taken, now that it answered
+// through output on: of the edges from that output, those whose condition
+// holds over doc.
+func (r *run) conditions(n *node, doc []byte, on int) ([]bool, error) {
 	taken := make([]bool, len(n.out))
 	for j, k := range n.out {
 		e := r.p.edges[k]
-		if e.when == nil {
+		switch {
+		case e.on != on:
+		case e.when == nil:
 			taken[j] = true
-			continue
+		default:
+			ok, err := e.when.Eval(r.ctx, doc)
+			if err != nil {
+				return nil, fmt.Errorf("edge to %s: when: %w", r.p.nodes[e.to].id, err)
+			}
+			taken[j] = ok
 		}
-		ok, err := e.when.Eval(r.ctx, doc)
-		if err != nil {
-			return nil, fmt.Errorf("edge to %s: when: %w", r.p.nodes[e.to].id, err)
-		}
-		taken[j] = ok
 	}
 	return taken, nil
 }

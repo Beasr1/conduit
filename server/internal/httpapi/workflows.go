@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Beasr1/conduit/server/internal/engine"
@@ -167,6 +169,52 @@ func (a *api) PublishWorkflow(ctx context.Context, req gen.PublishWorkflowReques
 
 func (*api) ValidateDefinition(_ context.Context, req gen.ValidateDefinitionRequestObject) (gen.ValidateDefinitionResponseObject, error) {
 	return gen.ValidateDefinition200JSONResponse{Problems: problemsOf(req.Body)}, nil
+}
+
+// previewTimeout bounds a whole preview. Each expression on the way has
+// its own guardrails, and a definition can hold a lot of them.
+const previewTimeout = 3 * time.Second
+
+func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequestObject) (gen.PreviewDefinitionResponseObject, error) {
+	ctx, cancel := context.WithTimeout(ctx, previewTimeout)
+	defer cancel()
+	b := req.Body
+	var pv *engine.Preview
+	var err error
+	switch {
+	case b.Edge != nil && b.Node != "":
+		return nil, &problem{
+			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "Preview a step or a connection, not both.",
+			errors: []gen.ProblemError{{Pointer: "/edge", Code: "not_allowed", Detail: "a preview is of a node or an edge, not both"}},
+		}
+	case b.Edge != nil:
+		pv, err = engine.SimulateEdge(ctx, &b.Definition, *b.Edge)
+	default:
+		pv, err = engine.Simulate(ctx, &b.Definition, b.Node)
+	}
+	switch {
+	case errors.Is(err, engine.ErrNoSuchNode):
+		return nil, &problem{
+			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "There's no such step to preview.",
+			errors: []gen.ProblemError{{Pointer: "/node", Code: "unknown_node", Detail: fmt.Sprintf("no node has the id %q", b.Node)}},
+		}
+	case errors.Is(err, engine.ErrNoSuchEdge):
+		return nil, &problem{
+			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "There's no such connection to preview.",
+			errors: []gen.ProblemError{{Pointer: "/edge", Code: "unknown_edge", Detail: fmt.Sprintf("the definition has no edge at %d", *b.Edge)}},
+		}
+	case err != nil:
+		return nil, err
+	}
+	out := gen.PreviewDefinition200JSONResponse{Reads: pv.Reads, Gives: pv.Gives, Taken: pv.Taken, Skipped: pv.Skipped, Problems: problemErrors(pv.Problems)}
+	if s := pv.Sends; s != nil {
+		headers := make(map[string]string, len(s.Header))
+		for name, values := range s.Header {
+			headers[name] = strings.Join(values, ", ")
+		}
+		out.Sends = gen.RenderedRequest{Method: s.Method, URL: s.URL, Headers: headers, Body: s.Body}
+	}
+	return out, nil
 }
 
 func invalidDefinition(ps []gen.ProblemError, format string, args ...any) *problem {

@@ -23,6 +23,7 @@ var bodies = map[string]reflect.Type{
 	"PUT /v1/workflows/{id}/draft":    reflect.TypeFor[workflow.Definition](),
 	"POST /v1/workflows/{id}/publish": reflect.TypeFor[gen.Publish](),
 	"POST /v1/validate":               reflect.TypeFor[workflow.Definition](),
+	"POST /v1/preview":                reflect.TypeFor[gen.PreviewRequest](),
 	"POST /v1/session":                reflect.TypeFor[gen.SignIn](),
 	"POST /v1/workflows/{id}/runs":    reflect.TypeFor[gen.StartRun](),
 }

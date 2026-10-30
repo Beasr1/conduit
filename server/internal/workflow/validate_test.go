@@ -46,6 +46,40 @@ func TestValidate_AcceptsSpecExample(t *testing.T) {
 	}
 }
 
+// A sample stands in for a response that can be anything, an empty one
+// included, so a null body and a status-less sample are fine.
+func TestValidate_AcceptsSamples(t *testing.T) {
+	t.Parallel()
+	d := decode(t, `{"nodes": [
+		{"id": "a", "kind": "http", "request": {"method": "GET", "url": "https://api.example.com/v1"},
+		 "sample": {"body": null}},
+		{"id": "b", "kind": "http", "request": {"method": "GET", "url": "https://api.example.com/v1"},
+		 "sample": {"status": 201, "headers": {"Content-Type": "application/json"}, "body": {"id": "7"}}}],
+		"sample_input": [1, 2, 3]}`)
+	if ps := Validate(d); len(ps) > 0 {
+		t.Fatalf("Validate() = %v, want no problems", ps)
+	}
+}
+
+// A step can answer through outputs besides 2xx, each with a sample or
+// none, and two steps can be joined once per output: here log follows user
+// whichever way it answered.
+func TestValidate_AcceptsOutputs(t *testing.T) {
+	t.Parallel()
+	d := decode(t, `{"nodes": [
+		{"id": "user", "kind": "http", "request": {"method": "GET", "url": "https://api.example.com/v1"},
+		 "outputs": [{"status": 404, "sample": {"headers": {"Content-Type": "application/json"}, "body": {"error": "gone"}}},
+		             {"status": 409}]},
+		{"id": "create", "kind": "transform", "expr": "1"},
+		{"id": "log", "kind": "transform", "expr": "1"}],
+		"edges": [{"from": "user", "to": "create", "on": 404},
+		          {"from": "user", "to": "log"},
+		          {"from": "user", "to": "log", "on": 404}]}`)
+	if ps := Validate(d); len(ps) > 0 {
+		t.Fatalf("Validate() = %v, want no problems", ps)
+	}
+}
+
 // Positions are the editor's business. One for a node that isn't in the
 // workflow is ignored, not reported.
 func TestValidate_IgnoresPositions(t *testing.T) {
@@ -210,6 +244,85 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 			want: []string{"/edges/0 cycle", "/edges/1 cycle", "/edges/2 cycle"},
 		},
 		{
+			name: "a header with no name",
+			def:  `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "https://api.example.com/v1", "headers": {"": "1"}}}]}`,
+			want: []string{"/nodes/0/request/headers/ invalid_header_name"},
+		},
+		{
+			name: "a sample on a transform node",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1", "sample": {"body": {}}}]}`,
+			want: []string{"/nodes/0/sample not_allowed"},
+		},
+		{
+			name: "a sample without a body",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "sample": {"status": 200}}]}`,
+			want: []string{"/nodes/0/sample/body required"},
+		},
+		{
+			name: "a sample's status out of range",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "sample": {"status": 99, "body": null}}]}`,
+			want: []string{"/nodes/0/sample/status invalid_status"},
+		},
+		{
+			name: "a sample's status outside 2xx",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "sample": {"status": 404, "body": null}}]}`,
+			want: []string{"/nodes/0/sample/status invalid_status"},
+		},
+		{
+			name: "outputs on a transform node",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1", "outputs": [{"status": 404}]}]}`,
+			want: []string{"/nodes/0/outputs not_allowed"},
+		},
+		{
+			name: "an output's status in 2xx, and past 599",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 204}, {"status": 600}]}]}`,
+			want: []string{"/nodes/0/outputs/0/status invalid_status", "/nodes/0/outputs/1/status invalid_status"},
+		},
+		{
+			name: "an output listed twice",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}, {"status": 404}]}]}`,
+			want: []string{"/nodes/0/outputs/1/status duplicate_output"},
+		},
+		{
+			name: "an output's sample with a status of its own, and one without a body",
+			def: `{"nodes": [{"id": "a", "kind": "http", ` + get + `,
+			                  "outputs": [{"status": 404, "sample": {"status": 200, "body": null}}, {"status": 409, "sample": {}}]}]}`,
+			want: []string{"/nodes/0/outputs/0/sample/status not_allowed", "/nodes/0/outputs/1/sample/body required"},
+		},
+		{
+			name: "an edge on an output its source doesn't have",
+			def: `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"}],
+			       "edges": [{"from": "a", "to": "b", "on": 409}]}`,
+			want: []string{"/edges/0/on unknown_output"},
+		},
+		{
+			name: "an edge on an output from a transform",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "1"}],
+			       "edges": [{"from": "a", "to": "b", "on": 404}]}`,
+			want: []string{"/edges/0/on not_allowed"},
+		},
+		{
+			name: "two edges on one output",
+			def: `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"}],
+			       "edges": [{"from": "a", "to": "b", "on": 404}, {"from": "a", "to": "b", "on": 404}]}`,
+			want: []string{"/edges/1 duplicate_edge"},
+		},
+		{
+			name: "a sample's header name with a space",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "sample": {"headers": {"X Bad": "1"}, "body": 1}}]}`,
+			want: []string{"/nodes/0/sample/headers/X Bad invalid_header_name"},
+		},
+		{
+			name: "a sample's body over 64 KiB",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "sample": {"body": "` + strings.Repeat("x", 64<<10) + `"}}]}`,
+			want: []string{"/nodes/0/sample/body too_large"},
+		},
+		{
+			name: "a sample input over 64 KiB",
+			def:  `{"nodes": [], "sample_input": "` + strings.Repeat("x", 64<<10) + `"}`,
+			want: []string{"/sample_input too_large"},
+		},
+		{
 			name: "every problem at once",
 			def: `{"nodes": [{"id": "A", "kind": "http", "request": {"method": "GET", "url": "https://{{ input.h }}/"}},
 			                 {"id": "b", "kind": "transform"}],
@@ -243,5 +356,27 @@ func TestValidate_TooManyNodes(t *testing.T) {
 	ps := Validate(d)
 	if len(ps) != 1 || ps[0].Pointer != "/nodes" || ps[0].Code != "too_many_nodes" {
 		t.Fatalf("Validate() = %v, want one too_many_nodes problem at /nodes", ps)
+	}
+}
+
+func TestPointerTokens(t *testing.T) {
+	t.Parallel()
+	for pointer, want := range map[string]string{
+		"":                     "",
+		"/nodes/0/request/url": "nodes|0|request|url",
+		"/a~1b/m~0n/~01":       "a/b|m~n|~1",
+		"/":                    "",
+	} {
+		if got := strings.Join(PointerTokens(pointer), "|"); got != want {
+			t.Errorf("PointerTokens(%q) = %q, want %q", pointer, got, want)
+		}
+	}
+}
+
+func TestProblems_Error(t *testing.T) {
+	t.Parallel()
+	ps := Problems{{Pointer: "/nodes/0/id", Code: "required", Detail: "a node needs an id"}, {Pointer: "/edges/0", Code: "cycle", Detail: "a loop"}}
+	if got := ps.Error(); got != "invalid workflow: /nodes/0/id: a node needs an id; /edges/0: a loop" {
+		t.Errorf("Error() = %q", got)
 	}
 }

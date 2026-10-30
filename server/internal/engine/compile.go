@@ -45,6 +45,7 @@ type node struct {
 	timeout    time.Duration   // zero: the client's default
 	attempts   int
 	idempotent bool
+	outputs    []int // the statuses besides 2xx it answers with
 
 	// transform nodes
 	expr *transform.Expr
@@ -61,12 +62,25 @@ type param struct {
 
 type edge struct {
 	from, to int
+	on       int                  // the output of from it leaves from: a status, or 0 for 2xx
 	when     *transform.Condition // nil: always taken
 }
 
 // Compile checks d and compiles every expression in it. The error, when
 // there is one, is a workflow.Problems listing everything wrong.
 func Compile(d *workflow.Definition) (*Program, error) {
+	p, ps := build(d)
+	if len(ps) > 0 {
+		return nil, ps
+	}
+	return p, nil
+}
+
+// build compiles what it can of d and lists everything wrong with it. An
+// expression that doesn't compile is left nil, and an edge is wired only
+// when each end names another node, so the program is whole only when
+// nothing is wrong. A preview reads what there is.
+func build(d *workflow.Definition) (*Program, workflow.Problems) {
 	c := compiler{problems: workflow.Validate(d)}
 	p := &Program{nodes: make([]node, len(d.Nodes)), edges: make([]edge, len(d.Edges))}
 
@@ -88,11 +102,15 @@ func Compile(d *workflow.Definition) (*Program, error) {
 			if r.Retry != nil {
 				pn.attempts, pn.idempotent = r.Retry.Attempts, r.Retry.Idempotent
 			}
+			for _, o := range n.Outputs {
+				pn.outputs = append(pn.outputs, o.Status)
+			}
 		case n.Kind == workflow.NodeKindTransform && n.Expr != "":
 			pn.expr = c.expr(ptr+"/expr", n.Expr)
 		}
 	}
 	for k, e := range d.Edges {
+		p.edges[k].on = e.On
 		if e.When != "" {
 			when, err := transform.CompileCondition(e.When)
 			c.check(fmt.Sprintf("/edges/%d/when", k), err)
@@ -108,16 +126,20 @@ func Compile(d *workflow.Definition) (*Program, error) {
 	if len(d.OutputSchema) > 0 {
 		c.jsonSchema("/output_schema", d.OutputSchema)
 	}
-	if len(c.problems) > 0 {
-		return nil, c.problems
-	}
 
+	// A repeated id is its first node's, as validation reads it.
 	index := make(map[string]int, len(d.Nodes))
 	for i, n := range d.Nodes {
-		index[n.ID] = i
+		if _, taken := index[n.ID]; !taken {
+			index[n.ID] = i
+		}
 	}
 	for k, e := range d.Edges {
-		from, to := index[e.From], index[e.To]
+		from, okFrom := index[e.From]
+		to, okTo := index[e.To]
+		if !okFrom || !okTo || from == to {
+			continue
+		}
 		p.edges[k].from, p.edges[k].to = from, to
 		p.nodes[from].out = append(p.nodes[from].out, k)
 		p.nodes[to].in = append(p.nodes[to].in, k)
@@ -125,10 +147,12 @@ func Compile(d *workflow.Definition) (*Program, error) {
 	for i := range p.nodes {
 		p.nodes[i].ancestors = p.ancestors(i)
 	}
-	return p, nil
+	return p, c.problems
 }
 
-// ancestors walks up from node i. Validation has ruled out cycles.
+// ancestors walks up from node i. Validation rules out cycles in a program
+// that runs; on one that doesn't, a node can be among its own, and a
+// preview leaves out every node on or after a cycle.
 func (p *Program) ancestors(i int) []int {
 	seen := make([]bool, len(p.nodes))
 	stack := []int{i}

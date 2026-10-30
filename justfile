@@ -23,7 +23,7 @@ generated := "server/internal/httpapi/gen server/internal/workflow/definition.ge
 
 # Test coverage floors, in percent, for the packages that run workflows.
 # Raise one when its coverage rises; never lower one to make check pass.
-coverage_floors := "workflow=88 transform=84 upstream=91 engine=96 runner=92"
+coverage_floors := "workflow=95 transform=84 upstream=91 engine=96 runner=92"
 
 default:
     @just --list

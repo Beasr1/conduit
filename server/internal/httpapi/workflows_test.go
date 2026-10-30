@@ -149,6 +149,7 @@ func TestEveryJSONBodyRefusesUnknownFields(t *testing.T) {
 		"PUT /v1/workflows/{id}/draft":    "/v1/workflows/" + id + "/draft",
 		"POST /v1/workflows/{id}/publish": "/v1/workflows/" + id + "/publish",
 		"POST /v1/validate":               "/v1/validate",
+		"POST /v1/preview":                "/v1/preview",
 		"POST /v1/workflows/{id}/runs":    "/v1/workflows/" + id + "/runs",
 		"POST /v1/session":                "/v1/session",
 	}
@@ -298,6 +299,49 @@ func TestValidate(t *testing.T) {
 				t.Errorf("body %s, want %s", r.body, tt.body)
 			}
 		})
+	}
+}
+
+// A preview reads the samples and renders the step's request, calling
+// nothing; the step it previews has to exist.
+func TestPreview(t *testing.T) {
+	t.Parallel()
+	def := `{"nodes": [
+		{"id": "user", "kind": "http", "request": {"method": "GET", "url": "https://users.example.com/v1"},
+		 "sample": {"body": {"email": "ada@example.com"}}},
+		{"id": "crm", "kind": "http", "request": {"method": "POST", "url": "https://crm.example.com/v1",
+		 "body": "{ 'email': nodes.user.body.email }"}}],
+		"edges": [{"from": "user", "to": "crm"}]}`
+	r := call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, "node": "crm"}`)
+	var pv gen.Preview
+	if err := json.Unmarshal(r.body, &pv); err != nil || r.status != http.StatusOK {
+		t.Fatalf("preview = %d %s", r.status, r.body)
+	}
+	s := pv.Sends
+	if s.Method != "POST" || s.URL != "https://crm.example.com/v1" || string(s.Body) != `{"email":"ada@example.com"}` || len(pv.Problems) != 0 {
+		t.Errorf("preview %s", r.body)
+	}
+
+	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, "node": "nope"}`)
+	if p := problemOf(t, r); r.status != http.StatusUnprocessableEntity || pointers(p) != "/node unknown_node" {
+		t.Errorf("preview of a missing step = %d %+v", r.status, p)
+	}
+
+	// A connection, by its place in the edges.
+	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, "edge": 0}`)
+	pv = gen.Preview{}
+	if err := json.Unmarshal(r.body, &pv); err != nil || r.status != http.StatusOK || pv.Taken == nil || !*pv.Taken || !strings.Contains(string(pv.Reads), "ada@example.com") {
+		t.Errorf("preview of a connection = %d %s", r.status, r.body)
+	}
+	for _, body := range []string{`"edge": 1`, `"edge": -1`} {
+		r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, `+body+`}`)
+		if p := problemOf(t, r); r.status != http.StatusUnprocessableEntity || pointers(p) != "/edge unknown_edge" {
+			t.Errorf("preview of a missing connection (%s) = %d %+v", body, r.status, p)
+		}
+	}
+	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, "node": "crm", "edge": 0}`)
+	if p := problemOf(t, r); r.status != http.StatusUnprocessableEntity || pointers(p) != "/edge not_allowed" {
+		t.Errorf("preview of a step and a connection = %d %+v", r.status, p)
 	}
 }
 

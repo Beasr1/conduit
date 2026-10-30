@@ -18,6 +18,10 @@ const MaxNodes = 200
 
 const maxTimeoutMS = 300_000
 
+// maxSample caps a sample's body and the sample input, so a definition with
+// several stays under the API's 1 MiB request limit.
+const maxSample = 64 << 10
+
 // ids are plain identifiers so nodes.<id> works in JSONata without backticks.
 var idPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
@@ -73,9 +77,15 @@ func Validate(d *Definition) Problems {
 		v.checkNode(p, n)
 	}
 
-	v.checkEdges(d.Edges, index, len(d.Nodes))
+	v.checkEdges(d.Edges, d.Nodes, index)
+	if len(d.SampleInput) > maxSample {
+		v.add("/sample_input", "too_large", "a sample input is at most %d KiB; this one is %d KiB", maxSample>>10, kib(len(d.SampleInput)))
+	}
 	return v.problems
 }
+
+// kib is n bytes in KiB, rounded up, so a cap overrun never reads as the cap.
+func kib(n int) int { return (n + 1023) >> 10 }
 
 type validator struct {
 	problems Problems
@@ -107,6 +117,65 @@ func (v *validator) checkNode(p string, n Node) {
 		}
 	default:
 		v.add(p+"/kind", "invalid_kind", "the kind %q isn't http or transform", n.Kind)
+	}
+	switch {
+	case n.Sample == nil:
+	case n.Kind == NodeKindHTTP:
+		v.checkSample(p+"/sample", n.Sample, false)
+	case n.Kind == NodeKindTransform:
+		v.add(p+"/sample", "not_allowed", "a transform node's value comes from its expr, so it has no sample")
+	}
+	switch {
+	case len(n.Outputs) == 0:
+	case n.Kind == NodeKindHTTP:
+		v.checkOutputs(p+"/outputs", n.Outputs)
+	case n.Kind == NodeKindTransform:
+		v.add(p+"/outputs", "not_allowed", "a transform node has one output, so it lists none")
+	}
+}
+
+// checkOutputs checks an http node's outputs besides 2xx: each a status
+// outside 2xx, listed once.
+func (v *validator) checkOutputs(p string, outputs []Output) {
+	seen := make(map[int]int, len(outputs))
+	for j, o := range outputs {
+		q := fmt.Sprintf("%s/%d", p, j)
+		switch k, dup := seen[o.Status]; {
+		case o.Status == 0:
+			v.add(q+"/status", "required", "an output needs a status")
+		case o.Status < 300 || o.Status > 599:
+			v.add(q+"/status", "invalid_status", "an output's status is 300 to 599, as 2xx is every http node's first output; %d isn't", o.Status)
+		case dup:
+			v.add(q+"/status", "duplicate_output", "%s/%d already has the status %d", p, k, o.Status)
+		default:
+			seen[o.Status] = j
+		}
+		if o.Sample != nil {
+			v.checkSample(q+"/sample", o.Sample, true)
+		}
+	}
+}
+
+// checkSample checks a sample response: a node's own, which is its 2xx
+// answer, or an output's, which takes the output's status.
+func (v *validator) checkSample(p string, s *Sample, ofOutput bool) {
+	switch {
+	case s.Status == 0:
+	case ofOutput:
+		v.add(p+"/status", "not_allowed", "an output's sample takes the output's status, so it has none of its own")
+	case s.Status < 200 || s.Status > 299:
+		v.add(p+"/status", "invalid_status", "a node's sample is its 2xx answer, so its status is 200 to 299; %d isn't", s.Status)
+	}
+	for _, name := range slices.Sorted(maps.Keys(s.Headers)) {
+		if !validHeaderName(name) {
+			v.add(p+"/headers/"+PointerToken(name), "invalid_header_name", "%q isn't a valid header name", name)
+		}
+	}
+	switch {
+	case len(s.Body) == 0:
+		v.add(p+"/body", "required", "a sample needs a body; null for none")
+	case len(s.Body) > maxSample:
+		v.add(p+"/body", "too_large", "a sample's body is at most %d KiB; this one is %d KiB", maxSample>>10, kib(len(s.Body)))
 	}
 }
 
@@ -201,13 +270,28 @@ func PointerToken(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "~", "~0"), "/", "~1")
 }
 
+// PointerTokens splits a JSON Pointer into its reference tokens, each
+// unescaped (RFC 6901 §4): ~1 becomes /, then ~0 becomes ~. The pointer to
+// the whole document, "", has none.
+func PointerTokens(pointer string) []string {
+	if !strings.HasPrefix(pointer, "/") {
+		return nil
+	}
+	tokens := strings.Split(pointer[1:], "/")
+	for i, t := range tokens {
+		tokens[i] = strings.ReplaceAll(strings.ReplaceAll(t, "~1", "/"), "~0", "~")
+	}
+	return tokens
+}
+
 type edgeRef struct {
 	index, from, to int
 }
 
-func (v *validator) checkEdges(edges []Edge, index map[string]int, nodes int) {
+func (v *validator) checkEdges(edges []Edge, nodes []Node, index map[string]int) {
 	var good []edgeRef
-	seen := make(map[[2]int]int, len(edges))
+	// Two nodes are joined at most once per output of the first.
+	seen := make(map[[3]int]int, len(edges))
 	for k, e := range edges {
 		p := fmt.Sprintf("/edges/%d", k)
 		from, okFrom := v.endpoint(p+"/from", e.From, index)
@@ -219,17 +303,28 @@ func (v *validator) checkEdges(edges []Edge, index map[string]int, nodes int) {
 			v.add(p, "self_edge", "a node can't be its own parent")
 			continue
 		}
-		if j, dup := seen[[2]int{from, to}]; dup {
-			v.add(p, "duplicate_edge", "/edges/%d already connects %s to %s", j, e.From, e.To)
+		if e.On != 0 {
+			switch n := nodes[from]; n.Kind {
+			case NodeKindHTTP:
+				if !slices.ContainsFunc(n.Outputs, func(o Output) bool { return o.Status == e.On }) {
+					v.add(p+"/on", "unknown_output", "%s has no %d output", e.From, e.On)
+				}
+			case NodeKindTransform:
+				v.add(p+"/on", "not_allowed", "a transform node has one output, so an edge from it names none")
+			}
+		}
+		key := [3]int{from, to, e.On}
+		if j, dup := seen[key]; dup {
+			v.add(p, "duplicate_edge", "/edges/%d already connects %s to %s from the same output", j, e.From, e.To)
 			continue
 		}
-		seen[[2]int{from, to}] = k
+		seen[key] = k
 		good = append(good, edgeRef{index: k, from: from, to: to})
 	}
 
 	// An edge is on a cycle when both ends are in the same strongly connected
 	// component. Edges behind a cycle aren't blamed.
-	out := make([][]int, nodes)
+	out := make([][]int, len(nodes))
 	for _, e := range good {
 		out[e.from] = append(out[e.from], e.to)
 	}

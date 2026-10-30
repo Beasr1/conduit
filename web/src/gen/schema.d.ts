@@ -202,6 +202,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview what a step would read and send, or whether a connection is taken, over the samples
+         * @description Simulates a run up to the step and calls nothing. Each http step before it answers with the sample of the output that leads to the step, each transform before it is evaluated, and so is each connection's condition; then the step renders its request, or gives its value. A connection is previewed up to its source, which answers through the connection's output, and then its condition. Works on a definition with problems, and returns the ones in the way.
+         */
+        post: operations["previewDefinition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workflows/{id}/runs": {
         parameters: {
             query?: never;
@@ -354,6 +374,36 @@ export interface components {
             provenance: components["schemas"]["Provenance"];
             /** Format: date-time */
             created_at: string;
+        };
+        PreviewRequest: {
+            definition: components["schemas"]["Definition"];
+            /** @description The step to preview, by id. Absent, with no edge, means the workflow's output. */
+            node?: string;
+            /** @description The connection to preview, by its place in the definition's edges. Not with node. */
+            edge?: number;
+        };
+        Preview: {
+            /** @description The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples. */
+            reads: unknown;
+            /** @description A connection's preview only, whether a run would take it with these samples. */
+            taken?: boolean;
+            sends?: components["schemas"]["RenderedRequest"];
+            /** @description A transform step's value, or the workflow's output. Absent when it gave none. */
+            gives?: unknown;
+            /** @description A run would skip the step, or a connection's source, with these samples, as no connection into it is taken. */
+            skipped: boolean;
+            /** @description What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there. */
+            problems: components["schemas"]["ProblemError"][];
+        };
+        /** @description An http step's request, as a run would send it. A part that didn't render is left out, and its problem says why. */
+        RenderedRequest: {
+            method: string;
+            url?: string;
+            headers: {
+                [key: string]: string;
+            };
+            /** @description The JSON body. */
+            body?: unknown;
         };
         Validation: {
             /** @description Everything wrong with the definition. Empty when it can be published. */
@@ -530,6 +580,22 @@ export interface components {
             timeout_ms?: number;
             retry?: components["schemas"]["Retry"];
         };
+        Sample: {
+            /** @description Absent means 200. Only a node's 2xx sample has one; an output's sample takes the output's. */
+            status?: number;
+            /** @description Header names are read in lower case, as a run reads a response's. */
+            headers?: {
+                [key: string]: string;
+            };
+            /** @description The response body, any JSON. At most 64 KiB. */
+            body: unknown;
+        };
+        Output: {
+            /** @description Listed once in a node. */
+            status: number;
+            /** @description A made-up or redacted response with this status, which previews read. It has no status of its own. */
+            sample?: components["schemas"]["Sample"];
+        };
         Node: {
             /** @description Unique in the workflow. Expressions read the node's result as nodes.<id>. */
             id: string;
@@ -538,11 +604,17 @@ export interface components {
             request?: components["schemas"]["HTTPRequest"];
             /** @description A transform node's JSONata. Its value becomes the node's body. */
             expr?: string;
+            /** @description An http node's made-up or redacted 2xx response, which previews read in place of a real one. Runs ignore it. */
+            sample?: components["schemas"]["Sample"];
+            /** @description An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node. */
+            outputs?: components["schemas"]["Output"][];
         };
         Edge: {
             from: string;
             to: string;
-            /** @description A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source succeeded and this is true. Absent means true. */
+            /** @description The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and a transform's only output. */
+            on?: number;
+            /** @description A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source succeeded, answering through the edge's output, and this is true. Absent means true. */
             when?: string;
         };
         /** @description A point on the canvas. A missing coordinate reads as 0. */
@@ -572,6 +644,8 @@ export interface components {
             output_schema?: {
                 [key: string]: unknown;
             };
+            /** @description A made-up run input, any JSON, that previews read. Runs ignore it. At most 64 KiB. */
+            sample_input?: unknown;
             /** @description How the editor draws the workflow. The engine ignores it. */
             ui?: components["schemas"]["UI"];
         };
@@ -907,6 +981,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Validation"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    previewDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description The preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preview"];
                 };
             };
             401: components["responses"]["Problem"];

@@ -36,6 +36,9 @@ components:
           type: object
           additionalProperties: true
           description: A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet.
+        sample_input:
+          description: A made-up run input, any JSON, that previews read. Runs ignore it. At most 64 KiB.
+          x-go-type: json.RawMessage
         ui:
           $ref: "#/components/schemas/UI"
           description: How the editor draws the workflow. The engine ignores it.
@@ -82,10 +85,53 @@ components:
         expr:
           type: string
           description: A transform node's JSONata. Its value becomes the node's body.
+        sample:
+          $ref: "#/components/schemas/Sample"
+          description: An http node's made-up or redacted 2xx response, which previews read in place of a real one. Runs ignore it.
+          x-go-type-skip-optional-pointer: false
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Output"
+          description: An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node.
 
     NodeKind:
       type: string
       enum: [http, transform]
+
+    Output:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: integer
+          minimum: 300
+          maximum: 599
+          description: Listed once in a node.
+        sample:
+          $ref: "#/components/schemas/Sample"
+          description: A made-up or redacted response with this status, which previews read. It has no status of its own.
+          x-go-type-skip-optional-pointer: false
+
+    Sample:
+      type: object
+      required: [body]
+      additionalProperties: false
+      properties:
+        status:
+          type: integer
+          minimum: 200
+          maximum: 299
+          description: Absent means 200. Only a node's 2xx sample has one; an output's sample takes the output's.
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Header names are read in lower case, as a run reads a response's.
+        body:
+          description: The response body, any JSON. At most 64 KiB.
+          x-go-type: json.RawMessage
 
     HTTPRequest:
       type: object
@@ -144,6 +190,9 @@ components:
           type: string
         to:
           type: string
+        on:
+          type: integer
+          description: The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and a transform's only output.
         when:
           type: string
-          description: A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source succeeded and this is true. Absent means true.
+          description: A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source succeeded, answering through the edge's output, and this is true. Absent means true.

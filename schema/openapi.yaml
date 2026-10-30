@@ -285,6 +285,29 @@ paths:
         "422":
           $ref: "#/components/responses/Problem"
 
+  /v1/preview:
+    post:
+      operationId: previewDefinition
+      summary: Preview what a step would read and send, or whether a connection is taken, over the samples
+      description: Simulates a run up to the step and calls nothing. Each http step before it answers with the sample of the output that leads to the step, each transform before it is evaluated, and so is each connection's condition; then the step renders its request, or gives its value. A connection is previewed up to its source, which answers through the connection's output, and then its condition. Works on a definition with problems, and returns the ones in the way.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreviewRequest"
+      responses:
+        "200":
+          description: The preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Preview"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+
   /v1/workflows/{id}/runs:
     parameters:
       - $ref: "#/components/parameters/WorkflowID"
@@ -597,6 +620,64 @@ components:
         created_at:
           type: string
           format: date-time
+
+    PreviewRequest:
+      type: object
+      required: [definition]
+      additionalProperties: false
+      properties:
+        definition:
+          $ref: "./workflow.yaml#/components/schemas/Definition"
+        node:
+          type: string
+          description: The step to preview, by id. Absent, with no edge, means the workflow's output.
+        edge:
+          type: integer
+          minimum: 0
+          description: The connection to preview, by its place in the definition's edges. Not with node.
+          x-go-type-skip-optional-pointer: false
+
+    Preview:
+      type: object
+      required: [reads, skipped, problems]
+      properties:
+        reads:
+          description: The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples.
+          x-go-type: json.RawMessage
+        taken:
+          type: boolean
+          description: A connection's preview only, whether a run would take it with these samples.
+          x-go-type-skip-optional-pointer: false
+        sends:
+          $ref: "#/components/schemas/RenderedRequest"
+        gives:
+          description: A transform step's value, or the workflow's output. Absent when it gave none.
+          x-go-type: json.RawMessage
+        skipped:
+          type: boolean
+          description: A run would skip the step, or a connection's source, with these samples, as no connection into it is taken.
+        problems:
+          type: array
+          description: What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
+          items:
+            $ref: "#/components/schemas/ProblemError"
+
+    RenderedRequest:
+      type: object
+      description: An http step's request, as a run would send it. A part that didn't render is left out, and its problem says why.
+      required: [method, headers]
+      properties:
+        method:
+          type: string
+        url:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        body:
+          description: The JSON body.
+          x-go-type: json.RawMessage
 
     Validation:
       type: object

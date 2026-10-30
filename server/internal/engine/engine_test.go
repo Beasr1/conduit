@@ -276,6 +276,98 @@ func TestRun_ReadsStatusAndHeaders(t *testing.T) {
 	}
 }
 
+// A status a step lists as an output is its answer: the step succeeds, and
+// only the edges from that output can be taken, each when its condition
+// holds. A status it doesn't list still fails it, and the run.
+func TestRun_BranchesOnOutputs(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /users/6", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "<p>gone</p>", http.StatusNotFound) // not JSON, so the body reads as null
+	})
+	mux.HandleFunc("GET /users/7", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error": "gone"}`)
+	})
+	mux.HandleFunc("GET /users/8", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id": "8"}`)
+	})
+	mux.HandleFunc("GET /users/9", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close) // after the parallel subtests, unlike a defer
+	p := program(t, srv.URL, `{
+	  "nodes": [
+	    {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.id }}"},
+	     "outputs": [{"status": 404}]},
+	    {"id": "create", "kind": "transform", "expr": "{ 'status': nodes.user.status, 'error': nodes.user.body.error }"},
+	    {"id": "found", "kind": "transform", "expr": "nodes.user.body.id"}
+	  ],
+	  "edges": [
+	    {"from": "user", "to": "create", "on": 404, "when": "$exists(nodes.user.body.error)"},
+	    {"from": "user", "to": "found"}
+	  ],
+	  "output": "{ 'create': nodes.create.body, 'found': nodes.found.body }"
+	}`)
+	tests := []struct {
+		id, status, nodes, output string
+	}{
+		{"7", "succeeded", "user succeeded, create succeeded, found skipped", `{"create":{"status":404,"error":"gone"}}`},
+		{"6", "succeeded", "user succeeded, create skipped, found skipped", `{}`},
+		{"8", "succeeded", "user succeeded, create skipped, found succeeded", `{"found":"8"}`},
+		{"9", "failed", "user failed, create cancelled, found cancelled", ``},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			t.Parallel()
+			res, _ := execute(t, testEngine(Options{}), p, `{"id": "`+tt.id+`"}`)
+			if string(res.Status) != tt.status || statuses(res) != tt.nodes || string(res.Output) != tt.output {
+				t.Errorf("run %s (%s), output %s, err %v; want %s (%s), output %s",
+					res.Status, statuses(res), res.Output, res.Err, tt.status, tt.nodes, tt.output)
+			}
+		})
+	}
+}
+
+// A condition that fails to evaluate fails the step it leaves from.
+func TestRun_FailsOnAFailingCondition(t *testing.T) {
+	t.Parallel()
+	p := program(t, "", `{
+	  "nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}],
+	  "edges": [{"from": "a", "to": "b", "when": "$number('x')"}]
+	}`)
+	res, _ := execute(t, testEngine(Options{}), p, `{}`)
+	if res.Status != StatusFailed || statuses(res) != "a failed, b cancelled" || !strings.Contains(fmt.Sprint(res.Err), "edge to b: when:") {
+		t.Errorf("run %s (%s): %v", res.Status, statuses(res), res.Err)
+	}
+}
+
+// Retries come before outputs: a 503 that's still 503 on the last attempt
+// goes to a 503 output.
+func TestRun_RetriesBeforeAnOutput(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	p := program(t, srv.URL, `{
+	  "nodes": [
+	    {"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/", "retry": {"attempts": 2}},
+	     "outputs": [{"status": 503}]},
+	    {"id": "fallback", "kind": "transform", "expr": "nodes.a.status"}
+	  ],
+	  "edges": [{"from": "a", "to": "fallback", "on": 503}],
+	  "output": "nodes.fallback.body"
+	}`)
+	res, _ := execute(t, testEngine(Options{}), p, `{}`)
+	if res.Status != StatusSucceeded || string(res.Output) != "503" || hits.Load() != 2 {
+		t.Errorf("run %s, output %s after %d calls: %v; want 503 after 2", res.Status, res.Output, hits.Load(), res.Err)
+	}
+}
+
 func TestRun_EscapesPlaceholdersInURLs(t *testing.T) {
 	t.Parallel()
 	srv := echo(t)
