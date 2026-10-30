@@ -155,6 +155,9 @@ the API is `/api` on the page's own origin.
   steps before the expression over their samples, or uses the last run's
   responses. The `jsonata` npm package never runs in the browser, because
   preview results must match what the engine does.
+- What asks the server about the draft as it's typed, the check and the
+  preview, waits for it to stand still for a moment (`useStill`,
+  `PAUSE_MS`), and keeps showing the last answer while the next comes.
 - Each open run reads its event stream with one `fetch()` (D9), not
   `EventSource`, which hides a failed connection's status. Events update
   node status in the query cache.
@@ -178,6 +181,18 @@ the API is `/api` on the page's own origin.
   WAI-ARIA tabs pattern recommends when panels show at once. A tab holding a
   form stays mounted while hidden (`keepMounted`), so text that doesn't
   count yet survives a switch.
+- A control that repeats, such as Format beside each JSON field, says what
+  it acts on in its accessible name ("Format sample input").
+- Each field is edited in one place. Two editors for one field drift apart:
+  a hidden one keeps its old text, and its next change writes that back.
+- A canvas node whose handles change after it mounts says so with
+  `useUpdateNodeInternals`. React Flow finds a node's handles when it
+  mounts, so a connection from a handle added later isn't drawn.
+- An HTTP step is drawn as blocks, each saying which part of the step it
+  is (`data-part`). The canvas reads the block a click lands in
+  (`onNodeClick`), and the store's `part` holds what's open, so the canvas
+  and the panel's tabs agree. A click on a point opens rather than
+  connects, so `connectOnClick` is off (design.md, the floor).
 - A link that looks like a button is a `Link` styled with
   `buttonVariants()`. A `Button` rendering a link would be announced as a
   button.
@@ -194,6 +209,9 @@ the API is `/api` on the page's own origin.
 - A test that renders the canvas calls `shimReactFlow()`
   (`src/test/react-flow.ts`): jsdom does no layout, and React Flow measures
   nodes before it draws edges.
+- A field on a hidden tab is still in the page, as the tabs stay mounted,
+  so a test finds a field by role and label, which skips hidden ones as a
+  screen reader does, rather than by label alone.
 - A test fails on any console warning or error it logs
   (`src/test/console.ts`). That's how React, React Router and Base UI
   report misuse. Vitest would only print it, and hides passing tests'

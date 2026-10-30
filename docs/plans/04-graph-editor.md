@@ -2,8 +2,9 @@
 
 Status: accepted 2026-10-28, with all seven questions answered (Answers, at
 the end); D10, D11 and D13 accepted with it, and D14 waits for 07. Phase A
-is committed (69bb36e), and Phase B is built; its last step, save, problems
-and publish, is not committed yet (2026-10-30). Building Phase A raised
+is committed (69bb36e), and so is Phase B, its last step in eabb7b6. Phase D
+now comes before C: its samples, previews, outputs by status and a step's
+blocks are built, not yet committed (2026-10-30). Building Phase A raised
 question 8, since answered.
 
 ## Goal
@@ -294,7 +295,7 @@ Found along the way:
 - [x] Nodes, edges, forms, the workflow's settings (input schema, output).
       The canvas draws the draft; nodes can be dragged, connected (a cycle
       refused as you drop it), deleted and added; a side panel edits what's
-      picked: a step (3c; an HTTP step's in Request and Response tabs), a
+      picked: a step (3c; an HTTP step's in Request and Preview tabs), a
       connection's condition, or the response card's
       output and output schema; a button opens the workflow's settings,
       the input schema (3d). Plan 11's brief applies: text on screen says
@@ -304,26 +305,260 @@ Found along the way:
       marked), publish. Problems are checked as you type and listed behind
       a button (step 4).
 
-**Phase C: runs**
+**Phase D: samples and previews** (before C since 2026-10-30, your call;
+it was after)
+- [x] Samples in `schema/workflow.yaml`: an optional `sample` on http steps
+      (`status`, `headers`, `body`) and an optional `sample_input` on the
+      definition. Real runs ignore them, as they ignore `ui`. A sample's
+      body is at most 64 KiB, so a definition with several stays under the
+      API's 1 MiB request limit (`server/internal/httpapi/router.go:20`).
+      Validation checks the status is 100 to 599; since outputs, 200 to
+      299, as it's the 2xx response's.
+- [x] Samples are typed or pasted: the sample input in the workflow's
+      settings, a step's sample response in its Preview tab, the notes on
+      reading it below. Made-up samples for the Spec example
+      come with it, in the test fixtures and as a new revision of your local
+      Spec example.
+- [x] `POST /v1/preview` simulates one step, or the response card, over the
+      samples: each http step before it stands in with its sample, each
+      transform before it is evaluated, then the step's own expressions.
+      It answers with what goes in, the document the step would read, built
+      by the engine's own code (`server/internal/engine/run.go:263`), so a
+      preview can't disagree with a run; and what comes out: an http step's
+      request (method, URL, headers, query, body), a transform's value, or
+      the workflow's output, with an error on each part that failed. A step
+      before it with no sample is named as missing, never guessed. Every
+      expression goes through `internal/transform` with its guardrails, and
+      the whole preview has a deadline. Tests for each kind, missing
+      samples and the guardrails.
+- [x] The Preview tab: an http step's panel has Request, Response and
+      Preview. Preview shows what it reads (the document: the input and
+      the steps before it), what it sends (the request, each part
+      evaluated), and what it gets back (its sample). It follows the draft
+      as it's typed, like the check. A transform step and the response card
+      have one field each, so they show what they read and what they give
+      under it rather than in a tab.
+- [ ] After C: preview beside each expression field; an expression that
+      reads nothing in the samples, or the wrong type, marked under its
+      field (the inferred schema below); a run's real response kept as a
+      step's sample; fetching a sample from a GET.
+
+**Phase D: outputs by status** (2026-10-30, your call, before C; built, not yet committed)
+
+An HTTP step answers through outputs: 2xx, which every HTTP step has, and
+each status you add, such as 404. A connection leaves from one output, and
+is taken when the step's answer comes out there and its condition holds. A
+status with no output fails the step and the run, as now.
+- [x] `schema/workflow.yaml`: `outputs` on an http node, a list of
+      `{status, sample}`; `on` on an edge, the status of the output it
+      leaves from, absent for 2xx. The 2xx output's sample stays `sample`.
+- [x] Validation: an output's status is 300 to 599 and listed once; only
+      an http node has outputs; an edge's `on` names an output its source
+      has, and an edge from a transform has none; an output's sample takes
+      its output's status, so it has none of its own, and the 2xx sample's
+      status is 200 to 299; two steps are joined at most once per output.
+- [x] The engine: a status with an output is an answer. The step
+      succeeds, its part of the document built as for a 2xx (the body when
+      it's JSON, else null, as now), and only the connections from that
+      output can be taken.
+- [x] The preview: each step on the way answers with the sample of the
+      output that leads to the step previewed, 2xx when several do; an
+      output without a sample is named as missing. Previewing the
+      response, each step answers 2xx. `POST /v1/preview` also takes a
+      connection, `edge`, its place in `edges`: it previews up to the
+      source, answering through the connection's output, and gives what
+      the condition reads and whether the connection is taken.
+- [x] The canvas: an HTTP step draws a handle per output on its right,
+      labelled `2xx`, `404`, and grows to fit them; a connection drawn from
+      one leaves from that output. A transform step keeps its one handle.
+- [x] The Preview tab: "Responses", one per output, each with its sample
+      (the 2xx one also has a status), then how the steps after read them.
+      A response is added by its status and removed with a button; its
+      connections go with it, as a deleted step's do.
+- [x] A connection's panel says which output it leaves from, and becomes a
+      workbench like a step's body: what the condition reads, as a tree;
+      the condition; then "Taken" or "Not taken" with these samples.
+- [x] The input tree opens the steps connected to the one it's for and
+      folds the rest; the response card's opens the steps its output reads,
+      a connection's its source.
+- [x] Problems placed and worded for outputs, their samples and `on`.
+- [x] Failing tests first; mutation checks; Chromium through nginx.
+- [x] Docs: plan 02's answer 6 and the roadmap's edges amended; Phase D,
+      as built.
+
+Decided while drafting, yours to overrule:
+1. **The names**: `outputs` and `on` in the definition. On screen the
+   handles say `2xx` and `404`, the Preview section says "Responses" (your
+   word for the blocks), and a connection says "From user, on 404, to
+   create_user".
+2. **An output's status is 300 to 599**: 2xx is every step's, and a call
+   never ends on a 1xx. It ends on a 3xx only after five redirects, or on
+   a 304.
+3. **`on` is the status, a number, and absent means 2xx**, so every saved
+   workflow means what it did.
+4. **Two steps can be joined once per output**, so a step can follow user
+   whether it answered 2xx or 404. Today it's once in all.
+5. **Retries come first**: a 503 retried to the last attempt that's still
+   503 goes to a 503 output.
+6. **Removing a response removes its connections**, as deleting a step
+   does. A response's status isn't edited in place: remove it and add
+   another.
+7. **Outputs keep the order they're added in**, after 2xx. When several of
+   a step's outputs lead to the step previewed, the preview takes 2xx,
+   else the first.
+8. **The 2xx sample's status narrows from 100–599 to 200–299**, and "a
+   sample outside 2xx fails its step" leaves the preview: the response it
+   stood for is now an output's. Your Spec example's samples get checked
+   first.
+9. **The response's preview reads every step's 2xx sample**; choosing
+   another branch for it waits.
+10. **A connection is previewed by its place in `edges`**, as the editor
+    names it.
+
+Left open: classes (4xx) as outputs, and a "failed" output for timeouts,
+transport errors and statuses with no output (the roadmap's "continue on
+error"). Done means the steps above, `just check` green, and your 404
+example built on the canvas, each branch previewed.
+
+**Phase D: a step's blocks** (2026-10-30, your call, before C; built, not yet committed)
+
+Graph mode put a step's every part in one place: its request body and all
+its responses on one tab. Now a step is drawn as you pictured it: its
+request, a block on the left, and a block per response on the right. A
+click on a block or its point opens that part, and only that part. A
+wireframe, not a design: the look stays plan 11's.
+- [x] The canvas draws an HTTP step as blocks: the request on the left (its
+      id, method and URL, and the point connections come in at), and on the
+      right a block per response, `2xx` then each status, with the point its
+      connections leave from; `+ Add` below them. A transform step and the
+      response card keep their shape.
+- [x] A click opens what it's on: the request block or its point opens
+      Request, a response's block or point opens that response, `+ Add`
+      opens "Add a response". A drag from a point still draws a connection;
+      clicking one point and then another no longer does (`connectOnClick`
+      off).
+- [x] The step's panel keeps its id on top, then a tab per block: Request,
+      2xx, one per response, and `+ Response`. The canvas and the tabs open
+      the same part, and a keyboard reaches a response through its tab. The
+      Preview tab goes, its parts moving to these.
+- [x] Request: method and URL, headers, query, then the body's workbench
+      (what it reads, the JSONata, what it sends), then timeout, attempts
+      and idempotent.
+- [x] A response's tab: its sample (body, headers, and for 2xx its status);
+      "Then, on 404", the connections leaving from it; "Connect to", a step
+      picked from a list, which connects without dragging (WCAG 2.5.7); and
+      what the steps after read, `nodes.user.status`, `.headers` and
+      `.body`. A response besides 2xx has Remove.
+- [x] A transform's panel gets "Then" and "Connect to" too, after its
+      expression.
+- [x] A click on a line opens its panel, as now: from, on and to, its
+      condition, Taken or Not taken. Each "Then" row opens its line too.
+- [x] Problems mark the tab they're on, and the problem list opens it.
+- [x] Failing tests first; Chromium through nginx, light and dark, with
+      screenshots.
+- [x] Docs: design.md's floor (connecting without dragging is Connect to),
+      web.md, and Phase D, as built.
+
+Decided with you on 2026-10-30 (night), from wireframes:
+- **Blocks, with `+ Add`**: the request on the left, a block per response
+  on the right, and a response added from the canvas. The same blocks with
+  adding in the panel only was the other.
+- **Tabs mirroring the blocks**, one part showing at a time. Only the part
+  clicked, with no tabs, was the other: the least on screen, but a keyboard
+  couldn't reach a response, since points can't take focus.
+- **Connect to, in a response's tab.** A click on a point opens it, so
+  clicking one point and then another can't also connect. WCAG 2.5.7 asks
+  for a way that isn't a drag, and a list is one a keyboard can use too.
+  A word that opens beside a dot that connects, two targets side by side,
+  was one other; a click that opens and arms a connection, so that the
+  next step looked at gets connected, was the last.
+- **The line keeps its condition**, so a click on it opens its panel, as
+  now: the condition is the line's own, the way Make sets a filter by
+  clicking the line between two modules and Camunda puts a condition on a
+  sequence flow (sources.md). You'd asked whether the click could go to
+  something else later; whatever comes, such as a run showing whether the
+  line was taken, goes in the same panel. Conditions in the response's
+  tab, a click on a line only selecting it, was the other.
+- **This replaces "Preview holds it all"** (below): Preview's parts went to
+  the tabs of the blocks they belong to, the body to Request and each
+  sample to its response.
+
+Decided while drafting, yours to overrule:
+1. **A click on a step's id, method or URL opens Request**: the whole left
+   block is the request's.
+2. **`+ Response` is the last tab**, holding "Add a response", the status
+   field as now; once one is added, its tab opens. A dialog was the other
+   way; a tab keeps the panel the one place parts open.
+3. **The open tab is the editor's**, not the panel's, so a click on the
+   canvas switches it, and removing the response open takes it back to
+   Request.
+4. **"Connect to" lists the steps a connection could reach**: not the step
+   itself, not one already joined from this response, none that would make
+   a loop. The response card isn't one: it reads steps by name.
+5. **A "Then" row says the step and its condition**, "always" or "if …".
+6. **A transform keeps one panel**, its expression, then Then and Connect
+   to, opened wherever it's clicked.
+
+Left out: moving a connection to another response from its panel (remove
+it and connect again), and a button on a line to put a step in between.
+Done means the steps above, `just check` green, and your 404 example
+clicked through: user's 404 block opens its tab, Connect to joins it to
+create_user, and the line opens its condition.
+
+**Phase C: runs** (after D)
 - [ ] `lib/events.ts` and its tests.
 - [ ] Run with an input, live statuses, node inspection (a step's last
-      response in its Response tab), the run history.
+      response in its Preview tab, beside its sample), the run history.
 
-**Phase D: previews**
-- [ ] Samples: an optional `sample` on http steps (`status`, `headers`,
-      `body`) and a sample input on the definition, in
-      `schema/workflow.yaml`. Real runs ignore them, as they ignore `ui`;
-      each is capped in size. A step's sample is edited in its Response
-      tab.
-- [ ] `POST /v1/preview` simulates: each http step's sample stands in for
-      its response, the transforms before the step are evaluated over
-      them, then the expression. The last run's real responses are the
-      other source. Tests for each kind and the guardrails.
-- [ ] Preview beside each expression field. An expression that reads
-      nothing in the samples, or reads the wrong type, is marked under its
-      field, using a JSON Schema the server infers from the samples.
-- [ ] The step panel shows what comes in, from the samples. A finished
-      step's response can be kept as its sample (after phase C).
+Samples and previews, decided with you on 2026-10-30:
+- **They come before runs.** You couldn't tell what a request could be
+  built from, with no data to look at. n8n, Zapier and Make all show a
+  step's data to map from, and get it by running the step once
+  (sources.md). Runs first was the other option, and needs upstreams that
+  answer; a list of readable names with no values was the third.
+- **A sample is typed or pasted first.** Fetching one from the API is later,
+  and for GETs: a real call to a POST creates real things, as Zapier warns
+  of its step tests.
+- **The tab is called Preview**, after Request and Response. "Try it" reads
+  as if it calls the API; "In and out" is a phrase, not a name.
+- **Preview holds it all** (later the same day): an HTTP step's data, in the
+  order it flows. The input the step reads, the JSONata of its request body,
+  what it sends, then its sample response and how the steps after it read
+  that. The Request tab keeps the call itself: method, URL, headers, query,
+  timeout and retries. The Response tab went, its sample moved into Preview,
+  so each field is edited in one place. One page with no tabs, or Preview
+  only showing while the tabs edit, were the other options.
+- **Picking a field of the input writes its path** where the cursor is in
+  the JSONata, as n8n's drag from its input does. JSON text to copy from
+  was the other option.
+- **A response gets no JSONata of its own**, not now: the whole of it goes on
+  to every step after, read by name. What a step hands on stays parked (Out
+  of scope).
+
+Outputs, decided with you on 2026-10-30 (night):
+- **A status can be a branch.** Until now any status outside 2xx failed
+  the step and stopped the run, so a connection's condition never saw a
+  404 (plan 02, answer 6). n8n's "Never Error" and Make's "Return error if
+  HTTP request fails" let a step take any status as its answer; Step
+  Functions' Catch, Logic Apps' "run after" and n8n's error output route
+  failures instead (sources.md).
+- **Outputs on the step**, your picture: the request on the left, a block
+  per response on the right, each a handle a connection leaves from. The
+  branch shows on the canvas, and nobody writes `nodes.user.status = 404`.
+  Response blocks as nodes of their own was the other option: twice the
+  nodes, and blocks that aren't steps (D13).
+- **2xx, plus the statuses you add.** Classes and a "failed" output wait.
+- **One sample per output**, so each branch previews without editing a
+  sample. One per step, its status picking the branch, was the other.
+- **No mapping on connections.** You asked whether one could filter what
+  the step after gets. A step sends only what its own JSONata picks, and
+  reads earlier steps by name, so a mapping there would shape the same data
+  a second time; reshaping once for several steps is a transform step.
+  None of n8n, Make, Step Functions, Logic Apps, Argo or Camunda maps data
+  on a connection: they put a condition or an outcome there, and shape
+  data in steps (sources.md). The noise is the input tree's, so it folds
+  the steps not connected.
+- **Built before C**, since it changes what a run does.
 
 Samples, decided with you on 2026-10-28:
 - **A sample response** (example JSON), not a hand-written JSON Schema:
@@ -474,7 +709,8 @@ Decided with you:
   `nodes.<id>.status`, `.headers` and `.body`; phase C's last response and
   phase D's sample go there too. Headings on one scroll were the other
   option, with the response below the fold on a laptop; renaming the field
-  was the third.
+  was the third. Since 2026-10-30 Preview holds the body and the sample, and
+  the Response tab is gone (Decided with you, phase D).
 - **A step's sample response stays in phase D** (confirmed 2026-10-28),
   arriving with the previews it feeds.
 - **Publish puts what's on screen live** (2026-10-30): unsaved changes are
@@ -576,11 +812,10 @@ overruling:
   picks on drag by default, which opened the panel mid-drag.
 - **Retry needs attempts**: Idempotent is disabled until attempts is a
   number from 2 to 5.
-- Deliberate TODOs for plan 10's JSONata editor, one per expression field:
-  - `web/src/features/editor/components/http-step-form.tsx:122`
-  - `web/src/features/editor/components/transform-step-form.tsx:33`
-  - `web/src/features/editor/components/connection-form.tsx:43`
-  - `web/src/features/editor/components/response-form.tsx:39`
+- Deliberate TODO for plan 10's JSONata editor. Since phase D, one field
+  edits a request body, a transform's expression, a connection's condition
+  and the output, so one TODO covers all four:
+  - `web/src/features/editor/components/mapping-field.tsx:110`
 
 Found in Chromium while checking 3c, and fixed:
 - **Every edit blinked all the edges off.** React Flow keeps a node's
@@ -749,6 +984,180 @@ After step 4, what it noticed, fixed at your ask (2026-10-30):
   permission check refused the delete, as it can't be undone. The SQL is
   for you to run.
 
+## Phase D, as built (so far)
+
+Samples and the Preview, the first four steps of D (2026-10-30). The order
+and the tab's name were yours (Decided with you); the rest was decided
+while building:
+- **A sample** is `{status, headers, body}`: the status absent means 200,
+  and the body is required, `null` for an empty one. Validation checks the
+  status is 100 to 599 (200 to 299 since outputs), the header names, and
+  that a body and the sample input are each at most 64 KiB. A sample on a
+  transform step is refused: its value comes from its expression.
+- **The simulation is the engine's own code.** `engine.Simulate` builds the
+  program as far as it compiles (`Compile` is now that build, refusing
+  any problem), renders a request with the function a run sends it with,
+  and builds the document with the run's builder, so header names come out
+  in lower case as a run reads a response's.
+- **A step with no sample is named, never guessed at**: what it would get
+  back isn't in the document, the step after it still previews with what
+  there is, and an expression reading it gives nothing, which says so.
+- **A sample outside 2xx failed its step**, as a run would on that status,
+  so that was how to see what a failure does to the steps after it.
+  Outputs replaced it: a response besides 2xx is an output with a sample
+  of its own (Outputs by status, as built).
+- **Conditions decide what runs**, as in a run, but only on the connections
+  the preview follows. One from a step the preview couldn't run counts as
+  taken, since it might be; one whose condition fails counts as taken and
+  says why. A step no taken connection reaches is shown as skipped.
+- **Only the problems in the way come back**: those in the steps it runs,
+  the connections between them, the sample input, and the output when
+  that's what it previews. A step on or after a loop isn't run; the loop's
+  problems say why.
+- **A retried POST's Idempotency-Key shows as `<run id>:crm`**, which a run
+  fills in with its own id.
+- **The whole preview has a 3 s deadline**, besides each expression's
+  guardrails, and a panic comes back as an error. The deadline isn't tested.
+- **On screen**, first built as "Reads", "Sends" and "Gets back", then
+  made the workbench below at your ask: the input as a tree, the JSONata,
+  and "It sends", "It gives" or "It answers", each value as indented
+  text. A preview waits for the same half-second pause as the check, and
+  keeps showing the last one while the next comes.
+- **Preview holds the request body and the sample's fields**, and stays
+  mounted while hidden, as Request does; a problem in either marks it.
+  Opening such a problem from the list opens Preview with the cursor in the
+  field.
+- **The two Format buttons in Workflow settings** say which field they
+  format, for a screen reader: "Format input schema", "Format sample input".
+- **The data workbench** (after your "Preview holds it all"): the input is a
+  tree, its first three levels open so a step's body shows its fields;
+  every field and item is a button that writes its JSONata path, with
+  backticks around a name JSONata can't read bare, as `content-type`,
+  checked on the engine. A pick goes where the cursor is, read from the
+  field at the moment of the pick, since a field keeps its selection when
+  it loses focus; before the field has had the cursor, at the end. Found in
+  Chromium: the first version followed the cursor through `onSelect`,
+  which missed moves made with the keys, and put the paths in the wrong
+  places. A transform step and the response card have the same workbench:
+  input, expression, then "It gives" or "It answers". The Request tab's form
+  no longer holds the body, so editing the call can't write a stale body
+  back over Preview's; a test pins that.
+- **Your local Spec example got made-up samples as revision 3**, saved with
+  If-Match on revision 2, everything else as it was. Its step `prefsg`, a
+  rename since revision 1, is yours and stays. The made-up samples in tests
+  are the Go tests' `sampled` definition; the web's preview tests answer
+  from fixed previews, as the server's simulation has tests of its own.
+- **The workflow package's coverage floor rose from 88% to 95%**, which it's
+  at now.
+- Checked in Chromium through nginx, light and dark, on the Spec example:
+  crm reads the input and user, orders and prefsg from their samples, and
+  sends `{"email": "ada@example.com"}`; orders' URL renders `?user=7`; a
+  body typed to read three steps previews as `{"email": …, "orders": 2,
+  "newsletter": true}` half a second later; the output answers
+  `{"crm_id": "c-1"}`. No CSP violations and no console errors.
+
+## Outputs by status, as built
+
+The steps of "Phase D: outputs by status" (2026-10-30). The plan's ten
+drafting decisions held. Decided while building:
+- **Every HTTP step shows its `2xx` handle labelled**, even with no other
+  response, so the place a connection leaves from is always named. A
+  transform step keeps one unlabelled handle.
+- **A step grows from its fourth handle on**: handles sit evenly down its
+  right side, at least 24 px apart (design.md's target spacing), so four
+  make it 120 px tall. A step whose handles change tells React Flow, which
+  otherwise finds handles only when a step mounts.
+- **On screen, each response's fields carry its name**: "2xx body", "404
+  headers", "Format 404 body", "Remove the 404 response", since several sit
+  on one tab. The "Add a response" field takes 300 to 599 and refuses one
+  the step has, before the server would.
+- **A connection names its response** for an HTTP step's: "From prefs, on
+  2xx, to crm." Its condition's example became
+  `nodes.user.body.active = true`, as a status is now a response's to
+  pick.
+- **A connection's workbench ends "With these samples"**: "Taken, so crm
+  runs."; "Not taken. crm runs only if another connection into it is.";
+  "A run would skip user, …"; or that it can't tell, when the condition
+  fails, the response it leaves from has no sample, or an end names no
+  step, with the problem saying why. `POST /v1/preview` takes `edge`; one
+  out of range is 422 `unknown_edge`, and `node` with `edge` is 422
+  `not_allowed`.
+- **The input tree opens the steps connected**, so in the Spec example
+  crm's tree opens orders and prefsg and folds user, which crm reads but
+  sits two steps back: one click opens it.
+- **A connection from a response its step lacks isn't drawn**, as one to a
+  missing step isn't; the problems list offers to remove it.
+- **Problems are worded for the new codes**: "A status from 300 to 599:
+  2xx is every HTTP step's.", "This step already has a response for that
+  status.", "A response's sample takes the response's status.", "user has
+  no 409 response. Add one in its Preview tab, or draw the connection from
+  another.", and a 2xx sample's status "A status from 200 to 299: this is
+  the 2xx response." A problem in a response opens Preview at its sample's
+  body; one on a connection follows the response it leaves from too.
+- **Checked**: Go tests with the race detector; engine coverage 96.4%,
+  workflow 95.0%; 11 mutations, each caught (the last after its test was
+  made to tell two connections apart by their response alone); Chromium
+  through nginx, light and dark, on your Spec example's draft, unsaved:
+  user gets a 404 response with a sample and draws `2xx` and `404`
+  handles; a new create_user, a POST, connected from the 404 handle, reads
+  user's status 404 and sends `{"id": "7", "why": "not found"}`; its
+  connection is "Taken", then "Not taken" under a condition that doesn't
+  hold; user → orders reads "on 2xx" and "Taken". No CSP violations and no
+  console errors.
+
+## A step's blocks, as built
+
+The steps of "Phase D: a step's blocks" (2026-10-30). The plan's six
+drafting decisions held. Decided while building:
+- **The blocks**: the request block holds the step's id, method and URL;
+  the response blocks are a column 72 px wide on its right, one per
+  response and `+ Add` last, each at least 24 px tall, so a step is as
+  tall as before. A transform step stays one block, a handle on each side.
+- **Which part a click opens is the editor store's** `part`: "request", a
+  response's block (`2xx`, `404`) or "add". The canvas reads it from the
+  block the click lands in (`data-part`, in `onNodeClick`), once the
+  click has picked the step, which opens its request. The panel's tabs
+  show and set the same `part`.
+- **The tab adding a response says "+ Response"**, as the wireframe had it,
+  and is named "Add a response" for screen readers. Its field keeps that
+  name, and a response added opens its tab.
+- **A response's tab** starts with what its sample is for, moved from
+  Preview's "Responses"; then the sample; then "Then, on 404", a row per
+  connection leaving on it, "crm always" or "crm if …", each opening its
+  line and marked when it has problems; then Connect to, and what the
+  steps after read. With no connection yet, it says how to make one.
+- **Connect to lists the steps by id**, and says "No step to connect to"
+  when none is left: each is joined on this response already, or would
+  make a loop.
+- **The Request tab** holds the URL, headers and query, then the body's
+  workbench, then timeout, attempts and idempotent, as in the wireframe.
+- **A problem opens the tab it's on**: the problem list opens a step on
+  the part the problem is in (`stepPartOf`), where it clicked the Preview
+  tab before. "user has no 409 response" now ends "Add one with + Add on
+  the step, or draw the connection from another."
+- **The tab row wraps** when a step has more responses than fit, rather
+  than widening the panel.
+- **Fixed on the way**: keeping the picked step in view went by the
+  fixed step height, so the foot of a step with three responses or more
+  could stay hidden; it goes by the height drawn now.
+- **Checked**: 203 editor tests, lint and Prettier; 10 mutations, each
+  caught; Chromium through nginx, light and dark, on your Spec example's
+  draft, unsaved: `+ Add` on user opens "+ Response", and 404 added opens
+  its tab; user's 404 block opens 404; Connect to joins create_user on 404,
+  drawn from the 404 point and listed under "Then, on 404"; the request
+  block and the left point open Request, the 2xx point 2xx, and clicks on
+  points connect nothing; the Then row and the line both open "From user,
+  on 404, to create_user."; a drag from user's 404 to crm still connects.
+  No CSP violations and no console errors.
+
+Seen, not fixed:
+- At phone width the side panel is wider than the screen: the canvas goes,
+  and the panel's right edge is cut off. At the canvas's least zoom the
+  Spec example doesn't fit either, so user starts off its left edge. Both
+  were so before; the editor at narrow widths is plan 11's.
+- A new step lands in the middle of the view, so a connection to it can
+  run behind another step. Placement is plan 11's too.
+
 ## Out of scope
 
 - **Page mode** (05). The editor's model stays the definition, so 05 adds a
@@ -756,7 +1165,9 @@ After step 4, what it noticed, fixed at your ask (2026-10-30):
 - **What a step hands on, and what comes in with its shape** (raised
   2026-10-28): an optional mapping for what a step gives the steps after it,
   and the panel and cards showing its parents' results as they arrive. For
-  page mode (05) or typed contracts (07); not decided.
+  page mode (05) or typed contracts (07); not decided. A mapping on a
+  connection was raised and declined on 2026-10-30 (Outputs, decided with
+  you).
 - **Credentials** (06). Until then a secret header is typed into the node
   and stored in the definition, as the API stores it today.
 - **Rewriting references** when a node is renamed.

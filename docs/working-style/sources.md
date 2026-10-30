@@ -66,6 +66,10 @@ resolve, but their claims weren't re-read.
 | A step joins its own branches; no extra node for a join (plan 04, 2026-10-28) | Step Functions' Parallel state runs branches "as concurrently as possible, and wait[s] until all branches terminate", its output "an array with one element for each branch" ✓ [39]. n8n is the explicit alternative: its Merge node is how "you combine the separate streams back into one stream" ✓ [40] |
 | A step reads every earlier step by name, not only what's handed to it (plan 04, 2026-10-28) | Step Functions added variables on 22 Nov 2024 so a state can "assign data in one state and reference it in any subsequent steps", avoiding "the need to pass data through multiple intermediate states" ✓ [41] |
 | An HTTP step's panel splits Request from Response, and the Response side is where a sample goes (plan 04, 2026-10-28) | n8n edits a node's data in its OUTPUT view, where Save "saves your data changes and pins your data" ✓ [42]. In Postman, "an example is a pairing made up of a request and a related response", added by hand or saved from a real one ✓ [43] |
+| Samples and a preview of what a step reads and sends come before live runs (plan 04, 2026-10-30) | n8n maps "by dragging and dropping data from the INPUT pane into node parameters. This generates the expression for you" ✓ [45], and pinning saves a node's output "instead of fetching fresh data" ✓ [46]. Zapier: a step's test record is "a representative sample of the step's data", and "you can use its data in subsequent Zap steps by mapping fields"; "Testing is live and may result in changes made in your app" ✓ [47]. Make: a module run once gives "a bundle of information", and "Every item here can be mapped in the next module(s)" ✓ [48] |
+| An HTTP step branches on its status through outputs, 2xx and the statuses it lists; any other status still fails the run (plan 04, 2026-10-30) | n8n's HTTP Request node: "By default, the node returns success only when the response returns with a 2xx code. Turn this option on to return success regardless of the code returned" ✓ [49], and a node's On Error setting can "Continue (using error output)" ✓ [50]. Make's HTTP module: "Select Yes if you want the scenario to stop if the request returns a 4xx or 5xx error" ✓ [51]. Step Functions' HTTP Task example catches `States.Http.StatusCode.404` and goes `Next` to a handler state ✓ [52]. Logic Apps sets which statuses of the action before an action runs after [53]; Argo writes `depends: "A.Succeeded \|\| A.Failed"` [54] |
+| Connections carry a condition, not a mapping; steps shape data (plan 04, 2026-10-30) | Make adds a filter "between two modules" by clicking "the connecting line"; a bundle that doesn't match has its processing "terminated", one that does is "passed on to the next module" ✓ [55]. Step Functions shapes data on the state, with `Arguments` and `Output` in JSONata [56]; Camunda maps variables on tasks and puts condition expressions on sequence flows [57]; in Pipes and Filters, filters process and pipes connect [58] |
+| A step is drawn as blocks, and a click on one opens that part; a connection keeps its condition, opened from its line (plan 04, 2026-10-30) | Make sets a filter up by clicking "the connecting line" between two modules ✓ [55]; Camunda puts condition expressions on sequence flows [57]. Connecting without dragging: the design floor's 2.5.7 row |
 | A tab opens as an arrow key reaches it, and the open panel takes focus (web.md) | The WAI-ARIA tabs pattern recommends tabs "activate automatically when they receive focus" when panels show "without noticeable latency", and a panel whose first content isn't focusable gets `tabindex="0"` ✓ [44] |
 
 ## Contested: kept anyway, revisit if it hurts
@@ -132,7 +136,7 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 | Focus visible and not hidden | 2.4.7 and 2.4.11, AA ✓ |
 | Everything from the keyboard | 2.1.1, A ✓ |
 | Or another view that does it all: page mode, for the canvas | conformance requirement 5.2.1 allows "a conforming alternate version", one that "provides all of the same information and functionality" and can be reached from the other ✓ |
-| Clicks for anything dragged | 2.5.7, AA ✓. React Flow's `connectOnClick` defaults to `true` (its 12.12.0 types) ✓ |
+| A way without dragging for anything dragged | 2.5.7, AA ✓: what's done by dragging "can be achieved by a single pointer without dragging". The way can be another control: one of WCAG's own examples "also has a menu alternative where users can select the person that should receive the gift from the menu" ✓ [59]. A click on a point opens its part, so React Flow's `connectOnClick`, `true` by default, is off, and then "users will need to drag the connection line to the target handle" ✓ [60]; Connect to, a list, is the way without |
 | 24 px targets, or spaced apart | 2.5.8, AA ✓. React Flow's stylesheet draws handles 6 px wide ✓ |
 | 320 px wide without sideways scrolling; the canvas exempt | 1.4.10, AA, and its exception for "parts of the content which require two-dimensional layout" ✓ |
 | Motion off under `prefers-reduced-motion` | 2.3.3, AAA ✓; held although it's above AA |
@@ -183,6 +187,22 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 42. https://docs.n8n.io/data/data-mocking/
 43. https://learning.postman.com/docs/sending-requests/response-data/examples/
 44. https://www.w3.org/WAI/ARIA/apg/patterns/tabs/
+45. https://docs.n8n.io/data/data-mapping/data-mapping-ui/
+46. https://docs.n8n.io/data/data-pinning/
+47. https://help.zapier.com/hc/en-us/articles/8496310366093
+48. https://academy-content.make.com/courses/make-foundation-scenarios/06-introduction-to-mapping
+49. https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.httprequest/
+50. https://docs.n8n.io/workflows/components/nodes/
+51. https://apps.make.com/http
+52. https://docs.aws.amazon.com/step-functions/latest/dg/call-https-apis.html
+53. https://learn.microsoft.com/azure/logic-apps/logic-apps-exception-handling
+54. https://argo-workflows.readthedocs.io/en/latest/enhanced-depends-logic/
+55. https://help.make.com/filtering
+56. https://docs.aws.amazon.com/step-functions/latest/dg/data-transform.html
+57. https://docs.camunda.io/docs/components/concepts/variables/
+58. https://www.enterpriseintegrationpatterns.com/patterns/messaging/PipesAndFilters.html
+59. https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html
+60. https://reactflow.dev/api-reference/react-flow
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

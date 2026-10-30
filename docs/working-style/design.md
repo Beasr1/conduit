@@ -58,7 +58,8 @@ any checklist, this file included.
   each with one job and used the same way everywhere. A new token needs a
   job no existing one does.
 - Show what the task needs; the rest appears when asked for. Picking a step
-  opens its settings.
+  opens its settings, and a click on one of its blocks opens only that
+  part: its request, or one of its responses.
 - Structure means something. A border, a number, a label or a colour is
   there because it tells the user something.
 - Colour says what a thing is or what state it's in. A status colour means
@@ -72,7 +73,10 @@ any checklist, this file included.
 - Name things the way users would. Text on screen says "step" and
   "connection"; code, the API and expressions say "node" and "edge"
   (`nodes.crm.body`), and wherever an expression is written, the screen
-  explains that once.
+  explains that once. A step's outputs are its "responses" on screen, each
+  named by its status, `2xx` or `404`; "the response" alone is the card the
+  workflow answers with. On the canvas a step is blocks: its request, and a
+  block per response.
 - "Upstream" means only the API a step calls. Direction in the graph is
   before and after: a step runs after another, and reads earlier steps.
   Docs and code comments say it the same way.
@@ -100,12 +104,14 @@ WCAG 2.2, level AA unless noted (sources.md):
   the same thing does everything this one does and can be reached from it:
   a conforming alternate version, in WCAG's terms. Drawing edges on the
   canvas needs a pointer, so page mode is the keyboard way to build.
-- Anything done by dragging can also be done by clicking (2.5.7). On the
-  canvas, an edge is made by clicking one handle and then the other: React
-  Flow's `connectOnClick`, on by default.
+- Anything done by dragging can also be done without dragging (2.5.7). On
+  the canvas a connection is drawn by dragging from a point, or made with
+  Connect to, a list in the tab of the response it leaves from. A click on
+  a point opens its part, so React Flow's `connectOnClick` is off.
 - Targets are at least 24 by 24 px, or spaced so that a 24 px circle around
   each touches no other target (2.5.8). That includes connection handles,
-  which React Flow draws 6 px wide.
+  which React Flow draws 6 px wide; a click on the block a handle sits on
+  opens what the handle does.
 - Motion nobody asked for stops under `prefers-reduced-motion`. That's
   2.3.3, level AAA; we hold it anyway.
 - Sign-in, the workflow list and the run screens work 320 px wide without

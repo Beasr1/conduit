@@ -175,8 +175,11 @@ Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
      nodes, up to a per-run concurrency limit.
 3. **A node ends** as succeeded, failed, skipped or cancelled. Each result
    is written to Postgres and published over SSE.
-4. **Edges:** an edge is active when its source succeeded and its `when`
-   expression is truthy. `when` defaults to true.
+4. **Edges:** an edge is active when its source succeeded, answering
+   through the output the edge leaves from, and its `when` expression is
+   truthy. `when` defaults to true. An http node's outputs are 2xx and each
+   status it lists, which it then takes as an answer rather than a failure
+   (plan 04, 2026-10-30).
    - A node runs once all its parents have ended and at least one incoming
      edge is active.
    - If none are active, the node is skipped, and skips cascade.

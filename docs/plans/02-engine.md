@@ -116,13 +116,15 @@ types into `server/internal/workflow/definition.gen.go`.
    - renders the request: URL, query, headers, then the body;
    - calls `upstream`;
    - evaluates its outgoing edges' `when` conditions, which see its own
-     result too;
+     result too: since plan 04's outputs (2026-10-30), those of the edges
+     from the output it answered through;
    - reports back.
 
    A panic is recovered and becomes the node's failure, as a `PanicError`
    with the stack.
 3. **Outcomes.**
-   - *succeeded*: a 2xx response, or a transform that evaluated.
+   - *succeeded*: a 2xx response, a status the node lists as an output
+     (plan 04, 2026-10-30), or a transform that evaluated.
    - *failed*: anything else, after retries.
    - *skipped*: every parent ended and no edge in was taken. Skips cascade.
    - *cancelled*: stopped by another node's failure or by the caller, or
@@ -356,4 +358,4 @@ refused rather than escaped.
 | 3 | Restrict node ids to `^[a-z][a-z0-9_]{0,63}$`? | Yes |
 | 4 | Include `transform` nodes now? | Yes |
 | 5 | Check run input against `input_schema` now? | No, in 03 |
-| 6 | Is any non-2xx upstream response a node failure? | Yes in v1 |
+| 6 | Is any non-2xx upstream response a node failure? | Yes in v1. Since plan 04 (2026-10-30), not a status the node lists as an output: that's an answer its edges can branch on |

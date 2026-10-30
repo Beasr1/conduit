@@ -10,7 +10,7 @@ lives as a row in 00-roadmap.md.
 | 01 | 01-foundation.md | monorepo skeleton; every gate runs locally and in CI | done |
 | 02 | 02-engine.md | workflow model, validation, scheduler, upstream caller, JSONata | done |
 | 03 | 03-api.md | persistence, REST, live run events, serving published workflows | done 2026-10-27 |
-| 04 | 04-graph-editor.md | build, save and run workflows in graph mode | accepted 2026-10-28; phase A committed, phase B built (2026-10-30) |
+| 04 | 04-graph-editor.md | build, save and run workflows in graph mode | accepted 2026-10-28; phases A and B committed; D's samples, previews, outputs by status and a step's blocks built ahead of C (2026-10-30) |
 | 05 | page-mode | the advanced view: steps in order, a card each with its data in and out; keyboard-first | not started |
 | 06 | hardening | credentials, limits, images, observability | not started |
 | 07 | tests-and-catalogue | dry-run; test cases; the upstream library, filled by OpenAPI import; per-workflow caller keys | not started |
