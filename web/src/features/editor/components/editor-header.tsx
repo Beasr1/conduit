@@ -66,9 +66,14 @@ export function EditorHeader({
   const [base, setBase] = useState(opened.revision);
   const [saved, setSaved] = useState<Definition>(opened.definition);
   const dirty = useMemo(() => changed(draft, saved), [draft, saved]);
-  const newer = save.error instanceof ApiError && save.error.status === 412;
+  // A newer revision exists when a save was refused for one, or when the
+  // workflow, fetched again as the window regains focus, says so. Nothing is
+  // saved over it: the draft stays on screen to copy from until it's loaded.
+  const refused = save.error instanceof ApiError && save.error.status === 412;
+  const newer = refused || workflow.latest_revision > base;
+  const [dismissed, setDismissed] = useState(false);
 
-  async function saveDraft(on: number | "latest") {
+  async function saveDraft(on: number) {
     const sent = editor.getState().draft;
     try {
       const revision = await save.mutateAsync({ draft: sent, base: on });
@@ -140,6 +145,12 @@ export function EditorHeader({
     );
   else if (dirty) status.push("Unsaved changes");
   else if (save.isSuccess) status.push("Saved");
+  if (newer)
+    status.push(
+      workflow.latest_revision > base
+        ? `Revision ${workflow.latest_revision} was saved elsewhere`
+        : "A newer revision was saved elsewhere",
+    );
   if (publish.isPending) status.push("Publishing…");
   else if (
     publish.isError &&
@@ -182,15 +193,20 @@ export function EditorHeader({
             {problems === 1 ? "1 problem" : `${problems} problems`}
           </Button>
         )}
+        {newer && (
+          <Button variant="outline" onClick={onReload}>
+            Load newer revision
+          </Button>
+        )}
         <Button
           variant="outline"
-          disabled={!dirty || save.isPending}
+          disabled={!dirty || save.isPending || newer}
           onClick={() => void saveDraft(base)}
         >
           {save.isPending ? "Saving…" : "Save"}
         </Button>
         <Button
-          disabled={live || save.isPending || publish.isPending}
+          disabled={live || save.isPending || publish.isPending || newer}
           onClick={() => void publishDraft()}
         >
           {publish.isPending ? "Publishing…" : live ? "Published" : "Publish"}
@@ -198,9 +214,9 @@ export function EditorHeader({
       </div>
 
       <Dialog
-        open={newer}
+        open={refused && !dismissed}
         onOpenChange={(open) => {
-          if (!open) save.reset();
+          if (!open) setDismissed(true);
         }}
       >
         <DialogContent className="nokey">
@@ -208,23 +224,16 @@ export function EditorHeader({
             <DialogTitle>A newer revision was saved</DialogTitle>
             <DialogDescription>
               This workflow was saved somewhere else after you opened it,
-              perhaps in another tab. Load that revision, dropping your unsaved
-              changes here, or save yours as the next revision; the other one
-              stays in the workflow&apos;s history.
+              perhaps in another tab, so your changes here can&apos;t be saved
+              over it. Load the newer revision to go on; your unsaved changes
+              are dropped.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={onReload}>
-              Load newer revision
+            <Button variant="outline" onClick={() => setDismissed(true)}>
+              Not now
             </Button>
-            <Button
-              onClick={() => {
-                save.reset();
-                void saveDraft("latest");
-              }}
-            >
-              Save anyway
-            </Button>
+            <Button onClick={onReload}>Load newer revision</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

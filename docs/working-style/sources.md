@@ -70,6 +70,7 @@ resolve, but their claims weren't re-read.
 | An HTTP step branches on its status through outputs, 2xx and the statuses it lists; any other status still fails the run (plan 04, 2026-10-30) | n8n's HTTP Request node: "By default, the node returns success only when the response returns with a 2xx code. Turn this option on to return success regardless of the code returned" ✓ [49], and a node's On Error setting can "Continue (using error output)" ✓ [50]. Make's HTTP module: "Select Yes if you want the scenario to stop if the request returns a 4xx or 5xx error" ✓ [51]. Step Functions' HTTP Task example catches `States.Http.StatusCode.404` and goes `Next` to a handler state ✓ [52]. Logic Apps sets which statuses of the action before an action runs after [53]; Argo writes `depends: "A.Succeeded \|\| A.Failed"` [54] |
 | Connections carry a condition, not a mapping; steps shape data (plan 04, 2026-10-30) | Make adds a filter "between two modules" by clicking "the connecting line"; a bundle that doesn't match has its processing "terminated", one that does is "passed on to the next module" ✓ [55]. Step Functions shapes data on the state, with `Arguments` and `Output` in JSONata [56]; Camunda maps variables on tasks and puts condition expressions on sequence flows [57]; in Pipes and Filters, filters process and pipes connect [58] |
 | A step is drawn as blocks, and a click on one opens that part; a connection keeps its condition, opened from its line (plan 04, 2026-10-30) | Make sets a filter up by clicking "the connecting line" between two modules ✓ [55]; Camunda puts condition expressions on sequence flows [57]. Connecting without dragging: the design floor's 2.5.7 row |
+| A workflow's API gives answers of its own, one status and one shape each, picked by lines into the response card, the body made by the step a line comes from (plan 04, 2026-10-30, after runs) | n8n's Respond to Webhook node can "Set the response code to use", and "A second Respond to Webhook node executes after the first one: the workflow ignores it" ✓ [61]. Logic Apps' Response action takes a Status Code, Headers and Body, and "if all Response actions are skipped, the caller receives a 502 Bad Gateway error, even if the workflow finishes successfully" ✓ [62]. API Gateway maps a backend's answers to the API's own statuses, one of them the "default response that is used to catch any response not yet configured" ✓ [63] |
 | A tab opens as an arrow key reaches it, and the open panel takes focus (web.md) | The WAI-ARIA tabs pattern recommends tabs "activate automatically when they receive focus" when panels show "without noticeable latency", and a panel whose first content isn't focusable gets `tabindex="0"` ✓ [44] |
 
 ## Contested: kept anyway, revisit if it hurts
@@ -203,6 +204,9 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 58. https://www.enterpriseintegrationpatterns.com/patterns/messaging/PipesAndFilters.html
 59. https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html
 60. https://reactflow.dev/api-reference/react-flow
+61. https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.respondtowebhook/
+62. https://learn.microsoft.com/en-us/azure/connectors/connectors-native-reqres
+63. https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-integration-settings-integration-response.html
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

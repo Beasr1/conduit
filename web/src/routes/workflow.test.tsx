@@ -184,7 +184,9 @@ test("Ctrl-S in the Id field saves the id typed there", async () => {
   ]);
 });
 
-test("after a newer revision is saved elsewhere, Save anyway saves on top of it", async () => {
+// Nothing is saved over a revision saved elsewhere: the draft stays on
+// screen, to copy from, but Save and Publish are off until it's loaded.
+test("after a newer revision is saved elsewhere, nothing is saved over it", async () => {
   const server = serveWorkflow();
   open();
   await pick("crm");
@@ -196,12 +198,53 @@ test("after a newer revision is saved elsewhere, Save anyway saves on top of it"
   const dialog = await screen.findByRole("dialog", {
     name: "A newer revision was saved",
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Save anyway" }));
-  expect(await screen.findByText("Revision 3 · Saved")).toBeTruthy();
-  expect(server.saves.map((s) => s.ifMatch)).toEqual(['"1"', '"2"']);
-  expect(crmURL(server.saves[1]!.body)).toBe(
+  expect(
+    within(dialog).queryByRole("button", { name: "Save anyway" }),
+  ).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+  expect(
+    await screen.findByText(
+      "Revision 1 · Unsaved changes · Revision 2 was saved elsewhere",
+    ),
+  ).toBeTruthy();
+  for (const name of ["Save", "Publish"])
+    expect(screen.getByRole("button", { name })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  expect(screen.getByLabelText("URL")).toHaveProperty(
+    "value",
     "https://crm.example.com/v2/contacts",
   );
+  expect(server.saves.map((s) => s.ifMatch)).toEqual(['"1"']);
+});
+
+// The workflow is fetched again when the tab comes back into view, so a
+// revision saved in another tab is known before a save is tried.
+test("a newer revision found when the tab is back in view stops a save before it's sent", async () => {
+  const server = serveWorkflow();
+  open();
+  await pick("crm");
+  await screen.findByLabelText("URL");
+  type("URL", "https://crm.example.com/v2/contacts");
+  server.saveElsewhere(specExample);
+
+  fireEvent(window, new Event("visibilitychange"));
+  expect(
+    await screen.findByText(
+      "Revision 1 · Unsaved changes · Revision 2 was saved elsewhere",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Load newer revision" }));
+  expect(await screen.findByText("Revision 2")).toBeTruthy();
+  expect(server.saves).toEqual([]);
 });
 
 test("after a newer revision is saved elsewhere, Load opens it afresh", async () => {

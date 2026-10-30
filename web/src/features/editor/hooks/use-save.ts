@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import type { components } from "@/gen/schema";
-import { api, call } from "@/lib/api";
+import { api, ApiError, call } from "@/lib/api";
 import { workflowKeys } from "@/lib/query-keys";
 
 type Definition = components["schemas"]["Definition"];
@@ -11,38 +11,20 @@ type WorkflowRevision = components["schemas"]["WorkflowRevision"];
 const etag = (revision: number) => `"${revision}"`;
 
 // useSaveDraft saves a draft as the workflow's next revision. It builds on
-// base, sent as If-Match, so it can't silently undo a save made elsewhere;
-// "latest" builds on whatever is newest, knowingly, and the revision it
-// follows stays in the history.
+// base, sent as If-Match, so nothing is saved over a revision saved
+// elsewhere: the server refuses it with 412, and the workflow is fetched
+// again to learn which revision is newest.
 export function useSaveDraft(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({
-      draft,
-      base,
-    }: {
-      draft: Definition;
-      base: number | "latest";
-    }) => {
-      const on =
-        base === "latest"
-          ? (
-              await call((signal) =>
-                api.GET("/v1/workflows/{id}", {
-                  params: { path: { id } },
-                  signal,
-                }),
-              )
-            ).revision.revision
-          : base;
-      return call((signal) =>
+    mutationFn: ({ draft, base }: { draft: Definition; base: number }) =>
+      call((signal) =>
         api.PUT("/v1/workflows/{id}/draft", {
-          params: { path: { id }, header: { "If-Match": etag(on) } },
+          params: { path: { id }, header: { "If-Match": etag(base) } },
           body: draft,
           signal,
         }),
-      );
-    },
+      ),
     // The editor says what went wrong: a newer revision in a dialog, the
     // rest beside the buttons.
     meta: { quiet: true },
@@ -56,6 +38,12 @@ export function useSaveDraft(id: string) {
           },
       );
       void queryClient.invalidateQueries({ queryKey: workflowKeys.list() });
+    },
+    onError: (err) => {
+      if (err instanceof ApiError && err.status === 412)
+        void queryClient.invalidateQueries({
+          queryKey: workflowKeys.detail(id),
+        });
     },
   });
 }

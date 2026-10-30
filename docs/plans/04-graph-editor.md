@@ -4,8 +4,9 @@ Status: accepted 2026-10-28, with all seven questions answered (Answers, at
 the end); D10, D11 and D13 accepted with it, and D14 waits for 07. Phase A
 is committed (69bb36e), and so is Phase B, its last step in eabb7b6. Phase D
 now comes before C: its samples, previews, outputs by status and a step's
-blocks are built, not yet committed (2026-10-30). Building Phase A raised
-question 8, since answered.
+blocks are committed (f9e7484, e98e50a, 2026-10-30), and its API's answers
+are planned for after C. Building Phase A raised question 8, since
+answered.
 
 ## Goal
 
@@ -124,9 +125,9 @@ Also seen:
 - An explicit save (button, or Ctrl-S), never autosave: each save is a new
   immutable revision, and autosave would make hundreds.
 - Saves send `If-Match` with the revision the draft started from. A `412`
-  means another tab, or later an agent, saved first; the editor offers to
-  load the newer revision, or, as built, to save anyway (Decided with you,
-  2026-10-30).
+  means another tab, or later an agent, saved first, and nothing is saved
+  over it: the editor says a newer revision was saved, and Save and Publish
+  stay off until it's loaded (decided with you, 2026-10-30, late night).
 - **Problems** come back with every save, each with a JSON Pointer. The
   editor maps a pointer to its node and field (`/nodes/2/request/url` is
   node 2's URL field), marks the node on the canvas, and shows the detail
@@ -343,7 +344,7 @@ it was after)
       field (the inferred schema below); a run's real response kept as a
       step's sample; fetching a sample from a GET.
 
-**Phase D: outputs by status** (2026-10-30, your call, before C; built, not yet committed)
+**Phase D: outputs by status** (2026-10-30, your call, before C; built)
 
 An HTTP step answers through outputs: 2xx, which every HTTP step has, and
 each status you add, such as 404. A connection leaves from one output, and
@@ -420,7 +421,7 @@ transport errors and statuses with no output (the roadmap's "continue on
 error"). Done means the steps above, `just check` green, and your 404
 example built on the canvas, each branch previewed.
 
-**Phase D: a step's blocks** (2026-10-30, your call, before C; built, not yet committed)
+**Phase D: a step's blocks** (2026-10-30, your call, before C; built)
 
 Graph mode put a step's every part in one place: its request body and all
 its responses on one tab. Now a step is drawn as you pictured it: its
@@ -575,6 +576,78 @@ Samples, decided with you on 2026-10-28:
   response is wrong. Several kept samples could refine it; OpenAPI schemas
   take over in 07.
 
+**Phase D: the API's answers** (2026-10-30, your call; after C)
+
+The response card is the overview of everything the workflow's API can
+answer, and each answer is one status with one shape. Today the API
+answers 200 with one output, whose shape changes with the way the run
+went: through user's 2xx it answers `200 {"id", "email"}`, through its
+404 `200 {}`, an unclear contract (your point). Its errors are written
+only in the API's schema.
+- [ ] An answer is a status, joined to by one step's line. That step makes
+      its body, a transform's value or an HTTP step's response body, and
+      its exact shape is edited there. A run that takes the line gives the
+      answer. Each answer keeps a schema, the shape a caller is promised.
+- [ ] One line per answer. Branches that should give the same answer meet
+      in a merger step first, a transform that reads whichever ran, so the
+      answer has one shape. Drawing a second line into an answer offers to
+      put a merger in front of it.
+- [ ] Today's output moves into a step: the card holds no JSONata. A
+      workflow's `output` becomes a transform step joined to 200, and its
+      output schema becomes 200's; saved workflows are converted the same
+      way.
+- [ ] Validation: an answer's status is listed once, it takes one line,
+      and a line into the card names an answer the workflow has.
+- [ ] The canvas: the card's answers are blocks on its left, where lines
+      arrive: 200 first, then each one added, then `+ Add`. Below them,
+      "also 400 · 502 · 504", the answers Conduit gives on its own.
+- [ ] The panel, the overview: each answer, the step that makes its body
+      (a click opens it), that body previewed over the samples of every
+      way into it, so a shape that changes with the branch shows, and its
+      schema; then Conduit's own answers, each saying when it's given and
+      the body a caller gets.
+- [ ] A served run answers with its answer's status and body.
+- [ ] Failing tests first; Chromium through nginx.
+
+Decided with you on 2026-10-30 (late night), from wireframes:
+- **The card shows every answer: yours, and Conduit's own.** Listing only
+  what it answers today was one other option, but every success would stay
+  200, so a user that isn't found couldn't answer 404. Only your answers,
+  with Conduit's in the docs, was the last.
+- **One status, one shape**, so a caller reads the card as an API's
+  reference: what each status means, and what comes with it.
+- **Lines into the card pick the answer.** A condition per answer was the
+  other way: the same contract, but the canvas wouldn't show which branch
+  gives which answer.
+- **The card is an overview; the step joined to an answer makes its
+  body.** The first draft gave each answer a JSONata body on the card; you
+  put the exact response at the step instead.
+- **Today's output moves into a step**, so every answer is made the same
+  way. Keeping it on the card for a plain 200 was the other option: no
+  extra step, but two ways to make a 200.
+- **One line per answer, with a merger for several branches.** Several
+  lines into one answer with a warning was the other option.
+- **Built after runs.**
+
+Decided while drafting, yours to overrule:
+1. **The card's order decides between answers**: when a run takes lines
+   into several, the first on the card wins. n8n answers with the first
+   Respond to Webhook node to run and ignores a later one (sources.md), but
+   steps here run in parallel, so which comes first isn't fixed; the card's
+   order is.
+2. **The answer is given when the run ends**, its steps all finished, as a
+   served run answers now. n8n and Logic Apps can answer midway, and go on
+   running.
+3. **An answer's schema stays on the card**: it's the contract a caller is
+   promised, while the body is the step's.
+
+Open: what the API answers when a run takes no line into the card (Logic
+Apps answers 502, "even if the workflow finishes successfully"; 200 with
+null is the other way); headers per answer; whether an answer may take a
+status Conduit gives on its own (400, 502, 504); whether a step's failure
+can lead to an answer (the "failed" output left open with outputs); the
+names in the definition, settled when it's built.
+
 **Phase E: the browser test**
 - [ ] Playwright, the test upstream, and the Done flow.
 - [ ] web.md corrected; CLAUDE.md, repo.md and the roadmap updated.
@@ -724,9 +797,13 @@ Decided with you:
   where that's the specific part: a JSONata syntax error, which URL rule
   broke. The server's text says "node" and "/nodes/0"; showing it, or
   rewording it on the server, were the other options.
-- **A newer revision can be loaded or saved over** (2026-10-30). The plan
-  offered only loading. Saving anyway makes this draft the next revision,
-  and the other stays in the history, since revisions are immutable.
+- **A newer revision is loaded, never saved over** (2026-10-30, late
+  night, your call). Saving anyway was built first: it made this draft the
+  next revision, the other kept in the history. You took it back out to
+  keep it simple, and deferred branches and merges, as in git, as likely
+  more harm than use for now. The editor also learns of a newer revision
+  when the window regains focus, as the workflow is fetched again, so it
+  says so before a save is tried.
 - **After a save the editor stays as it is** (2026-10-30, your "continue"
   after I recommended it): the new revision is the next save's base, and
   the open panel, tab and picked step stay. Reloading the saved revision was
@@ -927,8 +1004,8 @@ were yours; the rest was decided while building:
   disabled while nothing has changed since the last save or the opening,
   compared as JSON. The line under the name says "Unsaved changes",
   "Saving…", "Saved", or "Not saved." with the reason; the save is quiet,
-  so there's no toast as well. Save anyway asks for the latest revision's
-  number, then saves on it.
+  so there's no toast as well. A save refused for a newer revision can't
+  be forced (Save anyway went on 2026-10-30, late night).
 - **Publish**, with unsaved changes, saves first. When the last check was of
   this very draft and found problems, it opens the list and sends nothing; a
   `422` from the server opens the list too. It reads "Published" while the
