@@ -76,6 +76,8 @@ any checklist, this file included.
 - "Upstream" means only the API a step calls. Direction in the graph is
   before and after: a step runs after another, and reads earlier steps.
   Docs and code comments say it the same way.
+- Say which way data goes. A body or headers field sits under Request or
+  Response, never on its own: a step's "Body" alone was read both ways.
 - A button says what it does ("Save", "Publish", "Run"), and what follows
   uses the same word ("Saved", "Published").
 - An error says what happened and how to fix it. It doesn't apologise.

@@ -1,10 +1,10 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, test } from "vitest";
 
-import { Editor } from "@/features/editor/components/editor";
 import { SidePanel } from "@/features/editor/components/side-panel";
 import { createEditorStore, EditorContext } from "@/features/editor/store";
 import type { components } from "@/gen/schema";
+import { renderEditor } from "@/test/editor";
 import { specExample } from "@/test/fixtures";
 import { shimReactFlow } from "@/test/react-flow";
 import { renderAt } from "@/test/render";
@@ -50,7 +50,7 @@ function type(label: string, value: string) {
 }
 
 test("picking a step opens its settings, and Close puts them away", async () => {
-  renderAt(<Editor definition={specExample} />);
+  renderEditor(specExample);
   await pick("crm");
   const panel = await screen.findByRole("complementary", {
     name: "HTTP step",
@@ -69,7 +69,7 @@ test("picking a step opens its settings, and Close puts them away", async () => 
 test.each(["Close", "Add HTTP step"])(
   "Delete and Backspace on the %s button leave the step alone",
   async (button) => {
-    renderAt(<Editor definition={specExample} />);
+    renderEditor(specExample);
     await pick("crm");
     const target = await screen.findByRole("button", { name: button });
     target.focus();
@@ -86,8 +86,53 @@ test.each(["Close", "Add HTTP step"])(
   },
 );
 
+test("an HTTP step's Response tab says how the steps after it read it", async () => {
+  renderEditor(specExample);
+  await pick("crm");
+  const panel = await screen.findByRole("complementary", {
+    name: "HTTP step",
+  });
+  const tab = (name: string) => within(panel).getByRole("tab", { name });
+  expect(tab("Request").getAttribute("aria-selected")).toBe("true");
+  type("Timeout (ms)", "30s");
+
+  fireEvent.click(tab("Response"));
+  expect(within(panel).queryByRole("textbox", { name: "URL" })).toBeNull();
+  for (const part of ["status", "headers", "body"])
+    expect(within(panel).getByText(`nodes.crm.${part}`)).toBeTruthy();
+  // JSONata reads content-type as a subtraction without them.
+  expect(
+    within(panel).getByText("nodes.crm.headers.`content-type`"),
+  ).toBeTruthy();
+
+  // Text that doesn't count yet is still there after a switch.
+  fireEvent.click(tab("Request"));
+  expect(
+    within(panel).getByRole("textbox", { name: "Timeout (ms)" }),
+  ).toHaveProperty("value", "30s");
+});
+
+test("an arrow key moves to the other tab and opens it", async () => {
+  renderEditor(specExample);
+  await pick("crm");
+  const request = await screen.findByRole("tab", { name: "Request" });
+  request.focus();
+  fireEvent.keyDown(request, { key: "ArrowRight" });
+  expect(await screen.findByText("nodes.crm.status")).toBeTruthy();
+});
+
+test("the Response tab reads the step by the id it has now", async () => {
+  renderEditor(specExample);
+  await pick("crm");
+  fireEvent.click(await screen.findByRole("tab", { name: "Response" }));
+  const id = screen.getByLabelText("Id");
+  type("Id", "contacts");
+  fireEvent.blur(id);
+  expect(await screen.findByText("nodes.contacts.body")).toBeTruthy();
+});
+
 test("the URL goes into the step as it's typed", async () => {
-  renderAt(<Editor definition={specExample} />);
+  renderEditor(specExample);
   await pick("crm");
   await screen.findByLabelText("URL");
   type("URL", "https://crm.example.com/v2/contacts");
@@ -97,7 +142,7 @@ test("the URL goes into the step as it's typed", async () => {
 });
 
 test("an id is checked as it's typed and taken when the field is left", async () => {
-  renderAt(<Editor definition={specExample} />);
+  renderEditor(specExample);
   await pick("crm");
   const id = await screen.findByLabelText("Id");
 
@@ -122,26 +167,22 @@ test("an id is checked as it's typed and taken when the field is left", async ()
 });
 
 test("renaming says where expressions still read the old id", async () => {
-  renderAt(
-    <Editor
-      definition={withCrm({ ...crm, body: '{"name": nodes.user.body.name}' })}
-    />,
-  );
+  renderEditor(withCrm({ ...crm, body: '{"name": nodes.user.body.name}' }));
   await pick("user");
   const id = await screen.findByLabelText("Id");
   type("Id", "person");
   fireEvent.blur(id);
-  expect(
-    (await screen.findByText(/^Still reading nodes\.user/)).textContent,
-  ).toBe("Still reading nodes.user: crm's body. Change them to nodes.person.");
+  const panel = screen.getByRole("complementary");
+  const note = await within(panel).findByRole("status");
+  expect(note.textContent).toBe(
+    "Still reading nodes.user: crm's body. Change them to nodes.person.",
+  );
+  // What's code is set apart as code.
+  expect(within(note).getByText("nodes.user")).toBeTruthy();
 });
 
 test("removing a header row leaves the other rows as they were", async () => {
-  renderAt(
-    <Editor
-      definition={withCrm({ ...crm, headers: { A: "1", B: "2", C: "3" } })}
-    />,
-  );
+  renderEditor(withCrm({ ...crm, headers: { A: "1", B: "2", C: "3" } }));
   await pick("crm");
   fireEvent.click(
     await screen.findByRole("button", { name: "Remove header 2" }),
@@ -165,7 +206,7 @@ test("removing a header row leaves the other rows as they were", async () => {
 });
 
 test("a repeated header name is marked, and the first one counts", async () => {
-  renderAt(<Editor definition={withCrm({ ...crm, headers: { A: "1" } })} />);
+  renderEditor(withCrm({ ...crm, headers: { A: "1" } }));
   await pick("crm");
   fireEvent.click(await screen.findByRole("button", { name: "Add header" }));
   type("Header 2 name", "A");
@@ -180,7 +221,7 @@ test("a repeated header name is marked, and the first one counts", async () => {
 });
 
 test("a number is kept once it's a whole number in range", async () => {
-  renderAt(<Editor definition={specExample} />);
+  renderEditor(specExample);
   await pick("crm");
   await screen.findByLabelText("Timeout (ms)");
   type("Timeout (ms)", "30s");
@@ -213,15 +254,20 @@ test("a number is kept once it's a whole number in range", async () => {
 });
 
 test("a transform's expression goes into the step as it's typed", async () => {
-  renderAt(
-    <Editor
-      definition={{ nodes: [{ id: "merge", kind: "transform", expr: "1" }] }}
-    />,
-  );
+  renderEditor({ nodes: [{ id: "merge", kind: "transform", expr: "1" }] });
   await pick("merge");
   await screen.findByRole("complementary", { name: "Transform step" });
   type("Expression", "nodes.user.body");
   expect(await screen.findByText("nodes.user.body")).toBeTruthy();
+});
+
+test("a transform step says how the steps after it read its value", async () => {
+  renderEditor({ nodes: [{ id: "merge", kind: "transform", expr: "1" }] });
+  await pick("merge");
+  const panel = await screen.findByRole("complementary", {
+    name: "Transform step",
+  });
+  expect(within(panel).getByText("nodes.merge.body")).toBeTruthy();
 });
 
 // Looking at a step, or typing what doesn't count yet, mustn't count as

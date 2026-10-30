@@ -21,11 +21,15 @@ export interface EditorState {
   // only when it ends, rather than on every frame of it.
   moving: Record<string, XYPosition>;
   selected: Selection;
-  // Whether the workflow's own settings are open in the side panel. Opening
-  // them puts away what was picked, and picking something closes them.
-  settings: boolean;
-  openSettings: () => void;
-  closeSettings: () => void;
+  // What the side panel shows while nothing is picked: the workflow's own
+  // settings, or the list of problems. Opening one puts away what was
+  // picked, and picking something closes it.
+  panel: "settings" | "problems" | undefined;
+  openPanel: (panel: "settings" | "problems") => void;
+  closePanel: () => void;
+  // show picks one step, connection or the response card, as a click on the
+  // canvas would, and closes the panel.
+  show: (kind: keyof Selection, key: string) => void;
   edit: (change: (draft: Definition) => Definition) => void;
   // rename changes a node's id, and the selection follows it.
   rename: (index: number, id: string) => void;
@@ -47,10 +51,17 @@ export function createEditorStore(draft: Definition): EditorStore {
     draft,
     moving: {},
     selected: { nodes: [], edges: [] },
-    settings: false,
-    openSettings: () =>
-      set({ settings: true, selected: { nodes: [], edges: [] } }),
-    closeSettings: () => set({ settings: false }),
+    panel: undefined,
+    openPanel: (panel) => set({ panel, selected: { nodes: [], edges: [] } }),
+    closePanel: () => set({ panel: undefined }),
+    show: (kind, key) =>
+      set({
+        panel: undefined,
+        selected: {
+          nodes: kind === "nodes" ? [key] : [],
+          edges: kind === "edges" ? [key] : [],
+        },
+      }),
     // Every edit settles the draft first, so nothing placed automatically
     // moves under the user's hands. An edit that changes nothing, such as a
     // form leaving a field as it was, leaves the draft alone, settling
@@ -92,8 +103,8 @@ export function createEditorStore(draft: Definition): EditorStore {
           if (c.selected) on.add(c.id);
           else on.delete(c.id);
         }
-        const settings = s.settings && !changes.some((c) => c.selected);
-        return { selected: { ...s.selected, [kind]: [...on] }, settings };
+        const panel = changes.some((c) => c.selected) ? undefined : s.panel;
+        return { selected: { ...s.selected, [kind]: [...on] }, panel };
       }),
   }));
 }

@@ -4,6 +4,7 @@ import { type ReactNode, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { ConnectionForm } from "@/features/editor/components/connection-form";
 import { JsonField } from "@/features/editor/components/json-field";
+import { ProblemList } from "@/features/editor/components/problem-list";
 import { ResponseForm } from "@/features/editor/components/response-form";
 import { StepSettings } from "@/features/editor/components/step-panel";
 import { RESPONSE, toFlow } from "@/features/editor/flow";
@@ -16,13 +17,13 @@ const stepTitles: Record<string, string> = {
 
 // SidePanel holds the settings of what's picked on the canvas, one thing at a
 // time: a step, a connection or the response, or else the workflow's own
-// settings once they're opened.
+// settings or the list of problems, once they're opened.
 export function SidePanel() {
   const draft = useEditor((s) => s.draft);
   const selected = useEditor((s) => s.selected);
-  const settings = useEditor((s) => s.settings);
+  const panel = useEditor((s) => s.panel);
   const pick = useEditor((s) => s.pick);
-  const closeSettings = useEditor((s) => s.closeSettings);
+  const closePanel = useEditor((s) => s.closePanel);
   const flow = useMemo(() => toFlow(draft), [draft]);
 
   const node =
@@ -37,7 +38,7 @@ export function SidePanel() {
   let title: string;
   let body: ReactNode;
   let close: () => void;
-  if (settings) {
+  if (panel === "settings") {
     title = "Workflow settings";
     body = (
       <JsonField
@@ -47,7 +48,11 @@ export function SidePanel() {
         description="A JSON Schema the run's input must match. A served workflow answers input that doesn't with 400."
       />
     );
-    close = closeSettings;
+    close = closePanel;
+  } else if (panel === "problems") {
+    title = "Problems";
+    body = <ProblemList />;
+    close = closePanel;
   } else if (node === RESPONSE) {
     title = "Response";
     body = <ResponseForm />;

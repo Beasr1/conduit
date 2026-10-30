@@ -191,7 +191,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Check a definition without saving it */
+        /**
+         * Check a definition without saving it
+         * @description Problems in the definition are the answer, not an error, so they come back with 200. A body that isn't a definition at all, with a field one doesn't have or a value of the wrong type, is refused with 422.
+         */
         post: operations["validateDefinition"];
         delete?: never;
         options?: never;
@@ -351,6 +354,10 @@ export interface components {
             provenance: components["schemas"]["Provenance"];
             /** Format: date-time */
             created_at: string;
+        };
+        Validation: {
+            /** @description Everything wrong with the definition. Empty when it can be published. */
+            problems: components["schemas"]["ProblemError"][];
         };
         RevisionSummary: {
             revision: number;
@@ -893,12 +900,14 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The definition has no problems. */
-            204: {
+            /** @description What's wrong with the definition. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Validation"];
+                };
             };
             401: components["responses"]["Problem"];
             422: components["responses"]["Problem"];

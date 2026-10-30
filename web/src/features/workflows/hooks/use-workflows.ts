@@ -7,15 +7,10 @@ import {
 
 import type { components } from "@/gen/schema";
 import { api, call } from "@/lib/api";
+import { workflowKeys } from "@/lib/query-keys";
 
 export type Workflow = components["schemas"]["Workflow"];
 export type CreateWorkflow = components["schemas"]["CreateWorkflow"];
-
-export const workflowKeys = {
-  all: ["workflows"] as const,
-  list: () => [...workflowKeys.all, "list"] as const,
-  detail: (id: string) => [...workflowKeys.all, "detail", id] as const,
-};
 
 // useWorkflows pages through the list, newest first, a page at a time.
 export function useWorkflows() {

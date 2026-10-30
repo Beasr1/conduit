@@ -65,6 +65,8 @@ resolve, but their claims weren't re-read.
 | React Router | familiar. Contested, see below |
 | A step joins its own branches; no extra node for a join (plan 04, 2026-10-28) | Step Functions' Parallel state runs branches "as concurrently as possible, and wait[s] until all branches terminate", its output "an array with one element for each branch" ✓ [39]. n8n is the explicit alternative: its Merge node is how "you combine the separate streams back into one stream" ✓ [40] |
 | A step reads every earlier step by name, not only what's handed to it (plan 04, 2026-10-28) | Step Functions added variables on 22 Nov 2024 so a state can "assign data in one state and reference it in any subsequent steps", avoiding "the need to pass data through multiple intermediate states" ✓ [41] |
+| An HTTP step's panel splits Request from Response, and the Response side is where a sample goes (plan 04, 2026-10-28) | n8n edits a node's data in its OUTPUT view, where Save "saves your data changes and pins your data" ✓ [42]. In Postman, "an example is a pairing made up of a request and a related response", added by hand or saved from a real one ✓ [43] |
+| A tab opens as an arrow key reaches it, and the open panel takes focus (web.md) | The WAI-ARIA tabs pattern recommends tabs "activate automatically when they receive focus" when panels show "without noticeable latency", and a panel whose first content isn't focusable gets `tabindex="0"` ✓ [44] |
 
 ## Contested: kept anyway, revisit if it hurts
 
@@ -178,6 +180,9 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 39. https://docs.aws.amazon.com/step-functions/latest/dg/state-parallel.html
 40. https://docs.n8n.io/flow-logic/merging/
 41. https://aws.amazon.com/blogs/compute/simplifying-developer-experience-with-variables-and-jsonata-in-aws-step-functions/
+42. https://docs.n8n.io/data/data-mocking/
+43. https://learning.postman.com/docs/sending-requests/response-data/examples/
+44. https://www.w3.org/WAI/ARIA/apg/patterns/tabs/
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

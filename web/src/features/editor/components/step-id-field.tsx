@@ -10,7 +10,12 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { mentions, NODE_ID } from "@/features/editor/edits";
+import { ID_RULE, ID_TAKEN, mentions, NODE_ID } from "@/features/editor/edits";
+import {
+  asErrors,
+  atStep,
+  useProblems,
+} from "@/features/editor/hooks/use-problems";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 
 // StepIdField edits the id other steps read this one by. It's checked as
@@ -27,16 +32,13 @@ export function StepIdField({ index }: { index: number }) {
     z.object({
       id: z
         .string()
-        .regex(
-          NODE_ID,
-          "A lowercase letter, then up to 63 lowercase letters, digits and underscores.",
-        )
+        .regex(NODE_ID, ID_RULE)
         .refine(
           (next) =>
             !editor
               .getState()
               .draft.nodes.some((n, i) => i !== index && n.id === next),
-          "Another step already has this id.",
+          ID_TAKEN,
         ),
     }),
   );
@@ -46,6 +48,9 @@ export function StepIdField({ index }: { index: number }) {
     mode: "onChange",
   });
   const { errors } = form.formState;
+  // The form checks what's typed; the server, the id the step holds.
+  const problems = useProblems(atStep(index, "id"));
+  const said = errors.id ? [errors.id] : asErrors(problems);
 
   // An old id that another step has taken since is that step's to be read
   // by, so it's not reported.
@@ -58,35 +63,41 @@ export function StepIdField({ index }: { index: number }) {
     [before, draft],
   );
 
-  async function apply() {
+  // apply renames the step to the id typed, when it's a valid one. It's
+  // checked here at once rather than through the form, so a save that
+  // follows straight after, on Ctrl-S, saves the new id.
+  function apply() {
     const next = form.getValues("id");
-    if (next === id || !(await form.trigger("id"))) return;
+    if (next === id || !schema.safeParse({ id: next }).success) return;
     rename(index, next);
     setBefore((ids) => (ids.includes(id) ? ids : [...ids, id]));
   }
 
   return (
-    <Field data-invalid={!!errors.id}>
+    <Field data-invalid={said.length > 0}>
       <FieldLabel htmlFor="step-id">Id</FieldLabel>
       <Input
         id="step-id"
         className="font-mono"
         autoComplete="off"
         spellCheck={false}
-        aria-invalid={!!errors.id}
-        {...form.register("id", { onBlur: () => void apply() })}
+        aria-invalid={said.length > 0}
+        {...form.register("id", { onBlur: apply })}
         onKeyDown={(e) => {
-          if (e.key === "Enter") void apply();
+          const save = e.key.toLowerCase() === "s" && (e.ctrlKey || e.metaKey);
+          if (e.key === "Enter" || save) apply();
         }}
       />
-      <FieldError errors={[errors.id]} />
+      <FieldError errors={said} />
       <FieldDescription>
-        Other steps read its result as nodes.{id}.body.
+        In expressions, this step is{" "}
+        <span className="font-mono">{`nodes.${id}`}</span>.
       </FieldDescription>
       {stale.map(({ old, places }) => (
         <p key={old} role="status" className="text-sm">
-          Still reading nodes.{old}: {places.join(", ")}. Change them to nodes.
-          {id}.
+          Still reading <span className="font-mono">nodes.{old}</span>:{" "}
+          {places.join(", ")}. Change them to{" "}
+          <span className="font-mono">nodes.{id}</span>.
         </p>
       ))}
     </Field>

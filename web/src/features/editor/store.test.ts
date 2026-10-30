@@ -57,11 +57,11 @@ test("a renamed node stays selected, under its new id", () => {
 test("opening the workflow's settings puts away what was picked, and a pick closes them", () => {
   const store = createEditorStore(specExample);
   store.getState().pick("nodes", [{ id: "crm", selected: true }]);
-  store.getState().openSettings();
+  store.getState().openPanel("settings");
   expect(store.getState().selected).toEqual({ nodes: [], edges: [] });
-  expect(store.getState().settings).toBe(true);
+  expect(store.getState().panel).toBe("settings");
   store.getState().pick("edges", [{ id: "user->orders", selected: true }]);
-  expect(store.getState().settings).toBe(false);
+  expect(store.getState().panel).toBeUndefined();
 });
 
 test("the response card stays picked through edits", () => {
@@ -79,4 +79,16 @@ test("selection follows what the canvas picks and unpicks", () => {
   ]);
   store.getState().pick("nodes", [{ id: "user", selected: false }]);
   expect(store.getState().selected).toEqual({ nodes: ["crm"], edges: [] });
+});
+
+test("showing where a problem is picks only that, and puts the panel away", () => {
+  const store = createEditorStore(specExample);
+  store.getState().pick("nodes", [{ id: "user", selected: true }]);
+  store.getState().openPanel("problems");
+  store.getState().show("edges", "user->orders");
+  expect(store.getState().selected).toEqual({
+    nodes: [],
+    edges: ["user->orders"],
+  });
+  expect(store.getState().panel).toBeUndefined();
 });

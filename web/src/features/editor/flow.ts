@@ -105,6 +105,21 @@ export function toFlow(definition: Definition): Flow {
   return { nodes, edges, undrawn };
 }
 
+// The room kept around a new node, so it doesn't touch one already there.
+const SPACING = 24;
+
+// freeSpot moves a spot down, a node's height at a time, until a node there
+// would cover none of those placed.
+export function freeSpot(at: XYPosition, placed: XYPosition[]): XYPosition {
+  const covers = (p: XYPosition, q: XYPosition) =>
+    Math.abs(p.x - q.x) < NODE_WIDTH + SPACING &&
+    Math.abs(p.y - q.y) < NODE_HEIGHT + SPACING;
+  let spot = at;
+  while (placed.some((p) => covers(p, spot)))
+    spot = { x: spot.x, y: spot.y + NODE_HEIGHT + SPACING };
+  return spot;
+}
+
 // responseCard is the card that ends the graph: what the workflow answers.
 // It goes after the rightmost step, level with the middle of them all, and
 // can be picked but not dragged, connected or deleted. The canvas adds it,

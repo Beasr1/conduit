@@ -276,14 +276,28 @@ func TestPublish(t *testing.T) {
 	}
 }
 
+// A definition's problems are the answer, so both come back with 200: an
+// empty list for a valid one, rather than a missing one.
 func TestValidate(t *testing.T) {
 	t.Parallel()
-	if r := call(t, http.MethodPost, "/v1/validate", validDef); r.status != http.StatusNoContent {
-		t.Errorf("valid = %d %s", r.status, r.body)
-	}
-	r := call(t, http.MethodPost, "/v1/validate", invalidDef)
-	if p := problemOf(t, r); r.status != 422 || pointers(p) != "/nodes/0/id invalid_id, /nodes/0/expr invalid_expression" {
-		t.Errorf("invalid = %d %+v", r.status, p)
+	for _, tt := range []struct{ name, def, want, body string }{
+		{"valid", validDef, "", `{"problems":[]}`},
+		{"invalid", invalidDef, "/nodes/0/id invalid_id, /nodes/0/expr invalid_expression", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := call(t, http.MethodPost, "/v1/validate", tt.def)
+			var v gen.Validation
+			if err := json.Unmarshal(r.body, &v); err != nil || r.status != http.StatusOK {
+				t.Fatalf("= %d %s", r.status, r.body)
+			}
+			if got := pointers(gen.Problem{Errors: v.Problems}); got != tt.want {
+				t.Errorf("problems %q, want %q", got, tt.want)
+			}
+			if tt.body != "" && strings.TrimSpace(string(r.body)) != tt.body {
+				t.Errorf("body %s, want %s", r.body, tt.body)
+			}
+		})
 	}
 }
 

@@ -437,6 +437,12 @@ type StartRun struct {
 	Revision int `json:"revision,omitempty,omitzero"`
 }
 
+// Validation defines model for Validation.
+type Validation struct {
+	// Problems Everything wrong with the definition. Empty when it can be published.
+	Problems []ProblemError `json:"problems"`
+}
+
 // Workflow defines model for Workflow.
 type Workflow struct {
 	CreatedAt      time.Time `json:"created_at"`
@@ -1699,12 +1705,18 @@ type ValidateDefinitionResponseObject interface {
 	VisitValidateDefinitionResponse(w http.ResponseWriter) error
 }
 
-type ValidateDefinition204Response struct {
-}
+type ValidateDefinition200JSONResponse Validation
 
-func (response ValidateDefinition204Response) VisitValidateDefinitionResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
+func (response ValidateDefinition200JSONResponse) VisitValidateDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type ValidateDefinition401ApplicationProblemPlusJSONResponse struct {

@@ -139,7 +139,7 @@ All under the bearer token (D12) except the two health checks.
 | `PUT /v1/workflows/{id}/draft` | save the next revision. `If-Match` must name the latest revision; the response's `ETag` names the new one | `412`, `428` without `If-Match` |
 | `GET /v1/workflows/{id}/revisions[/{rev}]` | the history, or one revision | |
 | `POST /v1/workflows/{id}/publish` | `{revision}`; the revision must be valid | `422` with every problem |
-| `POST /v1/validate` | check a definition without saving it (the agent's `validate` tool in 08) | `422` |
+| `POST /v1/validate` | check a definition without saving it (the agent's `validate` tool in 08): `200` with its problems, an empty list when there are none. Built as `204` or `422`; changed in plan 04, since the editor checks as you type and the browser logged each `422` as a failed request | `422` when the body isn't a definition |
 | `POST /v1/workflows/{id}/runs` | `{revision?, input}` → `202`, `Location: /v1/runs/{id}`. Runs in the background | `422` invalid revision, `400` bad input, `503` at the cap |
 | `GET /v1/runs`, `GET /v1/runs/{id}` | runs, newest first; one run with every node result | |
 | `GET /v1/runs/{id}/events` | the live event stream (SSE) | |

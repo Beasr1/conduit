@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { setField } from "@/features/editor/edits";
+import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
 import { readSchema, showSchema } from "@/features/editor/fields";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 
@@ -32,6 +33,12 @@ export function JsonField({
     showSchema(editor.getState().draft[field]),
   );
   const { schema, error } = readSchema(text);
+  // The field's own check is about text that doesn't count yet; the
+  // server's, about the schema the workflow holds.
+  const found = useProblems(
+    (p) => (p.on === "response" || p.on === "settings") && p.field === field,
+  );
+  const said = error === undefined ? asErrors(found) : [{ message: error }];
 
   function change(next: string) {
     setText(next);
@@ -40,7 +47,7 @@ export function JsonField({
   }
 
   return (
-    <Field data-invalid={error !== undefined}>
+    <Field data-invalid={said.length > 0}>
       <div className="flex items-center justify-between gap-2">
         <FieldLabel htmlFor={id}>{label}</FieldLabel>
         <Button
@@ -57,11 +64,11 @@ export function JsonField({
         id={id}
         className="min-h-32 font-mono"
         spellCheck={false}
-        aria-invalid={error !== undefined}
+        aria-invalid={said.length > 0}
         value={text}
         onChange={(e) => change(e.target.value)}
       />
-      <FieldError>{error}</FieldError>
+      <FieldError errors={said} />
       <FieldDescription>{description}</FieldDescription>
     </Field>
   );

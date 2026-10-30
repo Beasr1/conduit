@@ -79,6 +79,11 @@ const MAX_TIMEOUT_MS = 300_000;
 export const MIN_ATTEMPTS = 2;
 export const MAX_ATTEMPTS = 5;
 
+// What a timeout and a number of attempts must be, as the form and the
+// server's problems say it.
+export const TIMEOUT_RULE = `A whole number of milliseconds, from 1 to ${MAX_TIMEOUT_MS}.`;
+export const ATTEMPTS_RULE = `A whole number from ${MIN_ATTEMPTS} to ${MAX_ATTEMPTS}.`;
+
 // An http step's request as its form holds it: numbers as the text typed,
 // maps as rows.
 export interface RequestValues {
@@ -111,15 +116,12 @@ export const requestSchema = z.object({
   body: z.string(),
   timeout: z
     .string()
-    .refine(
-      (t) => whole(t, 1, MAX_TIMEOUT_MS) !== null,
-      `A whole number of milliseconds, from 1 to ${MAX_TIMEOUT_MS}.`,
-    ),
+    .refine((t) => whole(t, 1, MAX_TIMEOUT_MS) !== null, TIMEOUT_RULE),
   attempts: z
     .string()
     .refine(
       (t) => whole(t, MIN_ATTEMPTS, MAX_ATTEMPTS) !== null,
-      `A whole number from ${MIN_ATTEMPTS} to ${MAX_ATTEMPTS}.`,
+      ATTEMPTS_RULE,
     ),
   idempotent: z.boolean(),
 });

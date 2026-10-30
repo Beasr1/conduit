@@ -23,6 +23,8 @@ export default defineConfig({
         target: "http://127.0.0.1:8080",
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+      // Served workflows, at the address the editor shows once published.
+      "/serve": { target: "http://127.0.0.1:8080" },
     },
   },
   test: {

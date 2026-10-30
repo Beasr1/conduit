@@ -1,10 +1,9 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, test } from "vitest";
 
-import { Editor } from "@/features/editor/components/editor";
+import { renderEditor } from "@/test/editor";
 import { specExample } from "@/test/fixtures";
 import { shimReactFlow } from "@/test/react-flow";
-import { renderAt } from "@/test/render";
 // For its cleanup between tests, and to fail on any request the editor makes.
 import "@/test/server";
 
@@ -20,7 +19,7 @@ async function close() {
 }
 
 test("picking a connection opens its condition, and a condition labels it", async () => {
-  renderAt(<Editor definition={specExample} />);
+  renderEditor(specExample);
   fireEvent.click(await screen.findByTestId("rf__edge-prefs->crm"));
   const panel = await screen.findByRole("complementary", {
     name: "Connection",
@@ -36,9 +35,7 @@ test("picking a connection opens its condition, and a condition labels it", asyn
 });
 
 test("the response card says what the output reads, and opens it", async () => {
-  renderAt(
-    <Editor definition={{ ...specExample, output: "nodes.crm.body" }} />,
-  );
+  renderEditor({ ...specExample, output: "nodes.crm.body" });
   expect(await screen.findByText("Reads crm")).toBeTruthy();
   fireEvent.click(screen.getByText("Response"));
   const panel = await screen.findByRole("complementary", { name: "Response" });
@@ -54,7 +51,7 @@ test("the response card says what the output reads, and opens it", async () => {
 });
 
 test("the input schema is kept once it's a JSON object", async () => {
-  renderAt(<Editor definition={specExample} />);
+  renderEditor(specExample);
   const open = async () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Workflow settings" }),
@@ -88,7 +85,7 @@ test("the input schema is kept once it's a JSON object", async () => {
 });
 
 test("picking a step while the workflow's settings are open shows the step", async () => {
-  renderAt(<Editor definition={specExample} />);
+  renderEditor(specExample);
   fireEvent.click(
     await screen.findByRole("button", { name: "Workflow settings" }),
   );

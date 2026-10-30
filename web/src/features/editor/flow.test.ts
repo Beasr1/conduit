@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import {
   type Flow,
+  freeSpot,
   NODE_HEIGHT,
   NODE_WIDTH,
   responseCard,
@@ -144,4 +145,21 @@ test("a cycle still lays out", () => {
     ],
   });
   expect(at(flow, "a")).not.toEqual(at(flow, "b"));
+});
+
+test("a new node goes below the middle until it covers no other", () => {
+  const placed = [
+    { x: 0, y: 0 },
+    { x: 0, y: NODE_HEIGHT + 24 },
+  ];
+  // On top of both, it moves down past them.
+  expect(freeSpot({ x: 10, y: 10 }, placed)).toEqual({
+    x: 10,
+    y: 10 + 2 * (NODE_HEIGHT + 24),
+  });
+  // Clear of them, it stays.
+  expect(freeSpot({ x: NODE_WIDTH + 24, y: 0 }, placed)).toEqual({
+    x: NODE_WIDTH + 24,
+    y: 0,
+  });
 });

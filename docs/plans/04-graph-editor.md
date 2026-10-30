@@ -2,8 +2,9 @@
 
 Status: accepted 2026-10-28, with all seven questions answered (Answers, at
 the end); D10, D11 and D13 accepted with it, and D14 waits for 07. Phase A
-is committed (69bb36e), and Phase B is in progress. Building Phase A
-raised question 8, since answered.
+is committed (69bb36e), and Phase B is built; its last step, save, problems
+and publish, is not committed yet (2026-10-30). Building Phase A raised
+question 8, since answered.
 
 ## Goal
 
@@ -81,8 +82,10 @@ Also seen:
   it's never copied into the store.
 - **A refetch never touches the draft.** The store is seeded once, when a
   workflow's revision is opened, never by an effect that watches query
-  data. The open revision isn't refetched under the editor: revisions are
-  immutable, so its query never goes stale.
+  data. The plan said the open revision is never refetched; it is, since the
+  workflow's query is its latest revision and refetches like any other (when
+  the window regains focus). The editor ignores it, and since step 4 a
+  refetch that fails keeps the editor on screen.
 - Canvas nodes don't fetch: a node component reads what it draws from the
   store, through a selector. Every handle has an id, since an edge names
   the handle it joins. Derived nodes are never mirrored into state by an
@@ -121,18 +124,20 @@ Also seen:
   immutable revision, and autosave would make hundreds.
 - Saves send `If-Match` with the revision the draft started from. A `412`
   means another tab, or later an agent, saved first; the editor offers to
-  load the newer revision.
+  load the newer revision, or, as built, to save anyway (Decided with you,
+  2026-10-30).
 - **Problems** come back with every save, each with a JSON Pointer. The
   editor maps a pointer to its node and field (`/nodes/2/request/url` is
   node 2's URL field), marks the node on the canvas, and shows the detail
-  under the field. Question 6 asks whether to check as you type too.
+  under the field. Question 6 asked whether to check as you type too:
+  yes (answer 6).
   - The mapping is a pure function, tested on every pointer shape the
     validator produces.
   - A save's errors go to the fields, not to a toast as well. The save
     tells the global error toast to stay quiet (TanStack Query's `meta`),
     so one failure doesn't show twice.
 - Publishing a revision with problems is refused by the server; the button
-  says why.
+  says why. As built, Publish opens the list of problems instead.
 
 **Runs.**
 - Run asks for an input (a JSON field, checked by the server against the
@@ -289,22 +294,27 @@ Found along the way:
 - [x] Nodes, edges, forms, the workflow's settings (input schema, output).
       The canvas draws the draft; nodes can be dragged, connected (a cycle
       refused as you drop it), deleted and added; a side panel edits what's
-      picked: a step (3c), a connection's condition, or the response card's
+      picked: a step (3c; an HTTP step's in Request and Response tabs), a
+      connection's condition, or the response card's
       output and output schema; a button opens the workflow's settings,
       the input schema (3d). Plan 11's brief applies: text on screen says
       "step" and "connection"; a step's name and the look wait for 11, and
       building from the keyboard for page mode (05).
-- [ ] Save with `If-Match`, problems on fields, publish.
+- [x] Save with `If-Match`, problems on fields (a tab hiding one is
+      marked), publish. Problems are checked as you type and listed behind
+      a button (step 4).
 
 **Phase C: runs**
 - [ ] `lib/events.ts` and its tests.
-- [ ] Run with an input, live statuses, node inspection, the run history.
+- [ ] Run with an input, live statuses, node inspection (a step's last
+      response in its Response tab), the run history.
 
 **Phase D: previews**
 - [ ] Samples: an optional `sample` on http steps (`status`, `headers`,
       `body`) and a sample input on the definition, in
       `schema/workflow.yaml`. Real runs ignore them, as they ignore `ui`;
-      each is capped in size.
+      each is capped in size. A step's sample is edited in its Response
+      tab.
 - [ ] `POST /v1/preview` simulates: each http step's sample stands in for
       its response, the transforms before the step are evaluated over
       them, then the expression. The last run's real responses are the
@@ -423,7 +433,7 @@ tried.
   refuses any cookie write that isn't `same-origin`. Ours stays, being the
   stricter.
 
-## Phase B, as built (so far)
+## Phase B, as built
 
 Decided with you:
 - **Positions are stored**, in the definition's `ui` block, as `{x, y}`. Not
@@ -458,6 +468,39 @@ Decided with you:
   already does (`server/internal/engine/run.go:262`). Reading only what
   points into it would make the arrows carry the data, at the cost of long
   extra arrows; Step Functions moved the other way in 2024 (sources.md).
+- **An HTTP step's panel has Request and Response tabs** (2026-10-28),
+  after a field called only "Body" left you unsure whether it was sent or
+  received. The Response tab says how the steps after it read
+  `nodes.<id>.status`, `.headers` and `.body`; phase C's last response and
+  phase D's sample go there too. Headings on one scroll were the other
+  option, with the response below the fold on a laptop; renaming the field
+  was the third.
+- **A step's sample response stays in phase D** (confirmed 2026-10-28),
+  arriving with the previews it feeds.
+- **Publish puts what's on screen live** (2026-10-30): unsaved changes are
+  saved first, as Run will; a draft with problems isn't sent. "Save first",
+  two clicks, and publishing the last saved revision were the other options.
+- **Problems are listed behind a button** (2026-10-30): "2 problems" beside
+  Save opens them in the side panel, and each entry opens what it's in. A
+  strip under the canvas, or marks with no list, were the other options.
+- **The editor words problems itself** (2026-10-30), by their code and
+  place, in the screen's words ("Add a URL."), and shows the server's detail
+  where that's the specific part: a JSONata syntax error, which URL rule
+  broke. The server's text says "node" and "/nodes/0"; showing it, or
+  rewording it on the server, were the other options.
+- **A newer revision can be loaded or saved over** (2026-10-30). The plan
+  offered only loading. Saving anyway makes this draft the next revision,
+  and the other stays in the history, since revisions are immutable.
+- **After a save the editor stays as it is** (2026-10-30, your "continue"
+  after I recommended it): the new revision is the next save's base, and
+  the open panel, tab and picked step stay. Reloading the saved revision was
+  the other option.
+- **Tests open the editor through one helper**, `renderEditor` in
+  `web/src/test/editor.tsx` (2026-10-30), extracted before step 4 changed
+  the editor's props, rather than patching 18 copies of the call.
+- **The look waits** (2026-10-30). After step 4 comes a "v0": the editor
+  working, and which elements each screen will have, with no visual design,
+  which stays plan 11's. What v0 covers is agreed once step 4 is in.
 
 Decided while building, without a question (each can be overruled):
 - **No `toDefinition`.** The draft is the one source: edits change it, and
@@ -585,6 +628,126 @@ while building:
 - Checked in Chromium through nginx: the card after crm, a connection's
   "if", the output's "Reads user, crm", the settings' Format, Backspace on
   the toolbar, light and dark, with no CSP violations and no console errors.
+
+Request and Response tabs (after 3d). The tabs were your choice; the rest
+was decided while building:
+- **The Request tab stays mounted while hidden** (`keepMounted`), so text
+  that doesn't count yet, such as `30s` in Timeout, survives a switch.
+- **An arrow key opens the tab it reaches** (`activateOnFocus`), as the
+  WAI-ARIA tabs pattern recommends when panels show at once (sources.md).
+  Base UI's default waits for Enter or Space.
+- **The open panel shows focus.** It's in the tab order, as the pattern
+  asks when a panel doesn't start with a control, and shadcn's copy had
+  `outline-none`; `components/ui/tabs.tsx` now draws the ring.
+- **Picking a step opens its Request tab**: the tabs are keyed by the
+  step's place, like its fields.
+- **The panel being left hides at once** (`data-ending-style:hidden`).
+  Base UI keeps it on screen while it might animate out, and right after a
+  click Chromium showed both panels together; nothing animates them.
+- **The id's hint says what the id is in expressions**: "In expressions,
+  this step is `nodes.crm`." It said "Other steps read its result as
+  nodes.crm.body", which is wrong for an HTTP step, whose response has a
+  status and headers too. The add-step dialog said the same and changed
+  with it.
+- A transform's field now says the steps after it read its value as
+  `nodes.<id>.body`.
+- Checked in Chromium through nginx: both tabs, the Response text, `30s`
+  kept in Timeout across a switch, ArrowRight, Tab to the panel with its
+  ring drawn, Backspace and Delete on a tab, one panel in every frame of a
+  switch, the transform's line and the dialog's, light and dark, with no
+  CSP violations and no console errors.
+
+Save, problems and publish (step 4). The choices dated 2026-10-30 above
+were yours; the rest was decided while building:
+- **Problems are checked as you type** (answer 6): the draft goes to
+  `POST /v1/validate` once it has stood still for 500 ms, through TanStack
+  Query keyed by the draft itself, so a draft is never checked twice. The
+  last check stands until a newer one comes back, starting with the opened
+  revision's problems. The check's result reaches the editor by React
+  context, not the store (web.md: server data never goes into Zustand). A
+  check that fails says "Couldn't check for problems" beside the revision.
+- **A problem stays on what it's about.** Its pointer is placed in the draft
+  as it is now: a step is followed by its id, a connection by the steps it
+  joins, so deleting an earlier step doesn't move a problem onto its
+  neighbour. Once what it's about changes, such as the field's text, it
+  goes, and the next check says whether it's still wrong. Found in
+  Chromium: a cleared condition kept its mark for as long as editing went
+  on elsewhere, since the next check waits for a pause.
+- **Where problems show:** the message under its field, after the field's
+  own check, which is about text that doesn't count yet; a red border and a
+  mark on its step; "problem" in its connection's label; a mark on the
+  response card, the Workflow settings button and the Request tab; at the
+  top of a step's or connection's panel when no field holds it; and all of
+  them in the list, steps first. A mark is an icon with words for screen
+  readers ("Request (1 problem)"), since colour alone isn't a signal.
+- **A connection whose end names no step** can be removed from the list. The
+  canvas can't draw it, so it can't be opened (Decided while building,
+  above: a draft saved with problems still draws).
+- **The words** live in `web/src/features/editor/problems.ts`, by code. The
+  id, timeout and attempts rules are shared with the forms (`ID_RULE`,
+  `TIMEOUT_RULE`, `ATTEMPTS_RULE`), so a field and a problem say the same
+  thing. A schema error shows the line of the compiler's report that says
+  what's wrong; the report opens with the schema's made-up base URL.
+- **Save** is a button, and Ctrl-S or Cmd-S wherever the focus is. It's
+  disabled while nothing has changed since the last save or the opening,
+  compared as JSON. The line under the name says "Unsaved changes",
+  "Saving…", "Saved", or "Not saved." with the reason; the save is quiet,
+  so there's no toast as well. Save anyway asks for the latest revision's
+  number, then saves on it.
+- **Publish**, with unsaved changes, saves first. When the last check was of
+  this very draft and found problems, it opens the list and sends nothing; a
+  `422` from the server opens the list too. It reads "Published" while the
+  open revision is the served one, and the line under the name says
+  "Revision 4 is served at <URL>", or "Not published. Publishing serves it
+  at <URL>".
+- **Leaving with unsaved changes asks first:** another page in the app
+  through a dialog (React Router's `useBlocker`), and closing or reloading
+  the tab through the browser's own (`beforeunload`, listened for only
+  while there are unsaved changes).
+- **The name and the buttons moved into the editor**, which knows the save
+  state. **A refetch that fails no longer replaces the editor** with
+  "Couldn't load it.": the page shows that only when it has no workflow at
+  all. Latent since Phase A, as the workflow's query refetches when the
+  window regains focus. **Load newer revision** opens the editor afresh.
+- **`workflowKeys` moved to `web/src/lib/query-keys.ts`**, as web.md says
+  code does once a second feature needs it: the editor updates the workflow
+  it saves and publishes.
+- **Vite's dev server forwards `/serve`**, as nginx does, so the served URL
+  the editor shows works under `just dev` too.
+- **The store's settings flag became a panel** (`settings` or `problems`),
+  and `show()` picks what a problem is in.
+- Checked in Chromium through nginx, light and dark, on a new
+  `pw-step4-…` workflow: a problem as it's typed, under the URL, on crm, on
+  its Request tab and in the list, and the list opening crm; a bad
+  condition labelled "if · problem", gone at once when cleared; Ctrl-S; a
+  save after another tab saved, then Save anyway; Publish and its served
+  URL; leaving asks, and Stay stays; closing the tab asks. No CSP
+  violations. The console's only lines are the browser's own "Failed to
+  load resource" for each `422` and `412`.
+
+After step 4, what it noticed, fixed at your ask (2026-10-30):
+- **`POST /v1/validate` answers `200` with the problems**, an empty list when
+  there are none, rather than `204` or `422`: problems are its answer, not
+  an error. The browser had logged every check that found one as a failed
+  request. A body that isn't a definition at all is still refused with
+  `422`. Plan 03's endpoint table says so.
+- **Ctrl-S in the Id field saves the id typed there.** The id applies when the
+  field is left, on Enter, and now on Ctrl-S or Cmd-S too, checked at once
+  rather than through the form, so the save that follows has it. The save
+  reads the draft as it is at that moment, not as the header last drew it.
+- **An entry in the problems list puts the cursor in its field**, a header or
+  parameter by its row, once its panel is drawn.
+- **A new step lands clear of the others**: from the middle of the view, it
+  moves down a step's height at a time until it covers none.
+- **The rename warning sets `nodes.<id>` in the code font.**
+- **The Response tab says a header name with a hyphen goes in backticks**,
+  as in ``nodes.crm.headers.`content-type` ``. Checked on the engine first:
+  with backticks a served transform read `application/json`; without them
+  JSONata read `content-type` as a subtraction, and the run failed with "the
+  expression gave no value".
+- **The checks' throwaway workflows** (`pw-` slugs) weren't deleted: the
+  permission check refused the delete, as it can't be undone. The SQL is
+  for you to run.
 
 ## Out of scope
 

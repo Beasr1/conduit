@@ -266,6 +266,7 @@ paths:
     post:
       operationId: validateDefinition
       summary: Check a definition without saving it
+      description: Problems in the definition are the answer, not an error, so they come back with 200. A body that isn't a definition at all, with a field one doesn't have or a value of the wrong type, is refused with 422.
       requestBody:
         required: true
         content:
@@ -273,8 +274,12 @@ paths:
             schema:
               $ref: "./workflow.yaml#/components/schemas/Definition"
       responses:
-        "204":
-          description: The definition has no problems.
+        "200":
+          description: What's wrong with the definition.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Validation"
         "401":
           $ref: "#/components/responses/Problem"
         "422":
@@ -592,6 +597,16 @@ components:
         created_at:
           type: string
           format: date-time
+
+    Validation:
+      type: object
+      required: [problems]
+      properties:
+        problems:
+          type: array
+          description: Everything wrong with the definition. Empty when it can be published.
+          items:
+            $ref: "#/components/schemas/ProblemError"
 
     RevisionSummary:
       type: object

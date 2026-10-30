@@ -13,6 +13,12 @@ type Position = components["schemas"]["Position"];
 // decides.
 export const NODE_ID = /^[a-z][a-z0-9_]{0,63}$/;
 
+// What an id must be, and why one is refused, as the forms and the server's
+// problems say it.
+export const ID_RULE =
+  "A lowercase letter, then up to 63 lowercase letters, digits and underscores.";
+export const ID_TAKEN = "Another step already has this id.";
+
 // Each edit takes the draft and returns a new one, leaving its input as it
 // was, so the store can tell a change by identity.
 

@@ -133,6 +133,12 @@
   .base-ui-disable-scrollbar::-webkit-scrollbar {
     display: none;
   }
+  /* A connection with problems takes the problem colour. Its label says
+     "problem" too, since colour alone isn't a signal. */
+  .react-flow__edge.problem {
+    --xy-edge-stroke: var(--destructive);
+    --xy-edge-label-color: var(--destructive);
+  }
   * {
     @apply border-border outline-ring/50;
   }

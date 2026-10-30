@@ -40,7 +40,7 @@ review; duplicates creep in one PR at a time.
 web/src/
   main.tsx
   router.tsx             route table + route builders (routes.workflow(id))
-  lib/                   api.ts, query-client.ts, problems.ts
+  lib/                   api.ts, query-client.ts, query-keys.ts, problems.ts
   gen/                   generated from schema/, never edited
   components/ui/         shadcn components (our code, edit freely)
   components/            app-wide composites
@@ -85,7 +85,8 @@ the API is `/api` on the page's own origin.
 - All server data goes through TanStack Query. No `fetch` inside
   `useEffect`.
 - Query keys come from one factory per resource (`workflowKeys.detail(id)`).
-  No inline key arrays.
+  No inline key arrays. A factory two features use lives in
+  `lib/query-keys.ts`.
 - There is one API client, in `lib/api.ts`:
   - requests go to `/api` on the page's own origin, which nginx and Vite's
     dev proxy forward to the server;
@@ -137,6 +138,19 @@ the API is `/api` on the page's own origin.
   Delete or Backspace anywhere but in a text field, buttons included.
 - Blocking cycles in the UI (`isValidConnection`) is only for UX. Server
   validation is the source of truth.
+- The server's problems with the draft reach the editor through React
+  context, never the store, and components read them through selectors
+  (`useProblems`, `useProblemCount`), so a step redraws only when its own
+  problems change. A problem is placed in the draft as it is now, and goes
+  once what it's about has changed; the next check, when the draft has
+  stood still for a moment, says again.
+- The editor words problems itself, by code (`features/editor/problems.ts`),
+  in the screen's words; the server's detail shows where it's the specific
+  part. A mark for problems is an icon with words for screen readers
+  (`ProblemMark`), never colour alone.
+- Leaving with unsaved changes asks first: `useBlocker` for pages in the
+  app, and `beforeunload`, added only while there are unsaved changes, for
+  closing the tab.
 - JSONata preview calls the server's preview endpoint, which simulates the
   steps before the expression over their samples, or uses the last run's
   responses. The `jsonata` npm package never runs in the browser, because
@@ -160,6 +174,10 @@ the API is `/api` on the page's own origin.
   jsdom has no CSP, so a violation only shows in the browser.
 - Add primitives with the shadcn CLI and then adapt them. Don't hand-roll
   them.
+- A tab opens as an arrow key reaches it (`activateOnFocus`), as the
+  WAI-ARIA tabs pattern recommends when panels show at once. A tab holding a
+  form stays mounted while hidden (`keepMounted`), so text that doesn't
+  count yet survives a switch.
 - A link that looks like a button is a `Link` styled with
   `buttonVariants()`. A `Button` rendering a link would be announced as a
   button.

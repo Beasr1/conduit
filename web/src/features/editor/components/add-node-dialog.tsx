@@ -21,8 +21,13 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { addNode, NODE_ID } from "@/features/editor/edits";
-import { NODE_HEIGHT, NODE_WIDTH } from "@/features/editor/flow";
+import { addNode, ID_RULE, ID_TAKEN, NODE_ID } from "@/features/editor/edits";
+import {
+  freeSpot,
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  toFlow,
+} from "@/features/editor/flow";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 import type { components } from "@/gen/schema";
 
@@ -44,7 +49,8 @@ const kinds = {
 };
 
 // AddNodeDialog asks for the new node's id, which expressions use to read
-// its result, and puts the node in the middle of what the canvas shows.
+// its result, and puts the node in the middle of what the canvas shows, or
+// below that, clear of the nodes already there.
 export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
   const [open, setOpen] = useState(false);
   const editor = useEditorStore();
@@ -56,13 +62,10 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
     z.object({
       id: z
         .string()
-        .regex(
-          NODE_ID,
-          "A lowercase letter, then up to 63 lowercase letters, digits and underscores.",
-        )
+        .regex(NODE_ID, ID_RULE)
         .refine(
           (id) => !editor.getState().draft.nodes.some((n) => n.id === id),
-          "Another step already has this id.",
+          ID_TAKEN,
         ),
     }),
   );
@@ -81,7 +84,8 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
       x: (width / 2 - x) / zoom - NODE_WIDTH / 2,
       y: (height / 2 - y) / zoom - NODE_HEIGHT / 2,
     };
-    edit((d) => addNode(d, kinds[kind].fresh(id), middle));
+    const placed = toFlow(editor.getState().draft).nodes.map((n) => n.position);
+    edit((d) => addNode(d, kinds[kind].fresh(id), freeSpot(middle, placed)));
     setOpen(false);
     form.reset();
   }
@@ -103,7 +107,8 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
         <DialogHeader>
           <DialogTitle>Add {label}</DialogTitle>
           <DialogDescription>
-            Other steps read its result as nodes.&lt;id&gt;.body, so give it an
+            In expressions, a step is{" "}
+            <span className="font-mono">nodes.&lt;id&gt;</span>, so give it an
             id that says what it does.
           </DialogDescription>
         </DialogHeader>

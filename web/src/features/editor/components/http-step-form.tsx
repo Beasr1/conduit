@@ -41,6 +41,11 @@ import {
   toRequestValues,
   whole,
 } from "@/features/editor/fields";
+import {
+  asErrors,
+  atStep,
+  useProblems,
+} from "@/features/editor/hooks/use-problems";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 
 // HttpStepForm edits an http step's request. Each change goes into the draft
@@ -71,13 +76,30 @@ export function HttpStepForm({ index }: { index: number }) {
     [form, edit, index],
   );
   const { errors } = form.formState;
+  // What the step holds, as the server found it. A field's own check comes
+  // first where it has one: it's about text that doesn't count yet.
+  const found = {
+    method: useProblems(atStep(index, "method")),
+    url: useProblems(atStep(index, "url")),
+    body: useProblems(atStep(index, "body")),
+    timeout: useProblems(atStep(index, "timeout")),
+    attempts: useProblems(atStep(index, "attempts")),
+    idempotent: useProblems(atStep(index, "idempotent")),
+  };
+  const said = {
+    url: asErrors([...found.method, ...found.url]),
+    body: asErrors(found.body),
+    timeout: errors.timeout ? [errors.timeout] : asErrors(found.timeout),
+    attempts: errors.attempts ? [errors.attempts] : asErrors(found.attempts),
+    idempotent: asErrors(found.idempotent),
+  };
   const attempts = useWatch({ control: form.control, name: "attempts" });
   const retries =
     typeof whole(attempts, MIN_ATTEMPTS, MAX_ATTEMPTS) === "number";
 
   return (
     <FieldGroup className="gap-5">
-      <Field>
+      <Field data-invalid={said.url.length > 0}>
         <FieldLabel htmlFor="step-url">URL</FieldLabel>
         <div className="flex gap-2">
           <Controller
@@ -88,7 +110,12 @@ export function HttpStepForm({ index }: { index: number }) {
                 value={field.value}
                 onValueChange={(method) => field.onChange(method)}
               >
-                <SelectTrigger aria-label="Method" className="font-mono">
+                <SelectTrigger
+                  id="step-method"
+                  aria-label="Method"
+                  aria-invalid={found.method.length > 0}
+                  className="font-mono"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -107,52 +134,68 @@ export function HttpStepForm({ index }: { index: number }) {
             autoComplete="off"
             spellCheck={false}
             placeholder="https://api.example.com/v1/users"
+            aria-invalid={found.url.length > 0}
             {...form.register("url")}
           />
         </div>
+        <FieldError errors={said.url} />
         <FieldDescription>
           Absolute, http or https. {"{{ }}"} holds JSONata, in the path and
           query only.
         </FieldDescription>
       </Field>
-      <Rows form={form} name="headers" noun="Header" legend="Headers" />
-      <Rows form={form} name="query" noun="Parameter" legend="Query" />
-      <Field>
+      <Rows
+        form={form}
+        index={index}
+        name="headers"
+        noun="Header"
+        legend="Headers"
+      />
+      <Rows
+        form={form}
+        index={index}
+        name="query"
+        noun="Parameter"
+        legend="Query"
+      />
+      <Field data-invalid={said.body.length > 0}>
         <FieldLabel htmlFor="step-body">Body</FieldLabel>
         {/* TODO(plan 10): a JSONata editor replaces this textarea. */}
         <Textarea
           id="step-body"
           className="min-h-24 font-mono"
           spellCheck={false}
+          aria-invalid={said.body.length > 0}
           {...form.register("body")}
         />
+        <FieldError errors={said.body} />
         <FieldDescription>
           JSONata, sent as the JSON body. Empty sends none.
         </FieldDescription>
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field data-invalid={!!errors.timeout}>
+        <Field data-invalid={said.timeout.length > 0}>
           <FieldLabel htmlFor="step-timeout">Timeout (ms)</FieldLabel>
           <Input
             id="step-timeout"
             inputMode="numeric"
             placeholder="30000"
-            aria-invalid={!!errors.timeout}
+            aria-invalid={said.timeout.length > 0}
             {...form.register("timeout")}
           />
-          <FieldError errors={[errors.timeout]} />
+          <FieldError errors={said.timeout} />
           <FieldDescription>For each attempt.</FieldDescription>
         </Field>
-        <Field data-invalid={!!errors.attempts}>
+        <Field data-invalid={said.attempts.length > 0}>
           <FieldLabel htmlFor="step-attempts">Attempts</FieldLabel>
           <Input
             id="step-attempts"
             inputMode="numeric"
             placeholder="1"
-            aria-invalid={!!errors.attempts}
+            aria-invalid={said.attempts.length > 0}
             {...form.register("attempts")}
           />
-          <FieldError errors={[errors.attempts]} />
+          <FieldError errors={said.attempts} />
           <FieldDescription>
             The first included. Retries follow timeouts, transport errors, 429
             and 5xx.
@@ -178,6 +221,7 @@ export function HttpStepForm({ index }: { index: number }) {
             The upstream treats a repeat as one request, so POST and PATCH are
             retried too, with an Idempotency-Key header.
           </FieldDescription>
+          <FieldError errors={said.idempotent} />
         </FieldContent>
       </Field>
     </FieldGroup>
@@ -185,14 +229,18 @@ export function HttpStepForm({ index }: { index: number }) {
 }
 
 // Rows edits a map as rows. Each row is keyed by the id its field array gave
-// it, not its place, so removing one leaves the others' text alone.
+// it, not its place, so removing one leaves the others' text alone. The
+// server names a header or parameter by its name, so its problems go under
+// the first row with that name, and under the legend when no row has it.
 function Rows({
   form,
+  index,
   name,
   noun,
   legend,
 }: {
   form: UseFormReturn<RequestValues>;
+  index: number;
   name: "headers" | "query";
   noun: string;
   legend: string;
@@ -202,43 +250,66 @@ function Rows({
     name,
   });
   const errors = form.formState.errors[name];
+  const rows = useWatch({ control: form.control, name });
+  const found = useProblems(atStep(index, name));
+  const named = (row: string) =>
+    found.filter((f) => f.place.on === "step" && f.place.name === row);
+  const first = (i: number) =>
+    rows.findIndex((r) => r.name === rows[i]?.name) === i;
+  const homeless = found.filter(
+    (f) => !rows.some((r) => f.place.on === "step" && f.place.name === r.name),
+  );
   const lower = noun.toLowerCase();
   return (
     <FieldSet className="gap-2">
       <FieldLegend variant="label">{legend}</FieldLegend>
-      {fields.map((row, i) => (
-        <div key={row.id} className="flex flex-col gap-1">
-          <div className="flex gap-2">
-            <Input
-              aria-label={`${noun} ${i + 1} name`}
-              placeholder="Name"
-              className="font-mono"
-              autoComplete="off"
-              spellCheck={false}
-              aria-invalid={!!errors?.[i]?.name}
-              {...form.register(`${name}.${i}.name`)}
+      <FieldError errors={asErrors(homeless)} />
+      {fields.map((row, i) => {
+        const mine = first(i) ? named(rows[i]?.name ?? "") : [];
+        const badName =
+          !!errors?.[i]?.name ||
+          mine.some((f) => f.code === "invalid_header_name");
+        return (
+          <div key={row.id} className="flex flex-col gap-1">
+            <div className="flex gap-2">
+              <Input
+                id={`step-${name}-${i}-name`}
+                aria-label={`${noun} ${i + 1} name`}
+                placeholder="Name"
+                className="font-mono"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={badName}
+                {...form.register(`${name}.${i}.name`)}
+              />
+              <Input
+                id={`step-${name}-${i}-value`}
+                aria-label={`${noun} ${i + 1} value`}
+                placeholder="Value"
+                className="font-mono"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={mine.some(
+                  (f) => f.code !== "invalid_header_name",
+                )}
+                {...form.register(`${name}.${i}.value`)}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Remove ${lower} ${i + 1}`}
+                onClick={() => remove(i)}
+              >
+                <XIcon />
+              </Button>
+            </div>
+            <FieldError
+              errors={errors?.[i]?.name ? [errors[i].name] : asErrors(mine)}
             />
-            <Input
-              aria-label={`${noun} ${i + 1} value`}
-              placeholder="Value"
-              className="font-mono"
-              autoComplete="off"
-              spellCheck={false}
-              {...form.register(`${name}.${i}.value`)}
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Remove ${lower} ${i + 1}`}
-              onClick={() => remove(i)}
-            >
-              <XIcon />
-            </Button>
           </div>
-          <FieldError errors={[errors?.[i]?.name]} />
-        </div>
-      ))}
+        );
+      })}
       <Button
         type="button"
         variant="outline"

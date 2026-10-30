@@ -1,10 +1,9 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, test } from "vitest";
 
-import { Editor } from "@/features/editor/components/editor";
+import { renderEditor } from "@/test/editor";
 import { specExample } from "@/test/fixtures";
 import { shimReactFlow } from "@/test/react-flow";
-import { renderAt } from "@/test/render";
 // For its cleanup between tests, and to fail on any request the editor makes.
 import "@/test/server";
 
@@ -15,7 +14,7 @@ function typeId(value: string) {
 }
 
 test("adds a step under the id it's given, checking the id as it's typed", async () => {
-  renderAt(<Editor definition={specExample} />);
+  renderEditor(specExample);
   fireEvent.click(await screen.findByRole("button", { name: "Add HTTP step" }));
 
   typeId("Fetch");

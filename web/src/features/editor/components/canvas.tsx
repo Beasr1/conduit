@@ -11,6 +11,7 @@ import { useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { AddNodeDialog } from "@/features/editor/components/add-node-dialog";
 import { nodeTypes } from "@/features/editor/components/nodes";
+import { ProblemMark } from "@/features/editor/components/problem-mark";
 import {
   canConnect,
   connect,
@@ -26,6 +27,10 @@ import {
   responseCard,
   toFlow,
 } from "@/features/editor/flow";
+import {
+  useProblemCount,
+  useProblems,
+} from "@/features/editor/hooks/use-problems";
 import { useEditor } from "@/features/editor/store";
 
 // The room kept between a picked step and the canvas's edge.
@@ -41,7 +46,7 @@ export function Canvas() {
   const drag = useEditor((s) => s.drag);
   const drop = useEditor((s) => s.drop);
   const pick = useEditor((s) => s.pick);
-  const openSettings = useEditor((s) => s.openSettings);
+  const openPanel = useEditor((s) => s.openPanel);
 
   const flow = useMemo(() => toFlow(draft), [draft]);
   // Only a node that's moving or selected gets a new object, so the rest
@@ -56,13 +61,30 @@ export function Canvas() {
     const on = selected.nodes.includes(RESPONSE);
     return [...steps, on ? { ...card, selected: true } : card];
   }, [flow, moving, selected.nodes]);
-  const edges = useMemo(
-    () =>
-      flow.edges.map((e): FlowEdge =>
-        selected.edges.includes(e.id) ? { ...e, selected: true } : e,
-      ),
-    [flow, selected.edges],
-  );
+  // A connection with problems is drawn in the problem colour, and its label
+  // says so in words too.
+  const troubled = useProblems((p) => p.on === "connection");
+  const edges = useMemo(() => {
+    const wrong = new Set(
+      troubled.map((f) => (f.place.on === "connection" ? f.place.index : -1)),
+    );
+    return flow.edges.map((e): FlowEdge => {
+      const on = selected.edges.includes(e.id);
+      const bad = e.data !== undefined && wrong.has(e.data.index);
+      if (!on && !bad) return e;
+      return {
+        ...e,
+        selected: on,
+        ...(bad
+          ? {
+              className: "problem",
+              label: e.label ? `${String(e.label)} · problem` : "problem",
+            }
+          : {}),
+      };
+    });
+  }, [flow, selected.edges, troubled]);
+  const settingsProblems = useProblemCount((p) => p.on === "settings");
 
   return (
     <ReactFlow<FlowNode, FlowEdge>
@@ -120,8 +142,13 @@ export function Canvas() {
       <Panel position="top-left" className="nokey flex gap-2">
         <AddNodeDialog kind="http" />
         <AddNodeDialog kind="transform" />
-        <Button variant="outline" size="sm" onClick={openSettings}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => openPanel("settings")}
+        >
           Workflow settings
+          {settingsProblems > 0 && <ProblemMark count={settingsProblems} />}
         </Button>
       </Panel>
       <KeepPickedInView />

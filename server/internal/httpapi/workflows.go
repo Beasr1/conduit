@@ -166,10 +166,7 @@ func (a *api) PublishWorkflow(ctx context.Context, req gen.PublishWorkflowReques
 }
 
 func (*api) ValidateDefinition(_ context.Context, req gen.ValidateDefinitionRequestObject) (gen.ValidateDefinitionResponseObject, error) {
-	if ps := problemsOf(req.Body); len(ps) > 0 {
-		return nil, invalidDefinition(ps, "The definition has problems.")
-	}
-	return gen.ValidateDefinition204Response{}, nil
+	return gen.ValidateDefinition200JSONResponse{Problems: problemsOf(req.Body)}, nil
 }
 
 func invalidDefinition(ps []gen.ProblemError, format string, args ...any) *problem {
