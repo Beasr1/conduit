@@ -97,7 +97,7 @@ test("an HTTP step's tabs are its blocks, and its 2xx says how the steps after r
     within(panel)
       .getAllByRole("tab")
       .map((t) => t.textContent),
-  ).toEqual(["Request", "2xx", "+ Response"]);
+  ).toEqual(["Request", "2xx", "+ Response", "Unhandled"]);
   expect(tab("Request").getAttribute("aria-selected")).toBe("true");
   type("Timeout (ms)", "30s");
 

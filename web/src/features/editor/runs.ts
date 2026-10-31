@@ -1,3 +1,4 @@
+import { UNHANDLED } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 
 type NodeEvent = components["schemas"]["NodeEvent"];
@@ -66,7 +67,8 @@ const failures: Record<RunError["code"], string> = {
 };
 
 // said is how a step went, in a few words: "201, 140 ms", "failed: timeout,
-// after 3 attempts", "skipped".
+// after 3 attempts", "skipped", or "Unhandled: 404" when its Unhandled
+// block took its failure.
 export function said(run: StepRun): string {
   const ms = run.ms === undefined ? "" : `, ${run.ms} ms`;
   switch (run.state) {
@@ -79,7 +81,8 @@ export function said(run: StepRun): string {
         run.attempts !== undefined && run.attempts > 1
           ? `, after ${run.attempts} attempts`
           : "";
-      return `failed${why === undefined ? "" : `: ${why}`}${tries}`;
+      const what = run.error?.caught ? "Unhandled" : "failed";
+      return `${what}${why === undefined ? "" : `: ${why}`}${tries}`;
     }
     case "retrying":
       return `retrying, attempt ${run.attempts ?? 2}`;
@@ -88,9 +91,9 @@ export function said(run: StepRun): string {
   }
 }
 
-// takenOf says whether a run took a line: its step succeeded with the
-// response the line leaves on (on, absent for 2xx and a transform's one),
-// and the step it leads to ran. It's undefined until both have got that
+// takenOf says whether a run took a line: its step answered through the
+// output the line leaves on (on, absent for 2xx and a transform's one, or
+// UNHANDLED), and the step it leads to ran. It's undefined until both have got that
 // far. The server doesn't record which lines it took, so a line whose
 // condition failed, into a step another line led on, counts as taken.
 // TODO(plan 04): the engine records the lines a run took, so this needn't
@@ -101,14 +104,21 @@ export function takenOf(
   to: StepRun,
 ): boolean | undefined {
   if (["waiting", "running", "retrying"].includes(from.state)) return undefined;
-  if (from.state !== "succeeded") return false;
-  const way =
-    from.status === undefined || (from.status >= 200 && from.status <= 299)
-      ? 0
-      : from.status;
-  if (way !== (on ?? 0)) return false;
+  const way = wayOf(from);
+  if (way === undefined || way !== (on ?? 0)) return false;
   if (to.state === "waiting") return undefined;
   return !["skipped", "not run"].includes(to.state);
+}
+
+// wayOf is the output a step that ended answered through: 0 for 2xx and a
+// transform's one, its status, or UNHANDLED when that block took its
+// failure. It's undefined when the step gave no answer.
+export function wayOf(run: StepRun): number | undefined {
+  if (run.state === "failed" && run.error?.caught) return UNHANDLED;
+  if (run.state !== "succeeded") return undefined;
+  return run.status === undefined || (run.status >= 200 && run.status <= 299)
+    ? 0
+    : run.status;
 }
 
 // took is a time in words: milliseconds under a second, else seconds.

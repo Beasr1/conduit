@@ -499,6 +499,8 @@ export interface components {
             detail: string;
             /** @description On a run's error, the node that failed it. */
             node?: string;
+            /** @description On a node's error, its Unhandled block took it, and the run went on down the lines from that block. */
+            caught?: boolean;
         };
         NodeRun: {
             node: string;
@@ -628,15 +630,17 @@ export interface components {
             switch?: components["schemas"]["Switch"];
             /** @description An http node's made-up or redacted 2xx response, which previews read in place of a real one. Runs ignore it. */
             sample?: components["schemas"]["Sample"];
-            /** @description An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node. */
+            /** @description An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node, and its Unhandled block takes that as it takes every failure of the node's. */
             outputs?: components["schemas"]["Output"][];
         };
         Edge: {
             from: string;
             to: string;
-            /** @description The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and a transform's only output. */
+            /** @description The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and a transform's only output, or the Unhandled block when unhandled is set. */
             on?: number;
-            /** @description A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source succeeded, answering through the edge's output, and this is true. Absent means true. */
+            /** @description The edge leaves from its source's Unhandled block, and on is absent. Every node has one. It takes what the node's other outputs don't, a failure of its own, a status it doesn't list among them, so a run goes on down the edges from it, its node failed; with no line from it, the failure fails the run. Steps after it read the failure as nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer. */
+            unhandled?: boolean;
+            /** @description A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source answered through the edge's output, or failed into its Unhandled block, and this is true. Absent means true. */
             when?: string;
         };
         Answer: {
@@ -644,8 +648,10 @@ export interface components {
             status: number;
             /** @description The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs. */
             from?: string;
-            /** @description The output of from that the line leaves from, as an edge's. Absent means 2xx, and a transform's only output. */
+            /** @description The output of from that the line leaves from, as an edge's. Absent means 2xx, and a transform's only output, or the Unhandled block when unhandled is set. */
             on?: number;
+            /** @description The line leaves from from's Unhandled block, as an edge can, and on is absent. The answer's body is then from's body, what an http node got back with a status it doesn't list, else none. A node's Unhandled block is joined to one answer at most. */
+            unhandled?: boolean;
             /** @description A JSON Schema (2020-12) the body is promised to match. Checked when saved, not enforced on runs yet. */
             schema?: {
                 [key: string]: unknown;

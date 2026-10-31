@@ -104,7 +104,7 @@ CREATE TABLE node_runs (
   attempts   int  NOT NULL,
   request    jsonb,             -- redacted; body capped, with a truncated flag
   response   jsonb,             -- the same; or a transform node's value
-  error      jsonb,             -- {code, detail}
+  error      jsonb,             -- {code, detail}, caught once its Unhandled took it
   started_at timestamptz,
   ended_at   timestamptz NOT NULL,
   PRIMARY KEY (run_id, node_id)

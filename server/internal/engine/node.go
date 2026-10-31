@@ -51,36 +51,53 @@ func document(input json.RawMessage, parts []docPart) ([]byte, error) {
 }
 
 // exec runs node i on its own goroutine and reports back whatever happens,
-// a panic included.
+// a panic included. A failure of the node's own goes to its Unhandled block
+// when a line leaves that: the node ends failed, and the run goes on down
+// those lines. The run's end, by its deadline or a failure elsewhere, and a
+// panic, our bug, never do.
 func (r *run) exec(i int, parts []docPart) {
 	var o outcome
 	defer func() {
 		if v := recover(); v != nil {
 			o.entry, o.taken, o.err = nil, nil, &PanicError{Value: v, Stack: debug.Stack()}
+			o.result.Caught = false
 		}
 		r.msgs <- message{node: i, out: o}
 	}()
 
 	n := &r.p.nodes[i]
 	doc, err := document(r.input, parts)
-	if err != nil {
+	switch {
+	case err != nil:
 		o.err = err
-		return
-	}
-	switch n.kind {
-	case workflow.NodeKindHTTP:
+	case n.kind == workflow.NodeKindHTTP:
 		o = r.call(i, doc)
-	case workflow.NodeKindTransform:
+	case n.kind == workflow.NodeKindTransform:
 		o = r.transform(n, doc)
 	}
+	on := outputOf(o.result.HTTPStatus)
 	if o.err != nil {
-		return
+		if !n.catches || r.ctx.Err() != nil {
+			return
+		}
+		o.result.Err, o.result.Caught = o.err, true
+		if o.entry, o.err = caughtEntry(o.result); o.err != nil {
+			o.result.Caught = false
+			return
+		}
+		on = workflow.OnUnhandled
 	}
 	// Edge conditions see the node's own result too. Evaluating them here
 	// keeps a slow condition off the scheduler.
 	self := append(parts[:len(parts):len(parts)], docPart{id: n.id, entry: o.entry})
 	if doc, err = document(r.input, self); err == nil {
-		o.taken, err = r.conditions(n, doc, outputOf(o.result.HTTPStatus))
+		o.taken, err = r.conditions(n, doc, on)
+	}
+	if err != nil && o.result.Caught {
+		// A condition on a line from Unhandled that fails fails the run, and
+		// says what the block took too, as words: the condition is the cause.
+		err = fmt.Errorf("%s; then %w", o.result.Err.Error(), err)
+		o.result.Err, o.result.Caught = nil, false
 	}
 	o.err = err
 }
@@ -125,7 +142,8 @@ func (n *node) answers(err error) bool {
 }
 
 // outputOf is the output an answer with this status comes out of: the
-// status itself, or 0 for 2xx, and for a transform's one output.
+// status itself, or 0 for 2xx, and for a transform's one output. A failure
+// comes out of workflow.OnUnhandled.
 func outputOf(status int) int {
 	if status >= 200 && status <= 299 {
 		return 0
@@ -231,8 +249,7 @@ func escapeURLValue(prefix, v string) (string, error) {
 	return strings.ReplaceAll(url.QueryEscape(v), "+", "%20"), nil
 }
 
-// httpEntry is an http node's part of the data document. Header names are
-// lower case, as HTTP/2 sends them, and repeated fields are joined by commas.
+// httpEntry is an http node's part of the data document.
 func httpEntry(res *upstream.Response) (json.RawMessage, error) {
 	return responseEntry(res.Status, res.Header, res.Body)
 }
@@ -240,15 +257,43 @@ func httpEntry(res *upstream.Response) (json.RawMessage, error) {
 // responseEntry is an http node's part of the data document from what it
 // got back: its status, headers and body.
 func responseEntry(status int, header http.Header, body json.RawMessage) (json.RawMessage, error) {
+	return json.Marshal(struct {
+		Status  int               `json:"status"`
+		Headers map[string]string `json:"headers"`
+		Body    json.RawMessage   `json:"body"` // nil marshals as null
+	}{status, lowerHeaders(header), body})
+}
+
+// lowerHeaders is header as the data document has it: names in lower case,
+// as HTTP/2 sends them, and repeated fields joined by commas.
+func lowerHeaders(header http.Header) map[string]string {
 	headers := make(map[string]string, len(header))
 	for k, v := range header {
 		headers[strings.ToLower(k)] = strings.Join(v, ", ")
+	}
+	return headers
+}
+
+// caughtEntry is the part of the data document of a node whose Unhandled
+// block took its failure: the failure as error, {code, detail}, after the
+// status, headers and body an http node got back, when it got an answer.
+func caughtEntry(res NodeResult) (json.RawMessage, error) {
+	type failure struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	f := failure{Code: Classify(res.Err), Detail: res.Err.Error()}
+	if res.HTTPStatus == 0 {
+		return json.Marshal(struct {
+			Error failure `json:"error"`
+		}{f})
 	}
 	return json.Marshal(struct {
 		Status  int               `json:"status"`
 		Headers map[string]string `json:"headers"`
 		Body    json.RawMessage   `json:"body"` // nil marshals as null
-	}{status, headers, body})
+		Error   failure           `json:"error"`
+	}{res.HTTPStatus, lowerHeaders(res.Header), res.Body, f})
 }
 
 func (r *run) transform(n *node, doc []byte) outcome {

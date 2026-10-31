@@ -10,7 +10,7 @@ lives as a row in 00-roadmap.md.
 | 01 | 01-foundation.md | monorepo skeleton; every gate runs locally and in CI | done |
 | 02 | 02-engine.md | workflow model, validation, scheduler, upstream caller, JSONata | done |
 | 03 | 03-api.md | persistence, REST, live run events, serving published workflows | done 2026-10-27 |
-| 04 | 04-graph-editor.md | build, save and run workflows in graph mode | accepted 2026-10-28; phases A, B and C committed, with D's samples, previews, outputs by status and a step's blocks; D's answers built (2026-10-31): a line per answer, cases and Unhandled; next strict joins and a step's Unhandled (2026-11-01), then E, the browser test |
+| 04 | 04-graph-editor.md | build, save and run workflows in graph mode | accepted 2026-10-28; phases A, B and C committed, with D's samples, previews, outputs by status and a step's blocks; D's answers (a line per answer, cases and Unhandled) committed, and a step's Unhandled built (2026-11-01); next strict joins, then E, the browser test |
 | 05 | page-mode | the advanced view: steps in order, a card each with its data in and out; keyboard-first | not started |
 | 06 | hardening | credentials, limits, images, observability | not started |
 | 07 | 07-tests-and-catalogue.md | dry-run; test cases: unit tests of a step and API tests, mocked or live, gating Publish; the upstream library, filled by OpenAPI import; per-workflow caller keys | tests: direction (2026-10-30), shapes v1 seams, after 04's runs; the rest not started |

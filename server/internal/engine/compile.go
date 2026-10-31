@@ -41,7 +41,8 @@ type response struct {
 }
 
 // answerLine is an answer, given when node from answers through output on:
-// a status, or 0 for 2xx and for a transform's one output.
+// a status, 0 for 2xx and for a transform's one output, or
+// workflow.OnUnhandled.
 type answerLine struct {
 	status   int
 	from, on int
@@ -61,6 +62,10 @@ type node struct {
 	attempts   int
 	idempotent bool
 	outputs    []int // the statuses besides 2xx it answers with
+
+	// catches says a line leaves its Unhandled block, which then takes its
+	// failures.
+	catches bool
 
 	// transform nodes: an expr, or a switch, whose otherwise is never nil.
 	// whole says every expression in it compiled.
@@ -89,7 +94,7 @@ type switchCase struct {
 
 type edge struct {
 	from, to int
-	on       int                  // the output of from it leaves from: a status, or 0 for 2xx
+	on       int                  // the output of from it leaves from: a status, 0 for 2xx, or workflow.OnUnhandled
 	when     *transform.Condition // nil: always taken
 }
 
@@ -140,7 +145,7 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 		}
 	}
 	for k, e := range d.Edges {
-		p.edges[k].on = e.On
+		p.edges[k].on = e.Output()
 		if e.When != "" {
 			when, err := transform.CompileCondition(e.When)
 			c.check(fmt.Sprintf("/edges/%d/when", k), err)
@@ -173,12 +178,19 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 		p.edges[k].from, p.edges[k].to = from, to
 		p.nodes[from].out = append(p.nodes[from].out, k)
 		p.nodes[to].in = append(p.nodes[to].in, k)
+		if e.Unhandled {
+			p.nodes[from].catches = true
+		}
 	}
 	if r := d.Response; r != nil {
 		p.response = &response{}
 		// A from that names no node is a problem, so such a program never runs.
 		for k, a := range r.Answers {
-			p.response.answers = append(p.response.answers, answerLine{status: a.Status, from: index[a.From], on: a.On})
+			from, ok := index[a.From]
+			p.response.answers = append(p.response.answers, answerLine{status: a.Status, from: from, on: a.Output()})
+			if ok && a.Unhandled {
+				p.nodes[from].catches = true
+			}
 			if len(a.Schema) > 0 {
 				c.jsonSchema(fmt.Sprintf("/response/answers/%d/schema", k), a.Schema)
 			}

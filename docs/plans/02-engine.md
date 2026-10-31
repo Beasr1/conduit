@@ -137,6 +137,10 @@ types into `server/internal/workflow/definition.gen.go`.
 4. **Fail-fast.**
    - The first failure cancels the run's context, and other nodes that then
      end in error count as cancelled.
+   - A failure a node's Unhandled block takes, once a line leaves it, is no
+     failure of the run's: the node ends failed, and the run goes on down
+     the lines from the block (plan 04, 2026-11-01). A panic, the run's
+     deadline and its cancelling never are.
    - When the run's deadline (default 5 min) cuts nodes off, they count as
      failed: they're why the run failed.
    - Run statuses are succeeded, failed or cancelled; cancelled means the

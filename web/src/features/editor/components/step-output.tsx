@@ -106,9 +106,9 @@ export function AddResponse({
       <FieldError errors={error === undefined ? [] : [{ message: error }]} />
       <FieldDescription>
         By its status, as 404, when a run should go on rather than fail. Every
-        HTTP step has 2xx; any status it has no response for fails the step, and
-        the run. Each response is a block on the step, which connections leave
-        from.
+        HTTP step has 2xx; any status it has no response for goes to its
+        Unhandled, which fails the run unless a line leaves it. Each response is
+        a block on the step, which connections leave from.
       </FieldDescription>
     </Field>
   );

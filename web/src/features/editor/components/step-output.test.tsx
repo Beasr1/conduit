@@ -189,7 +189,11 @@ test("a transform step lists its connections and connects too", async () => {
     ],
   });
   await open("merge");
-  expect(screen.getByText(/^None yet/)).toBeTruthy();
+  // Nothing follows its value, nor its Unhandled.
+  expect(screen.getAllByText(/^None yet/).map((p) => p.textContent)).toEqual([
+    "None yet: connect a step below, or drag from its point on the canvas to the step.",
+    "None yet: connect a step below, or drag from its Unhandled point on the canvas to the step.",
+  ]);
   await choose("Connect to", "crm");
   expect(await screen.findByTestId("rf__edge-merge->crm")).toBeTruthy();
   expect(

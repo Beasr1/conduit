@@ -5,10 +5,10 @@ the end); D10, D11 and D13 accepted with it, and D14 waits for 07. Phase A
 is committed (69bb36e), and so is Phase B, its last step in eabb7b6. Phase D
 came before C: its samples, previews, outputs by status and a step's blocks
 are committed (f9e7484, e98e50a, 2026-10-30), and so is Phase C, runs
-(ad89609, 2026-10-30), and D's API's answers, after C (2026-10-31).
-Next, decided 2026-11-01: strict joins, then a step's Unhandled block;
-then Phase E, the browser test. Building Phase A raised question 8, since
-answered.
+(ad89609, 2026-10-30), and D's API's answers, after C (8cbc5b1,
+2026-11-01). A step's Unhandled block is built (2026-11-01); strict joins
+are next, then Phase E, the browser test. Building Phase A raised
+question 8, since answered.
 
 ## Goal
 
@@ -821,14 +821,54 @@ runs, which OWASP also advises (sources.md); an OpenAPI document for
 callers, built from the card (07); a Merge action, making one step of two
 that answer one status.
 
-**Phase D: strict joins, then Unhandled** (2026-11-01, your calls; next,
-in that order)
+**Phase D: Unhandled, then strict joins** (2026-11-01, your calls, in that
+order; Unhandled built the same day)
 
-Your "Fixes check" showed both. A step ran once every step with a line into
-it had ended, if any of those lines was taken (the roadmap's edges rule),
-so crm ran on orders' 2xx while prefs answered 400. And a failing step
-stops the run, with nowhere to map what it got back: "a 'failed' output"
-was left open (Phase D, outputs, above).
+Your "Fixes check" showed both. A failing step stops the run, with nowhere
+to map what it got back: "a 'failed' output" was left open (Phase D,
+outputs, above). And a step ran once every step with a line into it had
+ended, if any of those lines was taken (the roadmap's edges rule), so crm
+ran on orders' 2xx while prefs answered 400.
+
+A step's Unhandled, decided with you on 2026-11-01:
+- **Every step has an Unhandled block**, there by default, as a try/catch
+  is in code: a strip along the bottom of its card, muted and saying
+  "fails the run" until something is joined to it. It takes what the
+  step's other blocks don't: a status with no block; the connection, or
+  a timeout, after its retries; a body over the cap, or a 2xx body that
+  isn't JSON; an address the SSRF guard refuses; and its own JSONata
+  failing, in its URL, query, headers, body, expr or a case. n8n, Make
+  and Step Functions all send a step's failure on, each as an opt-in;
+  Step Functions catches its JSONata errors too (sources.md).
+- **Joined, the run goes on** down its lines. The step still shows
+  failed, with Unhandled marked, and the run succeeds if it answers. Not
+  joined, the run fails as it does now, and the response's Unhandled
+  answers.
+- **It hands on** `nodes.<step>.error`, `{code, detail}`, with `status`,
+  `headers` and `body` when the upstream answered a status with no
+  block: where a step's own result gets mapped.
+- **It doesn't take** a line's condition failing, as the step has
+  answered; a transform's `{status, body}` that isn't one of its answers;
+  the run's own time; a cancelled run; or our bugs. The response's
+  Unhandled answers those.
+- **Joined straight to an answer**, the body is the step's, as with any
+  block, and it joins one answer at most. Its panel warns that callers
+  get whatever the upstream sent, stack traces included (OWASP API8,
+  sources.md).
+- **The response card's Unhandled** becomes the same strip, with no point.
+  It's there by default too: a run nothing answers gets your body, or
+  Conduit's problem details.
+- **Its status stays by cause** (asked again on 2026-11-01): 502, 504 or
+  500, as the roadmap's serving rule and RFC 9110 have it, so callers and
+  their monitoring tell a down upstream from a broken workflow. Always
+  500, as for an exception nobody caught, was the other option; a step's
+  Unhandled lets a workflow answer any status itself.
+- **In the definition**, an edge or an answer's line gets
+  `unhandled: true`, beside `on`; a caught failure keeps its step
+  `failed`, with `caught: true` in its error. A preview after an
+  Unhandled line reads a made-up `error`.
+- [x] The engine, validation, runs and previews.
+- [x] The strips, their panels and the run's marks.
 
 Strict joins, decided with you on 2026-11-01:
 - **A line into a step is a dependency**: a step runs only when each step
@@ -853,39 +893,6 @@ Strict joins, decided with you on 2026-11-01:
       their routes agree, which ends the false alarms (as built, below).
 - [ ] The editor names that problem, "success_200 can never run: it needs
       prefs to answer 400 and 2xx"; the roadmap's rule and plan 02 change.
-
-A step's Unhandled, decided with you on 2026-11-01:
-- **Every step has an Unhandled block**, a strip along the bottom of its
-  card, muted and saying "fails the run" until something is joined to it.
-  It takes what the step's other blocks don't: a status with no block;
-  the connection, or a timeout, after its retries; a body over the cap,
-  or a 2xx body that isn't JSON; an address the SSRF guard refuses; and
-  its own JSONata failing, in its URL, query, headers, body, expr or a
-  case. n8n, Make and Step Functions all send a step's failure on, each
-  as an opt-in; Step Functions catches its JSONata errors too
-  (sources.md).
-- **Joined, the run goes on** down its lines. The step still shows
-  failed, with Unhandled marked, and the run succeeds if it answers. Not
-  joined, the run fails as it does now, and the response's Unhandled
-  answers.
-- **It hands on** `nodes.<step>.error`, `{code, detail}`, with `status`,
-  `headers` and `body` when the upstream answered a status with no
-  block: where a step's own result gets mapped.
-- **It doesn't take** a line's condition failing, as the step has
-  answered; a transform's `{status, body}` that isn't one of its answers;
-  the run's own time; a cancelled run; or our bugs. The response's
-  Unhandled answers those.
-- **Joined straight to an answer**, the body is the step's, as with any
-  block, and it joins one answer at most. Its panel warns that callers
-  get whatever the upstream sent, stack traces included (OWASP API8,
-  sources.md).
-- **The response card's Unhandled** becomes the same strip, with no point.
-- **In the definition**, an edge or an answer's line gets
-  `unhandled: true`, beside `on`; a caught failure keeps its step
-  `failed`, with `caught: true` in its error. A preview after an
-  Unhandled line reads a made-up `error`.
-- [ ] The engine, validation, runs and previews.
-- [ ] The strips, their panels and the run's marks.
 
 **Phase E: the browser test**
 - [ ] Playwright, against the test upstream (built in C), and the Done flow.
@@ -1552,7 +1559,7 @@ committed. Decided while building:
   still answer 400. Reducing a step's paths to what they share also
   raises false alarms: with the calls in a row, people → prefs → orders
   → crm, no run reaches both, yet it's flagged (a throwaway test,
-  2026-11-01). Strict joins end both (Phase D, next).
+  2026-11-01). Strict joins end both (Phase D, next, after Unhandled).
 - **A run's answer is checked once its steps have ended**, and each way it
   can miss fails the run as `workflow_error`, served 500 with the run's
   link unless unhandled answers: "no answer: no line into the response
@@ -1644,6 +1651,61 @@ Seen, not fixed:
 - Your "Fixes check" was saved, revisions 18 to 24, while the card took
   one line, so its 200 has no line now; joined again, it shows the
   problem above.
+
+## A step's Unhandled, as built
+
+"A step's Unhandled", built on 2026-11-01, after the API's answers were
+committed (8cbc5b1). Decided while building:
+- **Unhandled is one more output**, counted beside the statuses: -1 in
+  the server (`workflow.OnUnhandled`) and the editor (`UNHANDLED`), and
+  `unhandled: true` in the definition. Validation, the reach check and
+  previews needed no rule of their own: an answer after a step's
+  Unhandled and one after its 2xx are apart, as two of its responses are.
+- **The failure codes moved into the engine**, with `Classify`, as a
+  caught step hands its code on to the steps after it. The runner keeps
+  its names for them.
+- **A condition on a line from Unhandled that fails fails the run**, and
+  its detail says both: "GET …: status 404; then edge to gone: when: …".
+  The condition is the cause, so the run's code is `workflow_error`.
+- **What a caught step hands on**: `error`, `{code, detail}`, its detail
+  the one the run records, with `status`, `headers` and `body` when the
+  upstream answered. A 2xx body that isn't JSON reads as status 200 and
+  body null.
+- **The response's Unhandled reads caught steps too**, as the steps after
+  them do.
+- **Previews** take a step's 2xx when it leads to the step previewed, else
+  a status, else its Unhandled, whose made-up error says "user failed:
+  made up, as a preview calls nothing".
+- **The strip** is 24 px tall, a handle's room, and every card grows by
+  it. Until a line leaves it, it says "Unhandled · fails the run",
+  dimmed. A click opens an HTTP step's Unhandled tab, after + Response; a
+  transform's panel has the section after its connections, and the click
+  brings it into view. Its Connect to is called "Connect Unhandled to",
+  so a transform's two aren't one name to a screen reader.
+- **The response card's strip** says "Unhandled · your body" or
+  "Unhandled · problem details", and its third line is "also 4xx · 5xx"
+  again.
+- **A run's marks**: a caught step's line says "Unhandled: 500", and its
+  strip ", the block its failure took". A run that failed and was
+  answered by the response's Unhandled marks the card's strip. Before, it
+  marked the answer block with the same status.
+- **Joining a transform's Unhandled to an answer** leaves the transform as
+  it is: a failure picks no answer, so it doesn't become a switch.
+- **A step's part stays Unhandled across edits**: the store had sent any
+  part that wasn't one of the step's responses back to Request.
+- **Tests pick a later option from the keyboard**, as a click on any but
+  the first does nothing in jsdom.
+- **Checked**: `just check` (formatting, lint, race tests and coverage
+  floors, 368 web tests, typecheck, the build, generated code). 27 Go
+  mutations and 28 web ones, each caught but one Go: the reset of caught
+  when a panic follows a caught failure, which no test can reach. Three
+  web ones were caught only after a test was added. Chromium through
+  nginx, light and dark: `pw-unhandled`, whose upstream can't be reached.
+  The strips, and the Unhandled tab a click opens; a run going on to
+  fallback and answering 503, the line from Unhandled taken and the one
+  from 2xx dashed; a line dragged from a strip onto a new 500 answer; and
+  `/serve` answering `503 {"error":"upstream_failed"}`. No CSP violations
+  and no console problems. Not run: Chromium through `just dev`.
 
 ## Out of scope
 

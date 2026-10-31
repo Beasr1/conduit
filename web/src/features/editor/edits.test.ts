@@ -33,6 +33,7 @@ import {
   updateNode,
   updateOtherwise,
 } from "@/features/editor/edits";
+import { UNHANDLED } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 import { specExample as spec } from "@/test/fixtures";
 
@@ -70,6 +71,41 @@ test("two steps are joined once per output", () => {
   expect(joined.edges).toContainEqual({ from: "user", to: "orders", on: 404 });
   expect(canConnect(joined, "user", "orders", 404)).toBe(false);
   expect(canConnect(joined, "user", "orders")).toBe(false);
+});
+
+test("a step's Unhandled is joined as an output of its own", () => {
+  // To a step: beside the same step on 2xx, and only once.
+  expect(canConnect(branched, "user", "orders", UNHANDLED)).toBe(true);
+  const joined = connect(branched, "user", "orders", UNHANDLED);
+  expect(joined.edges).toContainEqual({
+    from: "user",
+    to: "orders",
+    unhandled: true,
+  });
+  expect(canConnect(joined, "user", "orders", UNHANDLED)).toBe(false);
+  // To an answer: a transform's picks nothing, so it stays an expression.
+  const respond = answering.nodes.length - 1;
+  const both = joinAnswer(
+    joinAnswer(addAnswer(answering, 500), 0, "respond"),
+    2,
+    "respond",
+    UNHANDLED,
+  );
+  expect(both.response?.answers?.[2]).toEqual({
+    status: 500,
+    from: "respond",
+    unhandled: true,
+  });
+  expect(both.nodes[respond]).toEqual(answering.nodes[respond]);
+  // Nor does a second answer on it, which validation refuses.
+  const twice = joinAnswer(addAnswer(both, 503), 3, "respond", UNHANDLED);
+  expect(twice.nodes[respond]).toEqual(answering.nodes[respond]);
+  expect(joinedTo(both, "respond")).toEqual([0]);
+  expect(joinedTo(both, "respond", UNHANDLED)).toEqual([2]);
+  // Leaving it takes the line away.
+  expect(leaveAnswer(both, 2).response?.answers?.[2]).toStrictEqual({
+    status: 500,
+  });
 });
 
 test("an output is added at the end, and removed with its connections", () => {

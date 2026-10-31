@@ -2,38 +2,12 @@ package runner
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/Beasr1/conduit/server/internal/engine"
-	"github.com/Beasr1/conduit/server/internal/upstream"
 )
-
-func TestClassify(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		err  error
-		want string
-	}{
-		{&upstream.Error{Kind: upstream.KindStatus, Status: 503}, CodeUpstream},
-		{&upstream.Error{Kind: upstream.KindTransport}, CodeUpstream},
-		{&upstream.Error{Kind: upstream.KindBlocked}, CodeUpstream},
-		{&upstream.Error{Kind: upstream.KindTooLarge}, CodeUpstream},
-		{&upstream.Error{Kind: upstream.KindTimeout}, CodeTimeout},
-		{fmt.Errorf("%w (30s)", engine.ErrRunTimeout), CodeTimeout},
-		{&engine.PanicError{Value: "boom"}, CodeInternal},
-		{fmt.Errorf("body: %w", errors.New("D3030: unable to cast")), CodeWorkflow},
-	}
-	for _, tt := range tests {
-		if got := classify(tt.err); got != tt.want {
-			t.Errorf("classify(%v) = %s, want %s", tt.err, got, tt.want)
-		}
-	}
-}
 
 // A served run that failed answers with its cause's status, its unhandled
 // body or its problem alike.

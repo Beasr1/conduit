@@ -74,6 +74,9 @@ type NodeResult struct {
 	// The response body, or a transform node's value.
 	Body json.RawMessage
 	Err  error
+	// Caught says a failed node's Unhandled block took Err, so the run went
+	// on down the lines from that block.
+	Caught bool
 	// Request is what an http node sent, as built, once its URL, headers and
 	// body rendered. Nothing is redacted here; whoever stores it does that.
 	Request *SentRequest
@@ -280,13 +283,19 @@ func (r *run) parts(i int) []docPart {
 	return out
 }
 
-// finish records a node's outcome and works out what it unblocks.
+// finish records a node's outcome and works out what it unblocks. A node
+// whose Unhandled block took its failure ends failed, and unblocks as one
+// that succeeded does.
 func (r *run) finish(i int, o outcome) {
 	stopped := r.ctx.Err() != nil
 	switch {
 	case o.err == nil:
 		r.nodes[i].entry = o.entry
-		r.end(i, StatusSucceeded, &o)
+		status := StatusSucceeded
+		if o.result.Caught {
+			status = StatusFailed
+		}
+		r.end(i, status, &o)
 		for j, k := range r.p.nodes[i].out {
 			r.parentEnded(r.p.edges[k].to, o.taken[j])
 		}
@@ -330,7 +339,9 @@ func (r *run) end(i int, s Status, o *outcome) {
 		id := n.result.ID
 		n.result = o.result
 		n.result.ID = id
-		n.result.Err = o.err
+		if o.err != nil {
+			n.result.Err = o.err
+		}
 	}
 	n.result.Status = s
 	res := n.result
@@ -345,9 +356,10 @@ func (r *run) emit(i int, kind EventKind, attempt int, result *NodeResult) {
 
 // answer is what the run answers: the answer whose line it took, or the
 // output of a definition saved with one, as a 200. A run takes an answer's
-// line when its node answered through its output. Taking none, or lines
-// from two outputs, fails the run, and so does a node joined to several
-// answers that picked none of them.
+// line when its node answered through its output, or failed into its
+// Unhandled block for a line from that. Taking none, or lines from two
+// outputs, fails the run, and so does a node joined to several answers
+// that picked none of them.
 func (r *run) answer() (int, json.RawMessage, error) {
 	if r.p.output != nil {
 		out, err := r.output()
@@ -367,8 +379,7 @@ func (r *run) answer() (int, json.RawMessage, error) {
 	}
 	var taken []joined
 	for _, a := range resp.answers {
-		n := r.nodes[a.from].result
-		if n.Status != StatusSucceeded || outputOf(n.HTTPStatus) != a.on {
+		if on, ok := took(r.nodes[a.from].result); !ok || on != a.on {
 			continue
 		}
 		i := slices.IndexFunc(taken, func(j joined) bool { return j.from == a.from && j.on == a.on })
@@ -389,10 +400,22 @@ func (r *run) answer() (int, json.RawMessage, error) {
 	}
 	j := taken[0]
 	n := r.nodes[j.from].result
-	if len(j.statuses) == 1 && r.p.nodes[j.from].otherwise == nil {
+	if len(j.statuses) == 1 && (j.on == workflow.OnUnhandled || r.p.nodes[j.from].otherwise == nil) {
 		return j.statuses[0], n.Body, nil
 	}
 	return pick(n.ID, n.Body, j.statuses)
+}
+
+// took is the output node result n answered through, and whether it
+// answered at all: its Unhandled block, when that took its failure.
+func took(n NodeResult) (int, bool) {
+	switch {
+	case n.Caught:
+		return workflow.OnUnhandled, true
+	case n.Status == StatusSucceeded:
+		return outputOf(n.HTTPStatus), true
+	}
+	return 0, false
 }
 
 // pick reads the answer node id picked among statuses: its result v is
@@ -432,8 +455,9 @@ func statusList(statuses []int) string {
 
 // Unhandled is what the response's unhandled answers a run that gave no
 // answer: its body, JSONata evaluated over the run as it stood, its input
-// and every node that succeeded, with failure, the run's {code, detail,
-// node}, as error. ok says whether the response has one.
+// and every node that succeeded or failed into its Unhandled block, with
+// failure, the run's {code, detail, node}, as error. ok says whether the
+// response has one.
 func (p *Program) Unhandled(ctx context.Context, input json.RawMessage, nodes []NodeResult, failure json.RawMessage) (body json.RawMessage, ok bool, err error) {
 	if p.response == nil || p.response.unhandled == nil {
 		return nil, false, nil
@@ -445,14 +469,22 @@ func (p *Program) Unhandled(ctx context.Context, input json.RawMessage, nodes []
 	}()
 	var parts []docPart
 	for i, n := range nodes {
-		if n.Status != StatusSucceeded || i >= len(p.nodes) {
+		if i >= len(p.nodes) {
 			continue
 		}
-		entry := bodyEntry(n.Body)
-		if p.nodes[i].kind == workflow.NodeKindHTTP {
-			if entry, err = responseEntry(n.HTTPStatus, n.Header, n.Body); err != nil {
-				return nil, true, fmt.Errorf("unhandled: %w", err)
-			}
+		var entry json.RawMessage
+		switch {
+		case n.Caught:
+			entry, err = caughtEntry(n)
+		case n.Status != StatusSucceeded:
+			continue
+		case p.nodes[i].kind == workflow.NodeKindHTTP:
+			entry, err = responseEntry(n.HTTPStatus, n.Header, n.Body)
+		default:
+			entry = bodyEntry(n.Body)
+		}
+		if err != nil {
+			return nil, true, fmt.Errorf("unhandled: %w", err)
 		}
 		parts = append(parts, docPart{id: p.nodes[i].id, entry: entry})
 	}

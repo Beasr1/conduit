@@ -3,9 +3,12 @@ import type { XYPosition } from "@xyflow/react";
 import {
   freeSpot,
   handlesOf,
+  lineFrom,
   NODE_WIDTH,
+  outputOf,
   RANK_GAP,
   toFlow,
+  UNHANDLED,
 } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 
@@ -72,7 +75,7 @@ export function settle(d: Definition): Definition {
 }
 
 // canConnect says whether an edge may be drawn from one node, leaving from
-// its output on (2xx when there's none), to another: not to itself, not
+// its output on (2xx when there's none, or its Unhandled block), to another: not to itself, not
 // twice from the same output, and not closing a cycle. It's only for feel;
 // the server's validation still decides.
 export function canConnect(
@@ -83,7 +86,7 @@ export function canConnect(
 ): boolean {
   if (from === to) return false;
   const twice = (d.edges ?? []).some(
-    (e) => e.from === from && e.to === to && e.on === on,
+    (e) => e.from === from && e.to === to && outputOf(e) === on,
   );
   return !twice && !reaches(d, to, from);
 }
@@ -104,22 +107,24 @@ function reaches(d: Definition, from: string, to: string): boolean {
   return false;
 }
 
+// connect draws an edge from one node, leaving from its output on, to
+// another.
 export function connect(
   d: Definition,
   from: string,
   to: string,
   on?: number,
 ): Definition {
-  const edge = on === undefined ? { from, to } : { from, to, on };
+  const edge = { from, to, ...lineFrom(on) };
   return { ...d, edges: [...(d.edges ?? []), edge] };
 }
 
 // joinedTo is the places in the response's answers of those joined to
-// output on of node from (2xx, or a transform's one, when there's none):
-// the answers that output gives.
+// output on of node from (2xx, or a transform's one, when there's none; or
+// its Unhandled block): the answers that output gives.
 export function joinedTo(d: Definition, from: string, on?: number): number[] {
   return (d.response?.answers ?? []).flatMap((a, k) =>
-    a.from === from && (a.on ?? 0) === (on ?? 0) ? [k] : [],
+    a.from === from && (outputOf(a) ?? 0) === (on ?? 0) ? [k] : [],
   );
 }
 
@@ -144,11 +149,12 @@ export function refusal(
 }
 
 // joinAnswer joins node from, on its output on (2xx, or a transform's one,
-// when there's none), to answer k, in place of any line it had. A
-// transform joined to a second answer picks between them, so it becomes a
-// switch: otherwise keeps its expression as the first answer's body, and a
-// case for the new status waits to be filled. A switch gets a case for a
-// status it doesn't give yet.
+// when there's none; or its Unhandled block), to answer k, in place of any
+// line it had. A transform joined to a second answer picks between them, so
+// it becomes a switch: otherwise keeps its expression as the first answer's
+// body, and a case for the new status waits to be filled. A switch gets a
+// case for a status it doesn't give yet. A line from Unhandled picks
+// nothing, and changes neither.
 export function joinAnswer(
   d: Definition,
   k: number,
@@ -159,18 +165,14 @@ export function joinAnswer(
   const answer = answers?.[k];
   if (!answers || !answer) return d;
   const before = joinedTo(d, from, on).filter((j) => j !== k);
-  const line = {
-    ...unjoined(answer),
-    from,
-    ...(on === undefined ? {} : { on }),
-  };
+  const line = { ...unjoined(answer), from, ...lineFrom(on) };
   const joined = {
     ...d,
     response: { ...d.response, answers: answers.with(k, line) },
   };
   const index = d.nodes.findIndex((n) => n.id === from);
   const node = d.nodes[index];
-  if (node?.kind !== "transform") return joined;
+  if (node?.kind !== "transform" || on === UNHANDLED) return joined;
   if (node.switch)
     return updateNode(joined, index, (n) => withCase(n, answer.status));
   const first = answers[before[0] ?? -1]?.status;
@@ -184,7 +186,8 @@ export function joinAnswer(
 export function leaveAnswer(d: Definition, k: number): Definition {
   const answers = d.response?.answers;
   const a = answers?.[k];
-  if (!answers || !a || (a.from === undefined && a.on === undefined)) return d;
+  if (!answers || !a || (a.from === undefined && outputOf(a) === undefined))
+    return d;
   return {
     ...d,
     response: { ...d.response, answers: answers.with(k, unjoined(a)) },

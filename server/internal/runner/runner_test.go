@@ -324,6 +324,38 @@ func TestServe_AnUnhandledThatFails(t *testing.T) {
 	}
 }
 
+// A step's Unhandled block takes its failure: the step is recorded failed
+// and caught, and the run answers through the steps after the block.
+func TestServe_AStepsUnhandledTakesItsFailure(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error": "down"}`, http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	r := newRunner(t, Options{})
+	w := saveWorkflow(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}},
+	    {"id": "sorry", "kind": "transform", "expr": "{ 'error': nodes.a.error.code, 'upstream': nodes.a.status }"}],
+	  "edges": [{"from": "a", "to": "sorry", "unhandled": true}],
+	  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 503, "from": "sorry"}]}}`)
+	out, err := r.Serve(t.Context(), w.Slug, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Run.Status != "succeeded" || out.Answer != 503 || string(out.Output) != `{"error":"upstream_failed","upstream":500}` || out.Failure != nil {
+		t.Errorf("run %s answered %d %s, failure %+v", out.Run.Status, out.Answer, out.Output, out.Failure)
+	}
+	nodes, err := db.NodeRuns(t.Context(), out.Run.ID)
+	if err != nil || len(nodes) != 2 {
+		t.Fatalf("NodeRuns() = %+v, %v", nodes, err)
+	}
+	if a, f := nodes[0], decode[Failure](t, nodes[0].Error); a.Status != "failed" || f.Code != CodeUpstream || !f.Caught {
+		t.Errorf("a = %s, error %s", a.Status, a.Error)
+	}
+	if sorry := nodes[1]; sorry.Status != "succeeded" || sorry.Error != nil {
+		t.Errorf("sorry = %s, error %s", sorry.Status, sorry.Error)
+	}
+}
+
 func TestServe_Refusals(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

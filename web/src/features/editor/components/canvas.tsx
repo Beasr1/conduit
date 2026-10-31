@@ -29,6 +29,7 @@ import {
   NODE_HEIGHT,
   NODE_WIDTH,
   onOf,
+  outputOf,
   RESPONSE,
   responseCard,
   toFlow,
@@ -79,12 +80,18 @@ export function Canvas() {
   // says so in words too. While a run is shown, one the run didn't take is
   // dashed, and its name says whether the run took it. A line into an
   // answer is taken once the run answered with it: gave is that status, or
-  // -1 while the run goes on.
+  // -1 while the run goes on. A run that failed took none, even one the
+  // response's Unhandled answered.
   const troubled = useProblems((p) => p.on === "connection");
   const steps = useRunSteps();
   const gave = useRun(
     useEditor((s) => s.run),
-    (r) => (r.status === "running" ? -1 : (r.answered ?? 0)),
+    (r) =>
+      r.status === "running"
+        ? -1
+        : r.status === "succeeded"
+          ? (r.answered ?? 0)
+          : 0,
   ).data;
   const edges = useMemo(() => {
     const wrong = new Set(
@@ -98,15 +105,16 @@ export function Canvas() {
           : draft.response?.answers?.[e.data.answer];
       const bad =
         answer === undefined && e.data !== undefined && wrong.has(e.data.index);
+      const edge = e.data && draft.edges?.[e.data.index];
       const line = answer
         ? answer.from === undefined
           ? undefined
           : {
               from: answer.from,
-              on: answer.on,
+              on: outputOf(answer),
               to: `the ${answer.status} answer`,
             }
-        : e.data && draft.edges?.[e.data.index];
+        : edge && { from: edge.from, on: outputOf(edge), to: edge.to };
       const into = (): StepRun =>
         answer
           ? {

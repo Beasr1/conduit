@@ -150,6 +150,29 @@ func eventList(t *testing.T, events []sseEvent) string {
 	return strings.TrimSpace(strings.Join(out, ", "))
 }
 
+// A step whose Unhandled block took its failure ends failed, and says so as
+// caught, live and on the run's record.
+func TestRuns_ACaughtFailure(t *testing.T) {
+	t.Parallel()
+	wr := create(t, strings.ReplaceAll(`{"nodes": [
+	    {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}},
+	    {"id": "sorry", "kind": "transform", "expr": "nodes.user.error.code"}],
+	  "edges": [{"from": "user", "to": "sorry", "unhandled": true}]}`, "BASE", usersUpstream(t).URL))
+	run := startRun(t, wr.Workflow.ID, `{"input": {"user_id": "500"}}`)
+	r := call(t, http.MethodGet, "/v1/runs/"+run.ID+"/events", "")
+	events := readEvents(t, bytes.NewReader(r.body))
+	if got, want := eventList(t, events), "1 user started, 2 user failed, 3 sorry started, 4 sorry succeeded, end run succeeded"; got != want {
+		t.Fatalf("events: %s\nwant:   %s", got, want)
+	}
+	if n := strict[gen.NodeEvent](t, []byte(events[1].data)); n.Error.Code != gen.RunErrorCodeUpstreamFailed || !n.Error.Caught || n.HTTPStatus != 500 {
+		t.Errorf("user's end = %s", events[1].data)
+	}
+	got := strict[gen.Run](t, call(t, http.MethodGet, "/v1/runs/"+run.ID, "").body)
+	if user := got.Nodes[0]; user.Status != gen.NodeRunStatusFailed || !user.Error.Caught || got.Error.Code != "" {
+		t.Errorf("run %s, error %+v; user %s, error %+v", got.Status, got.Error, user.Status, user.Error)
+	}
+}
+
 func startRun(t *testing.T, workflowID, body string) gen.Run {
 	t.Helper()
 	r := call(t, http.MethodPost, "/v1/workflows/"+workflowID+"/runs", body)

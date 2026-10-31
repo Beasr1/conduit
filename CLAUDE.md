@@ -6,15 +6,18 @@ with JSONata. A Go engine runs it, fanning out in parallel.
 
 **Status: plan 04, the graph editor, is under way: phases A, B and C are
 committed, with phase D's samples, previews, outputs by status and a step's
-blocks, and D's answers (2026-10-31); strict joins and a step's
-Unhandled block are next (2026-11-01), then Phase E, the browser test.** The web app signs in with a session cookie, lists workflows and
+blocks, D's answers, and a step's Unhandled block (2026-11-01). Next:
+strict joins, then Phase E, the browser test.** The web app signs in
+with a session cookie, lists workflows and
 creates them, and edits, checks, saves and publishes one in graph mode,
 previewing what each step reads and sends over sample data, branching on
 the status a step gets back, and running it with an input, followed live
 on the canvas. A step is drawn as its request and a block per response,
 and a click opens that part. Each answer on the response card takes one
 line, from the step that gives it; a step joined to several picks one with
-its cases, and Unhandled answers a run that gives none. What is left is in
+its cases, and Unhandled answers a run that gives none. A step's own
+Unhandled block takes its failures, and the run goes on down its line.
+What is left is in
 docs/plans/04-graph-editor.md; the bigger picture is docs/plans/README.md.
 
 ## Read before working

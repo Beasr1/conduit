@@ -184,8 +184,9 @@ Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
      edge is active.
    - If none are active, the node is skipped, and skips cascade.
 5. **Failure:** the first failure fails the run. In-flight nodes are
-   cancelled and the rest are marked cancelled. A per-node "continue on
-   error" setting is an open question for plan 02.
+   cancelled and the rest are marked cancelled. A node's Unhandled block
+   takes its failure instead, once a line leaves it: the node ends failed,
+   and the run goes on down that line (plan 04, 2026-11-01).
 6. **Retries:** off by default. When on, they cover transport errors, 5xx
    and 429 (honouring `Retry-After`). POST and PATCH are retried only if
    the node opts in, and then they carry `Idempotency-Key: <run>:<node>`.

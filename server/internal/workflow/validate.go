@@ -316,9 +316,31 @@ func PointerTokens(pointer string) []string {
 	return tokens
 }
 
+// OnUnhandled is the output a line from a node's Unhandled block leaves
+// from, counted beside the others: a status, and 0 for 2xx and a
+// transform's one output.
+const OnUnhandled = -1
+
+// Output is the output of its source the edge leaves from: on, or
+// OnUnhandled.
+func (e Edge) Output() int {
+	if e.Unhandled {
+		return OnUnhandled
+	}
+	return e.On
+}
+
+// Output is the output of from the answer's line leaves from, as an edge's.
+func (a Answer) Output() int {
+	if a.Unhandled {
+		return OnUnhandled
+	}
+	return a.On
+}
+
 type edgeRef struct {
 	index, from, to int
-	on              int // the output of from it leaves from: a status, or 0 for 2xx
+	on              int // the output of from it leaves from: a status, 0 for 2xx, or OnUnhandled
 }
 
 // checkEdges checks each edge, and gives back those whose ends are nodes,
@@ -337,6 +359,10 @@ func (v *validator) checkEdges(edges []Edge, nodes []Node, index map[string]int)
 			v.add(p, "self_edge", "a node can't be its own parent")
 			continue
 		}
+		if e.Unhandled && e.On != 0 {
+			v.add(p+"/unhandled", "not_allowed", "an edge leaves from one block: the %d output or Unhandled", e.On)
+			continue
+		}
 		if e.On != 0 {
 			switch n := nodes[from]; n.Kind {
 			case NodeKindHTTP:
@@ -347,13 +373,13 @@ func (v *validator) checkEdges(edges []Edge, nodes []Node, index map[string]int)
 				v.add(p+"/on", "not_allowed", "a transform node has one output, so an edge from it names none")
 			}
 		}
-		key := [3]int{from, to, e.On}
+		key := [3]int{from, to, e.Output()}
 		if j, dup := seen[key]; dup {
 			v.add(p, "duplicate_edge", "/edges/%d already connects %s to %s from the same output", j, e.From, e.To)
 			continue
 		}
 		seen[key] = k
-		good = append(good, edgeRef{index: k, from: from, to: to, on: e.On})
+		good = append(good, edgeRef{index: k, from: from, to: to, on: e.Output()})
 	}
 
 	// An edge is on a cycle when both ends are in the same strongly connected

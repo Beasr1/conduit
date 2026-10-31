@@ -1,11 +1,14 @@
 import { expect, test } from "vitest";
 
+import { UNHANDLED } from "@/features/editor/flow";
 import {
   runSaid,
   said,
+  type StepRun,
   stepRunOf,
   takenOf,
   took,
+  wayOf,
 } from "@/features/editor/runs";
 import type { components } from "@/gen/schema";
 
@@ -159,4 +162,30 @@ test("a run says how it went", () => {
       error: { code: "upstream_failed", detail: "user answered 503" },
     }),
   ).toBe("failed in 500 ms: user answered 503; Unhandled answered 502");
+});
+
+test("a step whose Unhandled took its failure answered through it", () => {
+  const failed: StepRun = {
+    state: "failed",
+    status: 500,
+    attempts: 2,
+    error: { code: "upstream_failed", detail: "status 500", caught: true },
+  };
+  expect(wayOf(failed)).toBe(UNHANDLED);
+  expect(said(failed)).toBe("Unhandled: 500, after 2 attempts");
+  expect(
+    said({
+      state: "failed",
+      error: { code: "timeout", detail: "", caught: true },
+    }),
+  ).toBe("Unhandled: timeout");
+  const ran: StepRun = { state: "succeeded" };
+  expect(takenOf(UNHANDLED, failed, ran)).toBe(true);
+  expect(takenOf(undefined, failed, ran)).toBe(false);
+  // A failure no line took answered nothing.
+  expect(
+    wayOf({ ...failed, error: { code: "upstream_failed", detail: "" } }),
+  ).toBeUndefined();
+  expect(wayOf({ state: "succeeded", status: 404 })).toBe(404);
+  expect(wayOf({ state: "succeeded" })).toBe(0);
 });

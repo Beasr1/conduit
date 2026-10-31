@@ -9,16 +9,17 @@ import (
 )
 
 // group is the answers joined to one output of one node: from node from, on
-// output on, a status or 0 for 2xx and a transform's one output.
+// output on, a status, 0 for 2xx and a transform's one output, or
+// OnUnhandled.
 type group struct {
 	from, on int
 	answers  []int // places in response.answers
 }
 
 // checkResponse checks what the workflow answers. Each answer has a status,
-// listed once, and one line, from a node and an output it has. A node
-// joined to several answers from one output picks among them, so it's a
-// transform; a switch gives the statuses of the answers it's joined to. Two
+// listed once, and one line, from a node and an output it has, its
+// Unhandled block among them. A node joined to several answers from one
+// output picks among them, so it's a transform; a switch gives the statuses of the answers it's joined to. Two
 // lines one run could both take are a problem, judged from the graph alone.
 // A definition answers through its response, or, kept for the revisions
 // saved with one, its output; not both.
@@ -60,6 +61,10 @@ func (v *validator) checkResponse(d *Definition, index map[string]int, edges []e
 			v.add(p+"/from", "unknown_node", "no node has the id %q", a.From)
 			continue
 		}
+		if a.Unhandled && a.On != 0 {
+			v.add(p+"/unhandled", "not_allowed", "a line leaves from one block: %s's %d output or its Unhandled", a.From, a.On)
+			continue
+		}
 		if a.On != 0 {
 			switch n := d.Nodes[from]; n.Kind {
 			case NodeKindHTTP:
@@ -72,9 +77,10 @@ func (v *validator) checkResponse(d *Definition, index map[string]int, edges []e
 				continue
 			}
 		}
-		i := slices.IndexFunc(groups, func(g group) bool { return g.from == from && g.on == a.On })
+		on := a.Output()
+		i := slices.IndexFunc(groups, func(g group) bool { return g.from == from && g.on == on })
 		if i < 0 {
-			groups = append(groups, group{from: from, on: a.On})
+			groups = append(groups, group{from: from, on: on})
 			i = len(groups) - 1
 		}
 		groups[i].answers = append(groups[i].answers, k)
@@ -88,14 +94,23 @@ func (v *validator) checkResponse(d *Definition, index map[string]int, edges []e
 }
 
 // checkGroup checks the answers joined to one output of one node. An http
-// node's result is the response it got, so it gives one answer. A switch
-// gives the answers it's joined to: each of its statuses is one, and each
-// one is among its statuses.
+// node's result is the response it got, so it gives one answer, and so does
+// a node's Unhandled block, as a failure has no status of the node's own to
+// pick with. A switch gives the answers it's joined to: each of its
+// statuses is one, and each one is among its statuses.
 func (v *validator) checkGroup(d *Definition, g group) {
 	n, answers := d.Nodes[g.from], d.Response.Answers
 	statuses := make([]int, len(g.answers))
 	for i, k := range g.answers {
 		statuses[i] = answers[k].Status
+	}
+	if g.on == OnUnhandled {
+		if len(statuses) > 1 {
+			v.add(fmt.Sprintf("/response/answers/%d/from", g.answers[1]), "not_allowed",
+				"%s's Unhandled is joined to %s: a failure has no status to pick one with, so it gives one answer; to pick among several, join a transform that does",
+				n.ID, statusList(statuses))
+		}
+		return
 	}
 	if n.Kind == NodeKindHTTP && len(statuses) > 1 {
 		v.add(fmt.Sprintf("/response/answers/%d/from", g.answers[1]), "not_allowed",
@@ -147,7 +162,7 @@ func (v *validator) checkReach(d *Definition, groups []group, edges []edgeRef) {
 }
 
 // needs is, for each node, the outputs it runs only after, by node: a
-// status, or 0 for 2xx and a transform's one output. A node runs once a
+// status, 0 for 2xx and a transform's one output, or OnUnhandled. A node runs once a
 // line into it is taken, so it needs what every line into it needs: the
 // line's node, answering through the line's output, and what that node
 // needs. A node with no line into it needs nothing. edges have no cycle.

@@ -18,7 +18,13 @@ import {
   joinAnswer,
   joinedTo,
 } from "@/features/editor/edits";
-import { RESPONSE, toFlow } from "@/features/editor/flow";
+import {
+  outputOf,
+  RESPONSE,
+  toFlow,
+  UNHANDLED,
+  UNHANDLED_HANDLE,
+} from "@/features/editor/flow";
 import { useProblemCount } from "@/features/editor/hooks/use-problems";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 
@@ -27,7 +33,7 @@ import { useEditor, useEditorStore } from "@/features/editor/store";
 // is edited, and the response's answers it gives; then Connect to, which
 // joins another step on it, or an answer with no line yet, without drawing,
 // as a keyboard can (WCAG 2.5.7). on is the response's status, and none is
-// 2xx, or a transform's one value.
+// 2xx, or a transform's one value; UNHANDLED is its Unhandled block.
 export function StepConnections({ index, on }: { index: number; on?: number }) {
   const edit = useEditor((s) => s.edit);
   const from = useEditor((s) => s.draft.nodes[index]?.id ?? "");
@@ -36,7 +42,7 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
   const leaving = useEditor(
     useShallow((s) =>
       (s.draft.edges ?? []).flatMap((e, i) =>
-        e.from === from && (e.on ?? 0) === (on ?? 0) ? [i] : [],
+        e.from === from && (outputOf(e) ?? 0) === (on ?? 0) ? [i] : [],
       ),
     ),
   );
@@ -72,15 +78,32 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
       );
     }),
   );
-  const handle = on === undefined ? (http ? "2xx" : "out") : String(on);
-  const point = http ? `the ${handle} point` : "its point";
+  const unhandled = on === UNHANDLED;
+  const handle = unhandled
+    ? UNHANDLED_HANDLE
+    : on === undefined
+      ? http
+        ? "2xx"
+        : "out"
+      : String(on);
+  const point = unhandled
+    ? "its Unhandled point"
+    : http
+      ? `the ${handle} point`
+      : "its point";
 
   const none = reachable.length === 0 && joinable.length === 0;
 
   return (
     <section className="flex flex-col gap-3 text-sm">
       <div className="flex flex-col gap-1.5">
-        <h3 className="font-medium">{http ? `Then, on ${handle}` : "Then"}</h3>
+        <h3 className="font-medium">
+          {unhandled
+            ? "Then, on Unhandled"
+            : http
+              ? `Then, on ${handle}`
+              : "Then"}
+        </h3>
         {leaving.length === 0 && gives.length === 0 ? (
           <p className="text-muted-foreground">
             None yet: connect a step below, or drag from {point} on the canvas
@@ -106,7 +129,9 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
         )}
       </div>
       <Field>
-        <FieldLabel htmlFor={`step-connect-${handle}`}>Connect to</FieldLabel>
+        <FieldLabel htmlFor={`step-connect-${handle}`}>
+          {unhandled ? "Connect Unhandled to" : "Connect to"}
+        </FieldLabel>
         <Select<string>
           value={null}
           disabled={none}
@@ -138,7 +163,8 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
           </SelectContent>
         </Select>
         <FieldDescription>
-          The step picked runs after this one when it answers this way. Its
+          The step picked runs after this one when it{" "}
+          {unhandled ? "fails into Unhandled" : "answers this way"}. Its
           condition, if it needs one, is the connection&apos;s. Picking an
           answer of the response makes this step give it.
         </FieldDescription>

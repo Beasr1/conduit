@@ -2,7 +2,6 @@ package runner
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,16 +11,16 @@ import (
 
 	"github.com/Beasr1/conduit/server/internal/engine"
 	"github.com/Beasr1/conduit/server/internal/store"
-	"github.com/Beasr1/conduit/server/internal/upstream"
 )
 
-// Codes say why a run or a node didn't succeed, and whose fault it was.
+// Codes say why a run or a node didn't succeed, and whose fault it was, as
+// the engine names them.
 const (
-	CodeUpstream  = "upstream_failed" // an upstream failed: a status, the connection, its body, or a blocked address
-	CodeTimeout   = "timeout"         // the run, or a node's last attempt, ran out of time
-	CodeWorkflow  = "workflow_error"  // the workflow's own configuration: an expression, a template
-	CodeInternal  = "internal_error"  // our bug: details only in the log
-	CodeCancelled = "cancelled"       // the caller went away, or the server shut down
+	CodeUpstream  = engine.CodeUpstream
+	CodeTimeout   = engine.CodeTimeout
+	CodeWorkflow  = engine.CodeWorkflow
+	CodeInternal  = engine.CodeInternal
+	CodeCancelled = engine.CodeCancelled
 )
 
 // Status is the HTTP status a served run that failed answers with, by its
@@ -49,25 +48,8 @@ type Failure struct {
 	Code   string `json:"code"`
 	Detail string `json:"detail"`
 	Node   string `json:"node,omitempty"` // on a run's failure: the node that failed it
-}
-
-// classify says whose fault err, a node's or a run's failure, is.
-func classify(err error) string {
-	var ue *upstream.Error
-	var pe *engine.PanicError
-	switch {
-	case errors.As(err, &pe):
-		return CodeInternal
-	case errors.Is(err, engine.ErrRunTimeout):
-		return CodeTimeout
-	case errors.As(err, &ue):
-		if ue.Kind == upstream.KindTimeout {
-			return CodeTimeout
-		}
-		return CodeUpstream
-	default:
-		return CodeWorkflow
-	}
+	// On a node's failure: its Unhandled block took it, and the run went on.
+	Caught bool `json:"caught,omitempty"`
 }
 
 // maxStored caps each body as stored (answer 4). The engine itself works

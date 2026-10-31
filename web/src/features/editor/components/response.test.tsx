@@ -42,8 +42,13 @@ const card = () => screen.getByTestId("rf__node-#response");
 
 // blocks are the card's answers, then + Add, as the canvas draws them.
 function blocks() {
-  return [...card().querySelectorAll("[data-part]")].map((b) => b.textContent);
+  return [
+    ...card().querySelectorAll('[data-part]:not([data-part="unhandled"])'),
+  ].map((b) => b.textContent);
 }
+
+// strip is the card's Unhandled, along its bottom.
+const strip = () => card().querySelector('[data-part="unhandled"]');
 
 async function openResponse() {
   fireEvent.click(
@@ -419,7 +424,8 @@ test("a step that leads nowhere, when every answer has its line, says to merge",
   });
   fireEvent.click(await screen.findByText("bad_400"));
   await screen.findByRole("complementary", { name: "Transform step" });
-  expect(screen.getByText(/^None yet/).textContent).toBe(
+  // Its value's, before its Unhandled's.
+  expect(screen.getAllByText(/^None yet/)[0]?.textContent).toBe(
     "None yet: connect a step below, or drag from its point on the canvas to the step. Each answer on the response takes one line, and has it: to answer from here, merge this step with the one that gives the answer.",
   );
 });
@@ -427,6 +433,7 @@ test("a step that leads nowhere, when every answer has its line, says to merge",
 test("unhandled answers a run that gives none: written, warned about, and taken away", async () => {
   renderEditor(answering);
   const panel = await openResponse();
+  expect(strip()?.textContent).toBe("Unhandled · problem details");
   fireEvent.click(
     within(panel).getByRole("button", { name: "Write your own" }),
   );
@@ -434,9 +441,7 @@ test("unhandled answers a run that gives none: written, warned about, and taken 
     name: "Unhandled body",
   });
   expect(body).toHaveProperty("value", "{ 'error': error.detail }");
-  expect(
-    within(card()).getByText("also 4xx · 5xx, your unhandled body"),
-  ).toBeTruthy();
+  expect(strip()?.textContent).toBe("Unhandled · your body");
   fireEvent.change(body, { target: { value: "$$" } });
   expect(
     within(panel).getByText(/^This sends callers what the run read/),
@@ -446,7 +451,9 @@ test("unhandled answers a run that gives none: written, warned about, and taken 
       name: "Use Conduit's problem details instead",
     }),
   );
-  expect(await within(card()).findByText("also 4xx · 5xx")).toBeTruthy();
+  await waitFor(() =>
+    expect(strip()?.textContent).toBe("Unhandled · problem details"),
+  );
 });
 
 test("a revision saved with an output opens with it moved into a step, to save", async () => {

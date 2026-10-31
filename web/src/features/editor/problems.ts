@@ -49,7 +49,8 @@ export const REQUEST_FIELDS: ReadonlySet<StepField | undefined> = new Set([
   "idempotent",
 ]);
 
-// The parts of the response a problem can be about: its line (from, on),
+// The parts of the response a problem can be about: its line (from, and on
+// for the block it leaves from, Unhandled's among them),
 // its answers as a whole, one answer's status or schema, and the output and
 // output schema of a revision saved with them.
 export type ResponseField =
@@ -94,9 +95,14 @@ export interface Found {
 export function placeOf(pointer: string): Place {
   const [top, i, ...rest] = tokens(pointer);
   if (top === "nodes" && isIndex(i)) return stepPlace(Number(i), rest);
+  // The block a line leaves from is its on, or its Unhandled.
   if (top === "edges" && isIndex(i))
-    return rest[0] === "when" || rest[0] === "on"
-      ? { on: "connection", index: Number(i), field: rest[0] }
+    return rest[0] === "when" || rest[0] === "on" || rest[0] === "unhandled"
+      ? {
+          on: "connection",
+          index: Number(i),
+          field: rest[0] === "when" ? "when" : "on",
+        }
       : { on: "connection", index: Number(i) };
   if (top === "output" || top === "output_schema")
     return { on: "response", field: top };
@@ -106,7 +112,11 @@ export function placeOf(pointer: string): Place {
     const [k, part] = rest;
     if (!isIndex(k)) return { on: "response", field: "answers" };
     const field =
-      part === "from" || part === "on" || part === "schema" ? part : "status";
+      part === "unhandled"
+        ? "on"
+        : part === "from" || part === "on" || part === "schema"
+          ? part
+          : "status";
     return { on: "response", field, answer: Number(k) };
   }
   if (top === "input_schema" || top === "sample_input")
@@ -352,7 +362,13 @@ export function say(problem: ProblemError, of: Definition): string {
       return `The editor doesn't know steps of the kind “${kind}”.`;
     }
     case "not_allowed":
-      if (place.on === "response") return responseNotAllowed(place.field);
+      if (tokens(problem.pointer).at(-1) === "unhandled")
+        return "A line leaves from one block: one of the step's responses, or its Unhandled.";
+      if (place.on === "response")
+        return responseNotAllowed(
+          place.field,
+          answerOf(place, of)?.unhandled === true,
+        );
       if (place.on === "connection")
         return "A transform step has no responses for a connection to leave from.";
       if (place.on === "step" && place.field === "switch")
@@ -449,13 +465,16 @@ function answerOf(place: Place, of: Definition) {
 }
 
 // responseNotAllowed is what's wrong with the part of the response a
-// not_allowed problem is about.
-function responseNotAllowed(field: ResponseField): string {
+// not_allowed problem is about, in an answer joined to a step's Unhandled
+// when unhandled says so.
+function responseNotAllowed(field: ResponseField, unhandled: boolean): string {
   switch (field) {
     case "on":
       return "A transform step has one point, so its line into an answer names no response.";
     case "from":
-      return "An HTTP step's response is what it got, so each of its responses gives one answer. To pick among several, join a transform step that does.";
+      return unhandled
+        ? "A step's Unhandled has no status to pick an answer with, so it gives one. To pick among several, join a transform step that does."
+        : "An HTTP step's response is what it got, so each of its responses gives one answer. To pick among several, join a transform step that does.";
     default:
       return "A workflow with a response has no output: the steps joined to its answers give them.";
   }

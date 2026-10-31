@@ -145,7 +145,7 @@ func nodeEventOut(e runner.NodeEvent) gen.NodeEvent {
 		At: e.At.UTC(), HTTPStatus: e.HTTPStatus,
 	}
 	if f := e.Failure; f != nil {
-		out.Error = gen.RunError{Code: gen.RunErrorCode(f.Code), Detail: f.Detail}
+		out.Error = gen.RunError{Code: gen.RunErrorCode(f.Code), Detail: f.Detail, Caught: f.Caught}
 	}
 	return out
 }

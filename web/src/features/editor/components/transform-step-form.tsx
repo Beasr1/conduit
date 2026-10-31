@@ -19,6 +19,7 @@ import {
 } from "@/features/editor/components/mapping-field";
 import { StepConnections } from "@/features/editor/components/step-connections";
 import { RunGave } from "@/features/editor/components/step-run";
+import { StepUnhandled } from "@/features/editor/components/step-unhandled";
 import { WholeRunNote } from "@/features/editor/components/whole-run-note";
 import {
   addCase,
@@ -59,6 +60,7 @@ export function TransformStepForm({ index }: { index: number }) {
       <RunGave index={index} />
       {cases ? <SwitchForm index={index} /> : <ExpressionForm index={index} />}
       <StepConnections index={index} />
+      <StepUnhandled index={index} />
     </>
   );
 }

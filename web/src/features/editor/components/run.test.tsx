@@ -130,9 +130,9 @@ function stream(nodes: NodeEvent[], run: Run) {
   );
 }
 
-// serveRun answers a run's start, its events and the run itself, ending as
-// end, as the server does, and keeps what each start asked for.
-function serveRun(end: Run = ended) {
+// serveRun answers a run's start, its events, nodes, and the run itself,
+// ending as end, as the server does, and keeps what each start asked for.
+function serveRun(end: Run = ended, nodes: NodeEvent[] = events) {
   const asked: StartRun[] = [];
   let done = false;
   server.use(
@@ -145,7 +145,7 @@ function serveRun(end: Run = ended) {
     ),
     http.get("/api/v1/runs/r-1/events", () => {
       done = true;
-      return stream(events, end);
+      return stream(nodes, end);
     }),
     http.get("/api/v1/runs/r-1", () =>
       HttpResponse.json<Run>(done ? end : started),
@@ -455,4 +455,118 @@ test("Run saves unsaved changes first, and runs the revision saved", async () =>
   await waitFor(() => expect(asked).toHaveLength(1));
   expect(saves).toEqual(['"1"']);
   expect(asked[0]).toEqual({ revision: 2, input: { user_id: "8" } });
+});
+
+// caughtDef has fallback after user's Unhandled.
+const caughtDef: Definition = {
+  ...branched,
+  nodes: [
+    ...branched.nodes,
+    { id: "fallback", kind: "transform", expr: "nodes.user.error.code" },
+  ],
+  edges: [
+    ...(branched.edges ?? []),
+    { from: "user", to: "fallback", unhandled: true },
+  ],
+};
+
+const userFailed = {
+  code: "upstream_failed" as const,
+  detail: "GET https://users.example.com/v1/users/7: status 500",
+  caught: true,
+};
+
+// caught is the run once user's 500 went to its Unhandled: fallback ran,
+// and neither step after user's responses did.
+const caught: Run = {
+  ...ended,
+  output: "upstream_failed",
+  nodes: [
+    {
+      node: "user",
+      status: "failed",
+      attempts: 1,
+      started_at: at(0),
+      ended_at: at(82),
+      response: { status: 500, headers: {}, body: { error: "down" } },
+      error: userFailed,
+    },
+    { node: "orders", status: "skipped", attempts: 0, ended_at: at(82) },
+    { node: "create_user", status: "skipped", attempts: 0, ended_at: at(82) },
+    {
+      node: "fallback",
+      status: "succeeded",
+      attempts: 0,
+      started_at: at(90),
+      ended_at: at(91),
+      response: { body: "upstream_failed" },
+    },
+  ],
+};
+
+test("a step whose Unhandled took its failure is marked so, and the run goes on down its line", async () => {
+  renderEditor(caughtDef);
+  serveRun(caught, [
+    { node: "user", kind: "started", attempt: 1, at: at(0) },
+    {
+      node: "user",
+      kind: "failed",
+      attempt: 1,
+      at: at(82),
+      http_status: 500,
+      error: userFailed,
+    },
+  ]);
+  await run();
+  await waitFor(() => expect(line("user")).toBe("Unhandled: 500"));
+  // Once the run is recorded, fallback has ended too.
+  await waitFor(() => expect(line("fallback")).toBe("done, 1 ms"));
+  expect(
+    within(screen.getByTestId("rf__node-user")).getByText(
+      ", the block its failure took",
+    ).parentElement?.textContent,
+  ).toBe("Unhandled, the block its failure took");
+  // Its responses' lines weren't taken; its Unhandled's was.
+  const kind = (id: string) =>
+    screen.getByTestId(`rf__edge-${id}`).getAttribute("class") ?? "";
+  expect(kind("user->orders")).toContain("untaken");
+  expect(kind("user->create_user")).toContain("untaken");
+  expect(kind("user->fallback")).not.toContain("untaken");
+});
+
+test("a run that failed, answered by the response's Unhandled, marks that and no answer", async () => {
+  renderEditor({
+    ...branched,
+    response: {
+      answers: [{ status: 502, from: "create_user" }],
+      unhandled: { body: "{ 'error': error.code }" },
+    },
+  });
+  serveRun({
+    ...ended,
+    status: "failed",
+    answered: 502,
+    output: { error: "upstream_failed" },
+    error: { code: "upstream_failed", detail: "status 500", node: "user" },
+  });
+  await run();
+  expect(
+    await screen.findByText(
+      /^Run of revision 1, started .*: failed in 300 ms: status 500; Unhandled answered 502$/,
+    ),
+  ).toBeTruthy();
+  const card = screen.getByTestId("rf__node-#response");
+  // Its strip, not the 502 answer the run didn't give.
+  await waitFor(() =>
+    expect(
+      within(card).getByText(", the answer it gave").parentElement?.textContent,
+    ).toBe("Unhandled · your body, the answer it gave"),
+  );
+  // create_user answered on the line into 502, but the run failed: it
+  // took no answer's line.
+  expect(
+    screen
+      .getByTestId("rf__edge-create_user->#response:0")
+      .getAttribute("class"),
+  ).toContain("untaken");
 });

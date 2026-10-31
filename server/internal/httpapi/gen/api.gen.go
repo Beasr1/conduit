@@ -416,6 +416,9 @@ type RunTrigger string
 
 // RunError Why a run or a node didn't succeed.
 type RunError struct {
+	// Caught On a node's error, its Unhandled block took it, and the run went on down the lines from that block.
+	Caught bool `json:"caught,omitempty,omitzero"`
+
 	// Code upstream_failed: an upstream answered with an error status, or couldn't be reached, read or allowed.
 	// timeout: the run, or a node's last attempt, ran out of time.
 	// workflow_error: the workflow's own configuration failed, such as an expression.

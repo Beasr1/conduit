@@ -3,10 +3,14 @@ import { expect, test } from "vitest";
 import {
   type Flow,
   freeSpot,
+  lineFrom,
   NODE_HEIGHT,
   NODE_WIDTH,
+  onOf,
+  outputOf,
   responseCard,
   toFlow,
+  UNHANDLED,
 } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 import { specExample as spec } from "@/test/fixtures";
@@ -120,14 +124,15 @@ test("a step grows to fit its outputs, a handle at least 24 px from the next", (
         },
       ],
     }).nodes[0];
+  // The Unhandled strip runs along the bottom, 24 px tall.
   expect(step([404])).toMatchObject({
-    height: NODE_HEIGHT,
-    measured: { height: NODE_HEIGHT },
+    height: NODE_HEIGHT + 24,
+    measured: { height: NODE_HEIGHT + 24 },
   });
-  // Four handles, each 1/5 of the way further down: 24 px apart.
+  // Four handles above it, each 1/5 of the way further down: 24 px apart.
   expect(step([404, 409, 500])).toMatchObject({
-    height: 120,
-    measured: { height: 120 },
+    height: 144,
+    measured: { height: 144 },
   });
 });
 
@@ -158,11 +163,12 @@ test("the response card goes after the rightmost step, level with the middle", (
   expect(card).toMatchObject({
     draggable: false,
     deletable: false,
-    height: NODE_HEIGHT,
+    height: NODE_HEIGHT + 24,
   });
   expect(card.connectable).not.toBe(false);
-  // It grows to fit its answers and + Add, 24 px apiece.
-  expect(responseCard(nodes, 3).height).toBe(96);
+  // It grows to fit its answers and + Add, 24 px apiece, above its
+  // Unhandled strip.
+  expect(responseCard(nodes, 3).height).toBe(120);
   expect(responseCard([], 0).position).toEqual({ x: 0, y: 0 });
 });
 
@@ -215,6 +221,47 @@ test("each answer's line leaves from its step, on its output, into the answer's 
     expect(toFlow({ ...spec, response }).edges).toEqual(toFlow(spec).edges);
 });
 
+test("a line from a step's Unhandled leaves from its strip", () => {
+  const flow = toFlow({
+    nodes: [
+      ...spec.nodes,
+      { id: "fallback", kind: "transform", expr: "1" },
+      // The API stores any string as a kind, and an unknown one has no strip.
+      { id: "odd", kind: "nonsense" as NodeKind },
+    ],
+    edges: [
+      { from: "user", to: "fallback", unhandled: true },
+      { from: "user", to: "fallback" },
+      { from: "odd", to: "fallback", unhandled: true },
+    ],
+    response: {
+      answers: [
+        { status: 200, from: "fallback" },
+        { status: 500, from: "fallback", unhandled: true },
+      ],
+    },
+  });
+  expect(flow.edges.map((e) => `${e.id} ${e.sourceHandle ?? ""}`)).toEqual([
+    "user->fallback unhandled",
+    "user->fallback#1 2xx",
+    "fallback->#response:0 out",
+    "fallback->#response:1 unhandled",
+  ]);
+  expect(flow.undrawn).toEqual([2]);
+});
+
+test("the editor counts Unhandled beside a step's other outputs", () => {
+  expect(onOf("unhandled")).toBe(UNHANDLED);
+  expect(onOf("404")).toBe(404);
+  expect(onOf("2xx")).toBeUndefined();
+  expect(outputOf({ on: 404 })).toBe(404);
+  expect(outputOf({ unhandled: true })).toBe(UNHANDLED);
+  expect(outputOf({})).toBeUndefined();
+  expect(lineFrom(UNHANDLED)).toEqual({ unhandled: true });
+  expect(lineFrom(404)).toEqual({ on: 404 });
+  expect(lineFrom(undefined)).toEqual({});
+});
+
 test("a draft saved with problems still draws", () => {
   const flow = toFlow({
     nodes: [
@@ -233,6 +280,8 @@ test("a draft saved with problems still draws", () => {
   });
   expect(flow.nodes.map((n) => n.id)).toEqual(["a", "a#1", "#2", "b"]);
   expect(flow.nodes[3]?.type).toBe("unknown");
+  // It has no Unhandled strip, so nothing for it to grow by.
+  expect(flow.nodes[3]?.height).toBe(NODE_HEIGHT);
   expect(flow.edges.map((e) => e.id)).toEqual(["a->b", "a->b#1", "b->b"]);
   expect(flow.undrawn).toEqual([2]);
 });

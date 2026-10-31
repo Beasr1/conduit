@@ -852,6 +852,9 @@ components:
         node:
           type: string
           description: On a run's error, the node that failed it.
+        caught:
+          type: boolean
+          description: On a node's error, its Unhandled block took it, and the run went on down the lines from that block.
 
     NodeRun:
       type: object

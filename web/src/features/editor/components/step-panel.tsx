@@ -10,6 +10,7 @@ import {
   AddResponse,
   StepOutput,
 } from "@/features/editor/components/step-output";
+import { StepUnhandled } from "@/features/editor/components/step-unhandled";
 import { TransformStepForm } from "@/features/editor/components/transform-step-form";
 import {
   asErrors,
@@ -34,8 +35,9 @@ const unknownKind = new Set<StepField | undefined>(["id", "kind"]);
 
 // StepSettings edits one step: its id, then what its kind has. An HTTP step
 // has a tab per block it's drawn as: Request, the call and its body; 2xx and
-// each response it lists, with its sample and what follows it; then one to
-// add a response. The tab open is the editor's part, so a click on a block
+// each response it lists, with its sample and what follows it; one to add
+// a response; then Unhandled, what takes its failures. The tab open is the
+// editor's part, so a click on a block
 // opens its tab. Its fields are keyed by the step's place in the draft
 // rather than its id, so renaming the step doesn't remount them under the
 // cursor.
@@ -89,6 +91,7 @@ export function StepSettings({ index }: { index: number }) {
             <TabsTrigger value="add" aria-label="Add a response">
               + Response
             </TabsTrigger>
+            <TabsTrigger value="unhandled">Unhandled</TabsTrigger>
           </TabsList>
           {/* Each stays mounted while hidden, so what's typed survives a
               switch. */}
@@ -106,6 +109,9 @@ export function StepSettings({ index }: { index: number }) {
           ))}
           <TabsContent value="add" keepMounted>
             <AddResponse index={index} taken={statuses} />
+          </TabsContent>
+          <TabsContent value="unhandled" keepMounted>
+            <StepUnhandled index={index} />
           </TabsContent>
         </Tabs>
       )}

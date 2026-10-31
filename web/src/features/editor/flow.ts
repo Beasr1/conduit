@@ -30,18 +30,71 @@ export function handlesOf(node: DefinitionNode): string[] {
     : ["out"];
 }
 
+// UNHANDLED is a step's Unhandled block among its outputs, as the editor
+// counts them: beside each status, and undefined for 2xx and a transform's
+// one. The definition writes a line from it as unhandled: true, and the
+// canvas draws it as a strip along the step's bottom, with this handle.
+export const UNHANDLED = -1;
+export const UNHANDLED_HANDLE = "unhandled";
+
+// outputOf is the output a line, an edge or an answer's, leaves from.
+export function outputOf(line: {
+  on?: number;
+  unhandled?: boolean;
+}): number | undefined {
+  return line.unhandled ? UNHANDLED : line.on;
+}
+
+// lineFrom is how the definition writes a line that leaves from output on.
+export function lineFrom(on: number | undefined): {
+  on?: number;
+  unhandled?: boolean;
+} {
+  if (on === UNHANDLED) return { unhandled: true };
+  return on === undefined ? {} : { on };
+}
+
 // onOf is the output an edge drawn from a handle leaves from, as the
-// definition names it: a status, or nothing for 2xx and a transform's one.
+// editor counts it: a status, UNHANDLED, or nothing for 2xx and a
+// transform's one.
 export function onOf(handle: string | null | undefined): number | undefined {
+  if (handle === UNHANDLED_HANDLE) return UNHANDLED;
   const status = Number(handle);
   return Number.isInteger(status) ? status : undefined;
 }
 
+// handleOf is the handle a line leaves its step from: its status's, the
+// Unhandled strip's, or the first, 2xx or a transform's one. Undefined when
+// the step has none such, as one of a kind the editor doesn't know has no
+// strip.
+function handleOf(
+  line: { on?: number; unhandled?: boolean },
+  node: DefinitionNode | undefined,
+): string | undefined {
+  if (line.unhandled)
+    return node && hasStrip(node) ? UNHANDLED_HANDLE : undefined;
+  const handles = handlesOf(node ?? { id: "", kind: "http" });
+  // No output, or 0 as the server reads it, is the first: 2xx.
+  const handle = line.on ? String(line.on) : (handles[0] ?? "");
+  return handles.includes(handle) ? handle : undefined;
+}
+
+// hasStrip says whether a step is drawn with its Unhandled strip: an HTTP
+// or transform step is.
+function hasStrip(node: DefinitionNode): boolean {
+  const kind: string = node.kind;
+  return kind === "http" || kind === "transform";
+}
+
 // heightOf is how tall a node is drawn: an HTTP step's response blocks and
 // its + Add share its right side, each at least HANDLE_GAP tall, so the
-// handles on them are at least that far apart.
+// handles on them are at least that far apart, and its Unhandled strip runs
+// along its bottom, as tall.
 function heightOf(node: DefinitionNode): number {
-  return Math.max(NODE_HEIGHT, (handlesOf(node).length + 1) * HANDLE_GAP);
+  const strip = hasStrip(node) ? HANDLE_GAP : 0;
+  return (
+    Math.max(NODE_HEIGHT, (handlesOf(node).length + 1) * HANDLE_GAP) + strip
+  );
 }
 
 // The response card's key. "#" can't appear in a node id, so the card is
@@ -94,14 +147,8 @@ export function toFlow(definition: Definition): Flow {
   for (const [i, e] of (definition.edges ?? []).entries()) {
     const source = keyOf.get(e.from);
     const target = keyOf.get(e.to);
-    const handles = handlesOf(nodeOf.get(e.from) ?? { id: "", kind: "http" });
-    // No output, or 0 as the server reads it, is the first: 2xx.
-    const handle = e.on ? String(e.on) : (handles[0] ?? "");
-    if (
-      source === undefined ||
-      target === undefined ||
-      !handles.includes(handle)
-    ) {
+    const handle = handleOf(e, nodeOf.get(e.from));
+    if (source === undefined || target === undefined || handle === undefined) {
       undrawn.push(i);
       continue;
     }
@@ -149,9 +196,8 @@ export function toFlow(definition: Definition): Flow {
   for (const [k, a] of (definition.response?.answers ?? []).entries()) {
     const source = a.from === undefined ? undefined : keyOf.get(a.from);
     if (a.from === undefined || source === undefined) continue;
-    const handles = handlesOf(nodeOf.get(a.from) ?? { id: "", kind: "http" });
-    const handle = a.on ? String(a.on) : (handles[0] ?? "");
-    if (!handles.includes(handle)) continue;
+    const handle = handleOf(a, nodeOf.get(a.from));
+    if (handle === undefined) continue;
     edges.push({
       id: `${source}->${RESPONSE}:${k}`,
       source,
@@ -181,7 +227,8 @@ export function freeSpot(at: XYPosition, placed: XYPosition[]): XYPosition {
 
 // responseCard is the card that ends the graph: what the workflow answers.
 // It goes after the rightmost step, level with the middle of them all, and
-// is as tall as its answers and + Add need, as a step is for its responses.
+// is as tall as its answers and + Add need, as a step is for its responses,
+// with its Unhandled strip along its bottom.
 // It can be picked, and a line drawn into it, but it can't be dragged or
 // deleted. The canvas adds it, since it isn't a node of the definition.
 export function responseCard(nodes: FlowNode[], answers: number): FlowNode {
@@ -194,7 +241,7 @@ export function responseCard(nodes: FlowNode[], answers: number): FlowNode {
           x: Math.max(...xs) + NODE_WIDTH + RANK_GAP,
           y: (Math.min(...ys) + Math.max(...ys)) / 2,
         };
-  const height = Math.max(NODE_HEIGHT, (answers + 1) * HANDLE_GAP);
+  const height = Math.max(NODE_HEIGHT, (answers + 1) * HANDLE_GAP) + HANDLE_GAP;
   return {
     id: RESPONSE,
     type: "response",

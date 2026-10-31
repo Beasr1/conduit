@@ -66,11 +66,13 @@ test.each<[string, Place]>([
   ["/edges/3", { on: "connection", index: 3 }],
   ["/edges/2/to", { on: "connection", index: 2 }],
   ["/edges/0/when", { on: "connection", index: 0, field: "when" }],
+  ["/edges/1/unhandled", { on: "connection", index: 1, field: "on" }],
   ["/output", { on: "response", field: "output" }],
   ["/output_schema", { on: "response", field: "output_schema" }],
   ["/response/answers", { on: "response", field: "answers" }],
   ["/response/answers/2/from", { on: "response", field: "from", answer: 2 }],
   ["/response/answers/0/on", { on: "response", field: "on", answer: 0 }],
+  ["/response/answers/1/unhandled", { on: "response", field: "on", answer: 1 }],
   ["/response/unhandled/body", { on: "response", field: "unhandled" }],
   ["/response/from", { on: "workflow" }],
   ["/nodes/1/switch", { on: "step", index: 1, field: "switch" }],
@@ -340,6 +342,7 @@ const broken: Definition = {
     answers: [
       { status: 99, from: "zz", on: 409 },
       { status: 99, from: "a" },
+      { status: 98, from: "a", unhandled: true },
     ],
   },
 };
@@ -365,6 +368,21 @@ test.each([
     "/response/answers/1/from",
     "not_allowed",
     "An HTTP step's response is what it got, so each of its responses gives one answer. To pick among several, join a transform step that does.",
+  ],
+  [
+    "/response/answers/2/from",
+    "not_allowed",
+    "A step's Unhandled has no status to pick an answer with, so it gives one. To pick among several, join a transform step that does.",
+  ],
+  [
+    "/response/answers/2/unhandled",
+    "not_allowed",
+    "A line leaves from one block: one of the step's responses, or its Unhandled.",
+  ],
+  [
+    "/edges/2/unhandled",
+    "not_allowed",
+    "A line leaves from one block: one of the step's responses, or its Unhandled.",
   ],
   [
     "/response/answers/1/from",

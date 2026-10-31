@@ -46,7 +46,8 @@ type Preview struct {
 // d's samples, and calls nothing. Each http step before it answers with the
 // sample of an output that leads to it, 2xx when that does, and each
 // transform before it is evaluated, and so is each connection's condition,
-// as a run would. Previewing the output, every http step answers 2xx. It
+// as a run would. A step only whose Unhandled block leads to it fails, with
+// an error made up. Previewing the output, every http step answers 2xx. It
 // works on a definition with problems, compiling what it can and reporting
 // what's in the way.
 func Simulate(ctx context.Context, d *workflow.Definition, id string) (pv *Preview, err error) {
@@ -155,7 +156,7 @@ type sim struct {
 	edge     int               // the connection previewed, or -1
 	entry    []json.RawMessage // a node's part of the data document, once it ran
 	needed   []bool            // the nodes the preview runs
-	via      []int             // the output each node answers through: a status, or 0 for 2xx
+	via      []int             // the output each node answers through: a status, 0 for 2xx, or workflow.OnUnhandled
 	skipped  []bool
 	taken    []bool // by edge, once its source ran
 	problems workflow.Problems
@@ -216,8 +217,8 @@ func (s *sim) need(target int) []bool {
 }
 
 // choose picks the output each needed node before target answers through:
-// one with a connection on towards target, 2xx when that has one. Previewing
-// the output, every node answers 2xx.
+// one with a connection on towards target, 2xx when that has one, else a
+// status, else Unhandled. Previewing the output, every node answers 2xx.
 func (s *sim) choose(target int) {
 	if target < 0 {
 		return
@@ -237,6 +238,8 @@ func (s *sim) choose(target int) {
 		}
 		if j := slices.IndexFunc(n.outputs, func(status int) bool { return leads[status] }); j >= 0 {
 			s.via[i] = n.outputs[j]
+		} else if leads[workflow.OnUnhandled] {
+			s.via[i] = workflow.OnUnhandled
 		}
 	}
 }
@@ -364,7 +367,8 @@ func (s *sim) parts(i int) []docPart {
 }
 
 // run simulates a node before the one previewed: an http node answers with
-// a sample, a transform gives its value.
+// a sample, a transform gives its value, and one that fails into its
+// Unhandled block gives a made-up failure.
 func (s *sim) run(i int) {
 	n := &s.p.nodes[i]
 	if !s.reached(i) {
@@ -372,6 +376,13 @@ func (s *sim) run(i int) {
 		return
 	}
 	switch {
+	case s.via[i] == workflow.OnUnhandled:
+		entry, err := madeUpFailure(n)
+		if err != nil {
+			s.problem("/nodes/"+strconv.Itoa(i), "evaluation_failed", "%s: %v", n.id, err)
+			return
+		}
+		s.entry[i] = entry
 	case n.kind == workflow.NodeKindHTTP:
 		sample, ptr, status := s.sample(i)
 		switch {
@@ -510,6 +521,22 @@ func (s *sim) output(pv *Preview) {
 	if pv.Gives, err = s.p.output.Eval(s.ctx, doc); err != nil {
 		s.problem("/output", "evaluation_failed", "%v", err)
 	}
+}
+
+// madeUpFailure is node n's part of the data document when it fails into
+// its Unhandled block, as a preview has it: an error, and no answer.
+func madeUpFailure(n *node) (json.RawMessage, error) {
+	code := CodeWorkflow
+	if n.kind == workflow.NodeKindHTTP {
+		code = CodeUpstream
+	}
+	type failure struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	return json.Marshal(struct {
+		Error failure `json:"error"`
+	}{failure{code, n.id + " failed: made up, as a preview calls nothing"}})
 }
 
 // sampleEntry is an http node's part of the data document, from a sample

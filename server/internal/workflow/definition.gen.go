@@ -60,7 +60,7 @@ type Answer struct {
 	// From The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs.
 	From string `json:"from,omitempty"`
 
-	// On The output of from that the line leaves from, as an edge's. Absent means 2xx, and a transform's only output.
+	// On The output of from that the line leaves from, as an edge's. Absent means 2xx, and a transform's only output, or the Unhandled block when unhandled is set.
 	On int `json:"on,omitempty"`
 
 	// Schema A JSON Schema (2020-12) the body is promised to match. Checked when saved, not enforced on runs yet.
@@ -68,6 +68,9 @@ type Answer struct {
 
 	// Status The HTTP status the answer has. Listed once in a response.
 	Status int `json:"status"`
+
+	// Unhandled The line leaves from from's Unhandled block, as an edge can, and on is absent. The answer's body is then from's body, what an http node got back with a status it doesn't list, else none. A node's Unhandled block is joined to one answer at most.
+	Unhandled bool `json:"unhandled,omitempty"`
 }
 
 // Case defines model for Case.
@@ -108,11 +111,14 @@ type Definition struct {
 type Edge struct {
 	From string `json:"from"`
 
-	// On The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and a transform's only output.
+	// On The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and a transform's only output, or the Unhandled block when unhandled is set.
 	On int    `json:"on,omitempty"`
 	To string `json:"to"`
 
-	// When A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source succeeded, answering through the edge's output, and this is true. Absent means true.
+	// Unhandled The edge leaves from its source's Unhandled block, and on is absent. Every node has one. It takes what the node's other outputs don't, a failure of its own, a status it doesn't list among them, so a run goes on down the edges from it, its node failed; with no line from it, the failure fails the run. Steps after it read the failure as nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer.
+	Unhandled bool `json:"unhandled,omitempty"`
+
+	// When A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source answered through the edge's output, or failed into its Unhandled block, and this is true. Absent means true.
 	When string `json:"when,omitempty"`
 }
 
@@ -150,7 +156,7 @@ type Node struct {
 	ID   string   `json:"id"`
 	Kind NodeKind `json:"kind"`
 
-	// Outputs An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node.
+	// Outputs An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node, and its Unhandled block takes that as it takes every failure of the node's.
 	Outputs []Output `json:"outputs,omitempty"`
 
 	// Request The call an http node makes.

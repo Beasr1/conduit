@@ -102,6 +102,14 @@ func TestValidate_AcceptsResponses(t *testing.T) {
 			"response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}]}}`,
 		"unhandled": `{"nodes": [{"id": "respond", "kind": "transform", "expr": "1"}],
 			"response": {"answers": [{"status": 200, "from": "respond"}], "unhandled": {"body": "{ 'error': error.detail }"}}}`,
+		"a node's Unhandled to an answer of its own": `{"nodes": [` + branched + `],
+			"response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "on": 404}, {"status": 502, "from": "user", "unhandled": true}]}}`,
+		"a switch's Unhandled beside its cases": `{"nodes": [{"id": "respond", "kind": "transform",
+			"switch": {"cases": [{"when": "input.id = 0", "status": 404}], "otherwise": {"status": 200}}}],
+			"response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}, {"status": 500, "from": "respond", "unhandled": true}]}}`,
+		"an edge from Unhandled, and one from 2xx, to one node": `{"nodes": [` + branched + `],
+			"edges": [{"from": "user", "to": "found"}, {"from": "user", "to": "found", "unhandled": true}, {"from": "found", "to": "gone", "unhandled": true}],
+			"response": {"answers": [{"status": 200, "from": "gone"}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -134,6 +142,12 @@ func TestValidate_TwoAnswersInOneRun(t *testing.T) {
 		// runs after orders: crm's 400 runs bad_400 too.
 		{
 			"both reached when prefs answers 400", edges + `, {"from": "prefs", "to": "test_400", "on": 400}, {"from": "test_400", "to": "transform"}`,
+			"/response/answers/1/from overlap: 200 (transform) and 400 (bad_400) can both be reached in one run: merge them into one node",
+		},
+		// crm's Unhandled is one more output, kept apart from its 2xx and 400.
+		{"kept apart by crm's Unhandled", edges + `, {"from": "crm", "to": "test_400", "unhandled": true}`, ""},
+		{
+			"both reached when transform reads crm's Unhandled too", edges + `, {"from": "crm", "to": "test_400", "unhandled": true}, {"from": "test_400", "to": "transform"}`,
 			"/response/answers/1/from overlap: 200 (transform) and 400 (bad_400) can both be reached in one run: merge them into one node",
 		},
 		// transform runs on either of crm's outputs, so its 2xx keeps nothing
@@ -485,6 +499,20 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 			name: "unhandled with no body",
 			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "from": "a"}], "unhandled": {"body": " "}}}`,
 			want: []string{"/response/unhandled/body required"},
+		},
+		{
+			name: "a line from both an output and Unhandled",
+			def: `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"}],
+			       "edges": [{"from": "a", "to": "b", "on": 404, "unhandled": true}],
+			       "response": {"answers": [{"status": 200, "from": "b"}, {"status": 404, "from": "a", "on": 404, "unhandled": true}]}}`,
+			want: []string{"/edges/0/unhandled not_allowed", "/response/answers/1/unhandled not_allowed"},
+		},
+		{
+			name: "Unhandled joined to two answers, and twice to one node",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}],
+			       "edges": [{"from": "a", "to": "b", "unhandled": true}, {"from": "a", "to": "b", "unhandled": true}],
+			       "response": {"answers": [{"status": 200, "from": "a"}, {"status": 500, "from": "a", "unhandled": true}, {"status": 503, "from": "a", "unhandled": true}]}}`,
+			want: []string{"/edges/1 duplicate_edge", "/response/answers/2/from not_allowed"},
 		},
 		{
 			name: "an output beside a response",

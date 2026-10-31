@@ -340,6 +340,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 			ne.HTTPStatus = nr.HTTPStatus
 			if nr.Status == engine.StatusFailed {
 				ne.Failure = r.failure(ctx, run.ID, ev.Node, nr.Err)
+				ne.Failure.Caught = nr.Caught
 				failures[ev.Node] = ne.Failure
 			}
 			end := nodeEnd{result: *nr, failure: ne.Failure, endedAt: ev.At}
@@ -419,7 +420,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 // client only learns that something went wrong. node is empty for the
 // output expression.
 func (r *Runner) failure(ctx context.Context, runID, node string, err error) *Failure {
-	f := &Failure{Code: classify(err), Detail: err.Error()}
+	f := &Failure{Code: engine.Classify(err), Detail: err.Error()}
 	if f.Code == CodeInternal {
 		var pe *engine.PanicError
 		if errors.As(err, &pe) {
