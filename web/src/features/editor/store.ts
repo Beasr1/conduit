@@ -2,7 +2,12 @@ import type { XYPosition } from "@xyflow/react";
 import { createContext, useContext } from "react";
 import { createStore, type StoreApi, useStore } from "zustand";
 
-import { move, renameNode, settle } from "@/features/editor/edits";
+import {
+  move,
+  outputToStep,
+  renameNode,
+  settle,
+} from "@/features/editor/edits";
 import { handlesOf, RESPONSE, toFlow } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 
@@ -13,10 +18,19 @@ interface Selection {
   edges: string[];
 }
 
+export interface Refused {
+  step: string;
+  answer?: number;
+}
+
 // The open editor's state. The canvas names nodes and edges by toFlow's keys,
 // which for a valid draft are the node ids themselves.
 export interface EditorState {
   draft: Definition;
+  // The step that a revision's output, kept from before the response, moved
+  // into when it opened, so the editor can say why there are changes to
+  // save. Undefined when there was nothing to move.
+  moved: string | undefined;
   // Nodes being dragged, and where they are now. The draft hears about a drag
   // only when it ends, rather than on every frame of it.
   moving: Record<string, XYPosition>;
@@ -37,6 +51,12 @@ export interface EditorState {
   run: string | undefined;
   showRun: (id: string) => void;
   closeRun: () => void;
+  // A line into the response just refused: the step it was drawn from, and
+  // the answer, by its place, whose one line is from another step, or none
+  // when the response has no answer to join. The card says why, until the
+  // next edit, pick, drag or click on the canvas.
+  refused: Refused | undefined;
+  refuse: (refused: Refused | undefined) => void;
   // show picks one step, connection or the response card, as a click on the
   // canvas would, opens a step on part, its request unless told, and closes
   // the panel.
@@ -55,11 +75,14 @@ export interface EditorState {
 export type EditorStore = StoreApi<EditorState>;
 
 // createEditorStore makes the store for one open editor, seeded once with the
-// definition it opened. The saved revision stays in the query cache, so a
-// refetch of it never reaches the draft.
-export function createEditorStore(draft: Definition): EditorStore {
+// definition it opened, its output moved into a step if it has one. The
+// saved revision stays in the query cache, so a refetch of it never reaches
+// the draft.
+export function createEditorStore(opened: Definition): EditorStore {
+  const { draft, step } = outputToStep(opened);
   return createStore<EditorState>()((set) => ({
     draft,
+    moved: step,
     moving: {},
     selected: { nodes: [], edges: [] },
     part: "request",
@@ -70,6 +93,8 @@ export function createEditorStore(draft: Definition): EditorStore {
     run: undefined,
     showRun: (run) => set({ run }),
     closeRun: () => set({ run: undefined }),
+    refused: undefined,
+    refuse: (refused) => set({ refused }),
     show: (kind, key, part = "request") =>
       set({
         panel: undefined,
@@ -78,6 +103,7 @@ export function createEditorStore(draft: Definition): EditorStore {
           edges: kind === "edges" ? [key] : [],
         },
         part,
+        refused: undefined,
       }),
     // Every edit settles the draft first, so nothing placed automatically
     // moves under the user's hands. An edit that changes nothing, such as a
@@ -88,7 +114,7 @@ export function createEditorStore(draft: Definition): EditorStore {
         const settled = settle(s.draft);
         const draft = change(settled);
         if (draft === settled) return s;
-        return { draft, ...kept(s, draft) };
+        return { draft, refused: undefined, ...kept(s, draft) };
       }),
     rename: (index, id) =>
       set((s) => {
@@ -128,6 +154,7 @@ export function createEditorStore(draft: Definition): EditorStore {
           selected: { ...s.selected, [kind]: [...on] },
           panel: picked ? undefined : s.panel,
           part: picked ? "request" : s.part,
+          refused: undefined,
         };
       }),
   }));

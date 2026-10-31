@@ -380,6 +380,9 @@ type RevisionSummary struct {
 
 // Run defines model for Run.
 type Run struct {
+	// Answered The status of the answer the run gave, its own once it succeeded, or its response's unhandled once it failed, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
+	Answered int `json:"answered,omitempty,omitzero"`
+
 	// EndedAt Absent while the run goes on.
 	EndedAt time.Time `json:"ended_at,omitempty,omitzero"`
 
@@ -393,7 +396,7 @@ type Run struct {
 	// Nodes What each node did, in the order they ended. Only from GET /v1/runs/{id}.
 	Nodes []NodeRun `json:"nodes,omitempty,omitzero"`
 
-	// Output The output, once the run succeeded. Over 256 KiB, its first 256 KiB as a string, and output_truncated is true.
+	// Output The body of the answer the run gave, unless it has none. Over 256 KiB, its first 256 KiB as a string, and output_truncated is true.
 	Output          json.RawMessage `json:"output,omitempty,omitzero"`
 	OutputTruncated bool            `json:"output_truncated,omitempty,omitzero"`
 	Revision        int             `json:"revision"`
@@ -443,6 +446,9 @@ type RunList struct {
 
 // RunSummary defines model for RunSummary.
 type RunSummary struct {
+	// Answered The status of the answer the run gave, its own once it succeeded, or its response's unhandled once it failed, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
+	Answered int `json:"answered,omitempty,omitzero"`
+
 	// EndedAt Absent while the run goes on.
 	EndedAt time.Time `json:"ended_at,omitempty,omitzero"`
 
@@ -586,7 +592,7 @@ type ServerInterface interface {
 	// GetReadyz Report that the server can reach its database
 	// (GET /readyz)
 	GetReadyz(w http.ResponseWriter, r *http.Request)
-	// ServeWorkflow Run a workflow's published revision and answer with its output
+	// ServeWorkflow Run a workflow's published revision and answer with the answer it gives
 	// (POST /serve/{slug})
 	ServeWorkflow(w http.ResponseWriter, r *http.Request, slug string)
 	// PreviewDefinition Preview what a step would read and send, or whether a connection is taken, over the samples
@@ -2428,7 +2434,7 @@ type StrictServerInterface interface {
 	// GetReadyz Report that the server can reach its database
 	// (GET /readyz)
 	GetReadyz(ctx context.Context, request GetReadyzRequestObject) (GetReadyzResponseObject, error)
-	// ServeWorkflow Run a workflow's published revision and answer with its output
+	// ServeWorkflow Run a workflow's published revision and answer with the answer it gives
 	// (POST /serve/{slug})
 	ServeWorkflow(ctx context.Context, request ServeWorkflowRequestObject) (ServeWorkflowResponseObject, error)
 	// PreviewDefinition Preview what a step would read and send, or whether a connection is taken, over the samples

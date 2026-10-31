@@ -94,9 +94,13 @@ func (e *InputError) Error() string { return "the input doesn't match the input 
 
 // Outcome is how a run ended.
 type Outcome struct {
-	Run     store.Run       // as recorded
-	Output  json.RawMessage // in full, once it succeeded; null if the definition has no output
-	Failure *Failure        // why it didn't
+	Run store.Run // as recorded
+	// What it answered: once it succeeded, its answer, and once it failed,
+	// its response's unhandled, if it has one. The status, 0 for none, and the body in
+	// full, empty when it has none.
+	Answer  int
+	Output  json.RawMessage
+	Failure *Failure // why it didn't
 }
 
 // Start runs a revision of a workflow in the background and returns the run
@@ -304,6 +308,10 @@ func (r *Runner) begin(ctx context.Context, workflowID string, revision int, tri
 // for a connection.
 const writeTimeout = 10 * time.Second
 
+// unhandledTimeout bounds unhandled's body, which is evaluated after the run,
+// whose own time may be up.
+const unhandledTimeout = 5 * time.Second
+
 // execute runs p and records it: each node as it ends, through the writer,
 // then the run. It frees the run's slot once the run is recorded.
 func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Program, run store.Run) Outcome {
@@ -348,7 +356,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 		res = &engine.Result{Status: engine.StatusFailed, Err: err}
 	}
 
-	out := Outcome{Run: run, Output: orNull(res.Output)}
+	out := Outcome{Run: run, Answer: res.Answer, Output: res.Output}
 	var output, errDoc json.RawMessage
 	var truncated bool
 	var ne *engine.NodeError
@@ -361,7 +369,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 		f := *failures[ne.Node] // already logged, if it's our bug
 		f.Node = ne.Node
 		out.Failure = &f
-	default: // the run's timeout, or the output expression
+	default: // the run's timeout, the output expression, or no answer
 		out.Failure = r.failure(ctx, run.ID, "", res.Err)
 	}
 	if out.Failure != nil {
@@ -370,16 +378,37 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 			r.log.ErrorContext(ctx, "encode a run's failure", "run", run.ID, "err", err)
 		}
 	}
+	// A run that gave no answer gets its response's unhandled, if it has
+	// one. Nobody waits on a cancelled run.
+	if f := out.Failure; f != nil && f.Code != CodeCancelled {
+		dctx, cancel := context.WithTimeout(rec, unhandledTimeout)
+		body, ok, err := p.Unhandled(dctx, run.Input, res.Nodes, errDoc)
+		cancel()
+		switch {
+		case !ok:
+		case err != nil:
+			// Its author sees why on the run; its caller gets the failure's
+			// own problem.
+			f.Detail += "; unhandled failed too: " + err.Error()
+			if errDoc, err = json.Marshal(f); err != nil {
+				r.log.ErrorContext(ctx, "encode a run's failure", "run", run.ID, "err", err)
+			}
+		default:
+			out.Answer, out.Output = Status(f.Code), body
+			output, truncated = capped(body)
+		}
+	}
 
 	wctx, cancel := context.WithTimeout(rec, writeTimeout)
 	defer cancel()
-	final, err := r.store.FinishRun(wctx, run.ID, string(res.Status), output, truncated, errDoc)
+	final, err := r.store.FinishRun(wctx, run.ID, string(res.Status), out.Answer, output, truncated, errDoc)
 	if err != nil {
 		// The row stays running until the next start marks it interrupted.
 		r.log.ErrorContext(ctx, "record a run's end", "run", run.ID, "err", err)
 		now := time.Now()
 		final = run
-		final.Status, final.Output, final.OutputTruncated, final.Error, final.EndedAt = string(res.Status), output, truncated, errDoc, &now
+		final.Status, final.Answered, final.Output, final.OutputTruncated = string(res.Status), out.Answer, output, truncated
+		final.Error, final.EndedAt = errDoc, &now
 	}
 	out.Run = final
 	r.events.end(run.ID)

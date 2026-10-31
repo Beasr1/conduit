@@ -1,21 +1,37 @@
 import { expect, test } from "vitest";
 
 import {
+  addAnswer,
+  addCase,
   addNode,
   addOutput,
   canConnect,
+  canJoin,
   connect,
+  joinAnswer,
+  joinedTo,
+  leaveAnswer,
   mentions,
   move,
+  moveCase,
   NODE_ID,
+  outputToStep,
   reads,
+  refusal,
+  removeAnswer,
+  removeCase,
   removeEdges,
   removeNodes,
   removeOutput,
   renameNode,
+  setAnswerSchema,
   setField,
+  setUnhandled,
+  toSwitch,
+  updateCase,
   updateEdge,
   updateNode,
+  updateOtherwise,
 } from "@/features/editor/edits";
 import type { components } from "@/gen/schema";
 import { specExample as spec } from "@/test/fixtures";
@@ -75,6 +91,221 @@ test("an output is added at the end, and removed with its connections", () => {
     { from: "user", to: "prefs" },
     { from: "user", to: "crm", on: 409 },
   ]);
+});
+
+// answering has a 200 and a 404 answer, and no line into either yet.
+const answering: Definition = {
+  ...branched,
+  nodes: [
+    ...branched.nodes,
+    { id: "respond", kind: "transform", expr: "nodes.crm.body" },
+  ],
+  response: { answers: [{ status: 200 }, { status: 404 }] },
+};
+
+test("each answer takes one line, from one of a step's outputs", () => {
+  expect(canJoin(answering, 0)).toBe(true);
+  const joined = joinAnswer(answering, 1, "user", 404);
+  expect(joined.response?.answers?.[1]).toEqual({
+    status: 404,
+    from: "user",
+    on: 404,
+  });
+  expect(canJoin(joined, 1)).toBe(false);
+  expect(joinedTo(joined, "user", 404)).toEqual([1]);
+  expect(joinedTo(joined, "user")).toEqual([]);
+  // A line from a step that's gone can be drawn again.
+  expect(
+    canJoin(
+      { ...answering, response: { answers: [{ status: 200, from: "gone" }] } },
+      0,
+    ),
+  ).toBe(true);
+  expect(canJoin(answering, 7)).toBe(false);
+});
+
+test("a line drawn into an answer that has one is refused, saying from where", () => {
+  const joined = joinAnswer(answering, 1, "crm");
+  expect(refusal(joined, "orders", 1)).toEqual({ status: 404, from: "crm" });
+  // Not the step it's from already, nor an answer free to join.
+  expect(refusal(joined, "crm", 1)).toBeUndefined();
+  expect(refusal(joined, "orders", 0)).toBeUndefined();
+});
+
+test("a transform joined to a second answer picks between them, with cases", () => {
+  const respond = answering.nodes.length - 1;
+  const first = joinAnswer(answering, 0, "respond");
+  expect(first.nodes[respond]).toEqual(answering.nodes[respond]);
+  const second = joinAnswer(first, 1, "respond");
+  expect(second.nodes[respond]).toEqual({
+    id: "respond",
+    kind: "transform",
+    switch: {
+      cases: [{ when: "", status: 404 }],
+      otherwise: { status: 200, body: "nodes.crm.body" },
+    },
+  });
+  // A switch joined to an answer it gives keeps its cases as they are.
+  const again = joinAnswer(leaveAnswer(second, 1), 1, "respond");
+  expect(again.nodes[respond]).toEqual(second.nodes[respond]);
+  // And gets a case for one it doesn't.
+  const third = joinAnswer(addAnswer(second, 409), 2, "respond");
+  expect(third.nodes[respond]?.switch?.cases).toEqual([
+    { when: "", status: 404 },
+    { when: "", status: 409 },
+  ]);
+});
+
+test("leaving an answer takes its line; the answer stays", () => {
+  const joined = joinAnswer(
+    setAnswerSchema(answering, 0, { type: "object" }),
+    0,
+    "crm",
+  );
+  expect(leaveAnswer(joined, 0).response?.answers?.[0]).toStrictEqual({
+    status: 200,
+    schema: { type: "object" },
+  });
+  // Nothing to leave changes nothing.
+  expect(leaveAnswer(answering, 0)).toBe(answering);
+  expect(leaveAnswer(answering, 9)).toBe(answering);
+});
+
+test("answers are added at the end, their schemas set, and removed by place", () => {
+  const three = addAnswer(answering, 409);
+  expect(three.response?.answers?.map((a) => a.status)).toEqual([
+    200, 404, 409,
+  ]);
+  const typed = setAnswerSchema(three, 1, { type: "object" });
+  expect(typed.response?.answers?.[1]).toEqual({
+    status: 404,
+    schema: { type: "object" },
+  });
+  expect(setAnswerSchema(typed, 1, { type: "object" })).toBe(typed);
+  expect(
+    setAnswerSchema(typed, 1, undefined).response?.answers?.[1],
+  ).toStrictEqual({ status: 404 });
+  expect(removeAnswer(typed, 0).response?.answers).toEqual([
+    { status: 404, schema: { type: "object" } },
+    { status: 409 },
+  ]);
+  // A response left with neither an answer nor unhandled goes.
+  expect(removeAnswer(addAnswer(spec, 200), 0)).not.toHaveProperty("response");
+  expect(
+    removeAnswer(setUnhandled(addAnswer(spec, 200), "1"), 0).response,
+  ).toEqual({ answers: [], unhandled: { body: "1" } });
+});
+
+test("unhandled is set, changed and taken away", () => {
+  const set = setUnhandled(spec, "{ 'error': error.detail }");
+  expect(set.response).toEqual({
+    unhandled: { body: "{ 'error': error.detail }" },
+  });
+  expect(setUnhandled(set, "{ 'error': error.detail }")).toBe(set);
+  expect(setUnhandled(set, undefined)).not.toHaveProperty("response");
+  expect(setUnhandled(answering, undefined)).toBe(answering);
+});
+
+test("answers' lines go with their step, and with its outputs", () => {
+  const user = branched.nodes.findIndex((n) => n.id === "user");
+  const joined = joinAnswer(joinAnswer(answering, 1, "user", 404), 0, "user");
+  expect(
+    renameNode(joined, user, "person").response?.answers?.map((a) => a.from),
+  ).toEqual(["person", "person"]);
+  expect(removeNodes(joined, [user]).response?.answers).toEqual([
+    { status: 200 },
+    { status: 404 },
+  ]);
+  expect(removeOutput(joined, user, 409).response).toEqual(joined.response);
+  expect(removeOutput(joined, user, 404).response?.answers).toEqual([
+    { status: 200, from: "user" },
+    { status: 404 },
+  ]);
+});
+
+test("a switch's cases are added, changed, moved and removed", () => {
+  const respond = answering.nodes.length - 1;
+  const cased = updateNode(answering, respond, (n) => toSwitch(n, 200));
+  expect(cased.nodes[respond]).toEqual({
+    id: "respond",
+    kind: "transform",
+    switch: { otherwise: { status: 200, body: "nodes.crm.body" } },
+  });
+  const two = addCase(addCase(cased, respond, 404), respond, 409);
+  const changed = updateCase(two, respond, 1, (c) => ({
+    ...c,
+    when: "nodes.crm.status = 409",
+  }));
+  expect(changed.nodes[respond]?.switch?.cases).toEqual([
+    { when: "", status: 404 },
+    { when: "nodes.crm.status = 409", status: 409 },
+  ]);
+  const moved = moveCase(changed, respond, 1, 0);
+  expect(moved.nodes[respond]?.switch?.cases?.map((c) => c.status)).toEqual([
+    409, 404,
+  ]);
+  expect(moveCase(changed, respond, 0, 5)).toBe(changed);
+  expect(removeCase(moved, respond, 0).nodes[respond]?.switch?.cases).toEqual([
+    { when: "", status: 404 },
+  ]);
+  expect(
+    updateOtherwise(moved, respond, (o) => ({ ...o, status: 201 })).nodes[
+      respond
+    ]?.switch?.otherwise,
+  ).toEqual({ status: 201, body: "nodes.crm.body" });
+  // A step without cases has none to change.
+  expect(addCase(answering, respond, 404)).toBe(answering);
+});
+
+test("an output moves into a step, respond, joined to the response's one answer, 200", () => {
+  const draft: Definition = {
+    ...branched,
+    output: "{ 'user': nodes.user.body, 'crm': nodes.crm.body }",
+    output_schema: { type: "object" },
+    ui: { positions: { user: { x: 0, y: 100 }, crm: { x: 600, y: 300 } } },
+  };
+  const { draft: moved, step } = outputToStep(draft);
+  expect(step).toBe("respond");
+  expect(moved).not.toHaveProperty("output");
+  expect(moved).not.toHaveProperty("output_schema");
+  expect(moved.nodes.at(-1)).toEqual({
+    id: "respond",
+    kind: "transform",
+    expr: draft.output,
+  });
+  // It runs after the steps the output reads, whichever way each answered.
+  expect(moved.edges?.slice(draft.edges?.length)).toEqual([
+    { from: "user", to: "respond" },
+    { from: "user", to: "respond", on: 404 },
+    { from: "user", to: "respond", on: 409 },
+    { from: "crm", to: "respond" },
+  ]);
+  expect(moved.response).toEqual({
+    answers: [{ status: 200, from: "respond", schema: { type: "object" } }],
+  });
+  // After the rightmost step it reads, level with their middle.
+  expect(moved.ui?.positions?.respond).toEqual({ x: 600 + 240 + 80, y: 200 });
+  expect(draft).not.toHaveProperty("response");
+});
+
+test("an output moves only once, into a step whose id is free", () => {
+  expect(outputToStep(spec)).toEqual({ draft: spec });
+  const both: Definition = {
+    ...spec,
+    output: "1",
+    response: { answers: [{ status: 200, from: "crm" }] },
+  };
+  expect(outputToStep(both).draft).toBe(both);
+  const taken: Definition = {
+    ...spec,
+    nodes: [...spec.nodes, { id: "respond", kind: "transform", expr: "1" }],
+    output: "nodes.respond.body",
+  };
+  const { draft, step } = outputToStep(taken);
+  expect(step).toBe("respond_2");
+  expect(draft.edges?.at(-1)).toEqual({ from: "respond", to: "respond_2" });
+  // With nothing placed, the layout places it.
+  expect(draft.ui).toBeUndefined();
 });
 
 test("a node is added where it was put, at a whole position", () => {

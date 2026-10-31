@@ -14,10 +14,11 @@ type Run struct {
 	ID              string          `db:"id"`
 	WorkflowID      string          `db:"workflow_id"`
 	Revision        int             `db:"revision"`
-	Trigger         string          `db:"trigger"` // editor or served
-	Status          string          `db:"status"`  // running, succeeded, failed or cancelled
-	Input           json.RawMessage `db:"input"`   // empty in lists
-	Output          json.RawMessage `db:"output"`  // set once it succeeded; empty in lists
+	Trigger         string          `db:"trigger"`  // editor or served
+	Status          string          `db:"status"`   // running, succeeded, failed or cancelled
+	Input           json.RawMessage `db:"input"`    // empty in lists
+	Answered        int             `db:"answered"` // the answer's status, once it succeeded with one; else 0
+	Output          json.RawMessage `db:"output"`   // the answer's body, unless it has none; empty in lists
 	OutputTruncated bool            `db:"output_truncated"`
 	Error           json.RawMessage `db:"error"` // {code, detail, node}, once it failed or was cancelled
 	StartedAt       time.Time       `db:"started_at"`
@@ -39,7 +40,7 @@ type NodeRun struct {
 
 const (
 	runColumns = `id::text AS id, workflow_id::text AS workflow_id, revision, trigger, status,
-		input, output, output_truncated, error, started_at, ended_at`
+		input, COALESCE(answered, 0) AS answered, output, output_truncated, error, started_at, ended_at`
 	nodeRunColumns = `run_id::text AS run_id, node_id, status, attempts, request, response, error, started_at, ended_at`
 )
 
@@ -66,9 +67,10 @@ func (s *Store) SaveNodeRun(ctx context.Context, n NodeRun) error {
 }
 
 // FinishRun records how a run ended, and returns it as it now stands.
-func (s *Store) FinishRun(ctx context.Context, id, status string, output json.RawMessage, truncated bool, errDoc json.RawMessage) (Run, error) {
-	r, err := one[Run](ctx, s.pool, `UPDATE runs SET status = $2, output = $3, output_truncated = $4, error = $5, ended_at = now()
-		WHERE id = $1::uuid AND status = 'running' RETURNING `+runColumns, id, status, orNull(output), truncated, orNull(errDoc))
+// answered is the status it answered with, or 0 for none.
+func (s *Store) FinishRun(ctx context.Context, id, status string, answered int, output json.RawMessage, truncated bool, errDoc json.RawMessage) (Run, error) {
+	r, err := one[Run](ctx, s.pool, `UPDATE runs SET status = $2, answered = NULLIF($3, 0), output = $4, output_truncated = $5, error = $6, ended_at = now()
+		WHERE id = $1::uuid AND status = 'running' RETURNING `+runColumns, id, status, answered, orNull(output), truncated, orNull(errDoc))
 	if err != nil {
 		return Run{}, fmt.Errorf("finish run %s: %w", id, translate(err))
 	}
@@ -117,7 +119,7 @@ func (s *Store) NodeRuns(ctx context.Context, runID string) ([]NodeRun, error) {
 // when it isn't empty.
 func (s *Store) Runs(ctx context.Context, workflowID string, limit int, before string) ([]Run, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id::text AS id, workflow_id::text AS workflow_id, revision, trigger, status,
-		output_truncated, error, started_at, ended_at FROM runs
+		COALESCE(answered, 0) AS answered, output_truncated, error, started_at, ended_at FROM runs
 		WHERE ($2::uuid IS NULL OR workflow_id = $2::uuid) AND ($3::uuid IS NULL OR id < $3::uuid)
 		ORDER BY id DESC LIMIT $1`, limit, orNull(workflowID), orNull(before))
 	if err != nil {

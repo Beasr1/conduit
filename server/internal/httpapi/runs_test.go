@@ -35,14 +35,29 @@ const greetDef = `{
   "input_schema": {"type": "object", "required": ["user_id"], "properties": {"user_id": {"type": "string"}}}
 }`
 
-// usersUpstream answers greetDef: user 7 at once, user 8 after a second,
-// 500 with an error, and slow not before the caller gives up.
+// answersDef answers 200 with the user, or 404 when the users API has none.
+const answersDef = `{
+  "nodes": [
+    {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}, "outputs": [{"status": 404}]},
+    {"id": "respond", "kind": "transform",
+     "expr": "nodes.user.status = 404 ? { 'status': 404, 'body': { 'error': 'no such user' } } : { 'status': 200, 'body': nodes.user.body }"}
+  ],
+  "edges": [{"from": "user", "to": "respond"}, {"from": "user", "to": "respond", "on": 404}],
+  "response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}]}
+}`
+
+// usersUpstream answers greetDef and answersDef: user 7 at once, user 8
+// after a second, gone with a 404, 500 with an error, and slow not before
+// the caller gives up.
 func usersUpstream(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/users/7":
 			fmt.Fprint(w, `{"id": "7", "name": "Ada"}`)
+		case "/users/gone":
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error": "not found"}`)
 		case "/users/8":
 			time.Sleep(time.Second)
 			fmt.Fprint(w, `{"id": "8", "name": "Grace"}`)
@@ -167,7 +182,7 @@ func TestRuns_StartFollowAndFetch(t *testing.T) {
 	if got, want := eventList(t, events), "1 user started, 2 user succeeded, 3 greet started, 4 greet succeeded, end run succeeded"; got != want {
 		t.Fatalf("events: %s\nwant:   %s", got, want)
 	}
-	if end := strict[gen.Run](t, []byte(events[4].data)); string(end.Output) != `{"greeting":"Hello, Ada"}` || end.EndedAt.IsZero() {
+	if end := strict[gen.Run](t, []byte(events[4].data)); end.Answered != 200 || string(end.Output) != `{"greeting":"Hello, Ada"}` || end.EndedAt.IsZero() {
 		t.Errorf("run event = %s", events[4].data)
 	}
 	if n := strict[gen.NodeEvent](t, []byte(events[1].data)); n.HTTPStatus != 200 || n.Attempt != 1 {
@@ -284,7 +299,15 @@ func TestServe(t *testing.T) {
 	t.Parallel()
 	up := usersUpstream(t)
 	greet := published(t, up.URL, greetDef).Workflow.Slug
-	noOutput := published(t, up.URL, `{"nodes": []}`).Workflow.Slug
+	answers := published(t, up.URL, answersDef).Workflow.Slug
+	noBody := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': 204 }"}],
+	  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 204, "from": "a"}]}}`).Workflow.Slug
+	noResponse := published(t, up.URL, `{"nodes": []}`).Workflow.Slug
+	noAnswer := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': 418 }"}],
+	  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 404, "from": "a"}]}}`).Workflow.Slug
+	// A failure answers with unhandled's body, at the status of its cause.
+	unhandled := published(t, up.URL, `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}", "timeout_ms": 1000}}],
+	  "response": {"answers": [{"status": 200, "from": "user"}], "unhandled": {"body": "{ 'error': error.code, 'step': error.node }"}}}`).Workflow.Slug
 	broken := published(t, up.URL, `{"nodes": [{"id": "t", "kind": "transform", "expr": "$number('one')"}]}`).Workflow.Slug
 	unpublished := create(t, validDef).Workflow.Slug
 
@@ -293,13 +316,19 @@ func TestServe(t *testing.T) {
 		status           int
 		want             string // the body, or the problem's code and node
 	}{
-		{"the output", greet, `{"user_id": "7"}`, 200, `{"greeting":"Hello, Ada"}`},
-		{"no output expression", noOutput, ``, 200, `null`},
+		{"the output of a revision saved with one", greet, `{"user_id": "7"}`, 200, `{"greeting":"Hello, Ada"}`},
+		{"the answer the response gives", answers, `{"user_id": "7"}`, 200, `{"id":"7","name":"Ada"}`},
+		{"another answer it gives", answers, `{"user_id": "gone"}`, 404, `{"error":"no such user"}`},
+		{"an answer with no body", noBody, ``, 204, ``},
+		{"no response", noResponse, ``, 500, "workflow_error"},
+		{"an answer the response doesn't give", noAnswer, ``, 500, "workflow_error"},
 		{"input the schema refuses", greet, `{"user_id": 7}`, 400, "invalid_input"},
 		{"a body that isn't JSON", greet, `{`, 400, "invalid_request"},
 		{"an upstream fails", greet, `{"user_id": "500"}`, 502, "upstream_failed user"},
 		{"an upstream is too slow", greet, `{"user_id": "slow"}`, 504, "timeout user"},
 		{"an expression fails", broken, ``, 500, "workflow_error t"},
+		{"unhandled answers an upstream's failure", unhandled, `{"user_id": "500"}`, 502, `{"error":"upstream_failed","step":"user"}`},
+		{"and a timeout", unhandled, `{"user_id": "slow"}`, 504, `{"error":"timeout","step":"user"}`},
 		{"no such slug", "no-such-slug", ``, 404, "not_found"},
 		{"never published", unpublished, ``, 404, "not_found"},
 	}
@@ -310,9 +339,14 @@ func TestServe(t *testing.T) {
 			if r.status != tt.status {
 				t.Fatalf("status = %d, want %d; body %s", r.status, tt.status, r.body)
 			}
-			if tt.status == 200 {
-				if string(r.body) != tt.want || r.header.Get("Content-Type") != "application/json" {
-					t.Errorf("body %s, Content-Type %q; want %s", r.body, r.header.Get("Content-Type"), tt.want)
+			// An answer is JSON, or nothing; a problem is problem details.
+			if ct := r.header.Get("Content-Type"); ct != "application/problem+json" {
+				wantCT := "application/json"
+				if tt.want == "" {
+					wantCT = ""
+				}
+				if string(r.body) != tt.want || ct != wantCT {
+					t.Errorf("body %s, Content-Type %q; want %s", r.body, ct, tt.want)
 				}
 				return
 			}

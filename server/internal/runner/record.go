@@ -24,6 +24,23 @@ const (
 	CodeCancelled = "cancelled"       // the caller went away, or the server shut down
 )
 
+// Status is the HTTP status a served run that failed answers with, by its
+// failure's code: an upstream that failed 502, a timeout 504, the
+// workflow's own failure or our bug 500. A cancelled run's caller has gone,
+// so its 503 is for the access log.
+func Status(code string) int {
+	switch code {
+	case CodeUpstream:
+		return http.StatusBadGateway
+	case CodeTimeout:
+		return http.StatusGatewayTimeout
+	case CodeCancelled:
+		return http.StatusServiceUnavailable
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
 // internalDetail is all a client learns about our bug.
 const internalDetail = "Something went wrong on our side."
 

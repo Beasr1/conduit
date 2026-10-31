@@ -11,16 +11,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ProblemMark } from "@/features/editor/components/problem-mark";
-import { canConnect, connect } from "@/features/editor/edits";
-import { toFlow } from "@/features/editor/flow";
+import {
+  canConnect,
+  canJoin,
+  connect,
+  joinAnswer,
+  joinedTo,
+} from "@/features/editor/edits";
+import { RESPONSE, toFlow } from "@/features/editor/flow";
 import { useProblemCount } from "@/features/editor/hooks/use-problems";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 
 // StepConnections is what follows one of a step's responses: the
 // connections that leave on it, each opening its line, where its condition
-// is edited; then Connect to, which joins another step on it without
-// drawing, as a keyboard can (WCAG 2.5.7). on is the response's status, and
-// none is 2xx, or a transform's one value.
+// is edited, and the response's answers it gives; then Connect to, which
+// joins another step on it, or an answer with no line yet, without drawing,
+// as a keyboard can (WCAG 2.5.7). on is the response's status, and none is
+// 2xx, or a transform's one value.
 export function StepConnections({ index, on }: { index: number; on?: number }) {
   const edit = useEditor((s) => s.edit);
   const from = useEditor((s) => s.draft.nodes[index]?.id ?? "");
@@ -31,6 +38,23 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
       (s.draft.edges ?? []).flatMap((e, i) =>
         e.from === from && (e.on ?? 0) === (on ?? 0) ? [i] : [],
       ),
+    ),
+  );
+  // The answers this response gives, and those a line from here could
+  // join: each takes one. By their place in the response's answers.
+  const statuses = useEditor(
+    useShallow((s) => (s.draft.response?.answers ?? []).map((a) => a.status)),
+  );
+  const gives = useEditor(
+    useShallow((s) => (from === "" ? [] : joinedTo(s.draft, from, on))),
+  );
+  const joinable = useEditor(
+    useShallow((s) =>
+      from === ""
+        ? []
+        : (s.draft.response?.answers ?? []).flatMap((_, k) =>
+            canJoin(s.draft, k) ? [k] : [],
+          ),
     ),
   );
   // The steps a connection from here could go to: not this one, not one
@@ -51,19 +75,32 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
   const handle = on === undefined ? (http ? "2xx" : "out") : String(on);
   const point = http ? `the ${handle} point` : "its point";
 
+  const none = reachable.length === 0 && joinable.length === 0;
+
   return (
     <section className="flex flex-col gap-3 text-sm">
       <div className="flex flex-col gap-1.5">
         <h3 className="font-medium">{http ? `Then, on ${handle}` : "Then"}</h3>
-        {leaving.length === 0 ? (
+        {leaving.length === 0 && gives.length === 0 ? (
           <p className="text-muted-foreground">
             None yet: connect a step below, or drag from {point} on the canvas
             to the step.
+            {statuses.length > 0 && joinable.length === 0 && (
+              <>
+                {" "}
+                Each answer on the response takes one line, and has it: to
+                answer from here, merge this step with the one that gives the
+                answer.
+              </>
+            )}
           </p>
         ) : (
           <ul className="flex flex-col">
             {leaving.map((i) => (
               <Row key={i} index={i} />
+            ))}
+            {gives.map((k) => (
+              <AnswerRow key={`answer-${k}`} status={statuses[k]} />
             ))}
           </ul>
         )}
@@ -72,16 +109,19 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
         <FieldLabel htmlFor={`step-connect-${handle}`}>Connect to</FieldLabel>
         <Select<string>
           value={null}
-          disabled={reachable.length === 0}
+          disabled={none}
           onValueChange={(to) => {
-            if (to !== null) edit((d) => connect(d, from, to, on));
+            if (to === null) return;
+            if (to.startsWith(ANSWER))
+              edit((d) =>
+                joinAnswer(d, Number(to.slice(ANSWER.length)), from, on),
+              );
+            else edit((d) => connect(d, from, to, on));
           }}
         >
           <SelectTrigger id={`step-connect-${handle}`} className="w-full">
             <SelectValue
-              placeholder={
-                reachable.length === 0 ? "No step to connect to" : "Pick a step"
-              }
+              placeholder={none ? "No step to connect to" : "Pick a step"}
             />
           </SelectTrigger>
           <SelectContent>
@@ -90,14 +130,45 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
                 {id}
               </SelectItem>
             ))}
+            {joinable.map((k) => (
+              <SelectItem key={`answer-${k}`} value={`${ANSWER}${k}`}>
+                Response {statuses[k]}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <FieldDescription>
           The step picked runs after this one when it answers this way. Its
-          condition, if it needs one, is the connection&apos;s.
+          condition, if it needs one, is the connection&apos;s. Picking an
+          answer of the response makes this step give it.
         </FieldDescription>
       </Field>
     </section>
+  );
+}
+
+// An answer, as Connect to's value names it: its place in the response's
+// answers, after this.
+const ANSWER = `${RESPONSE}:`;
+
+// AnswerRow is an answer of the response the step gives through this
+// response. A click opens the response.
+function AnswerRow({ status }: { status: number | undefined }) {
+  const show = useEditor((s) => s.show);
+  return (
+    <li>
+      <Button
+        variant="ghost"
+        className="h-auto w-full justify-start gap-2 py-1.5 text-left font-normal [&_svg]:size-3.5"
+        onClick={() => show("nodes", RESPONSE)}
+      >
+        <span>Response {status}:</span>{" "}
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+          this step answers
+        </span>
+        <ChevronRightIcon aria-hidden />
+      </Button>
+    </li>
   );
 }
 

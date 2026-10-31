@@ -137,9 +137,26 @@ test("a run says how it went", () => {
   expect(
     runSaid({
       ...run,
+      status: "succeeded",
+      answered: 404,
+      ended_at: "2026-10-30T20:00:00.082Z",
+    }),
+  ).toBe("succeeded in 82 ms, answered 404");
+  expect(
+    runSaid({
+      ...run,
       status: "failed",
       ended_at: "2026-10-30T20:00:00.500Z",
       error: { code: "upstream_failed", detail: "user answered 503" },
     }),
   ).toBe("failed in 500 ms: user answered 503");
+  expect(
+    runSaid({
+      ...run,
+      status: "failed",
+      answered: 502,
+      ended_at: "2026-10-30T20:00:00.500Z",
+      error: { code: "upstream_failed", detail: "user answered 503" },
+    }),
+  ).toBe("failed in 500 ms: user answered 503; Unhandled answered 502");
 });

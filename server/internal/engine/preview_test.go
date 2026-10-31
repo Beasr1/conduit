@@ -134,6 +134,27 @@ func TestSimulate_EvaluatesTransformsOnTheWay(t *testing.T) {
 	}
 }
 
+// A switch previews as it runs: the answer of its first case that holds.
+// One whose case fails says which, and the steps after it read nothing of
+// it.
+func TestSimulate_Switch(t *testing.T) {
+	t.Parallel()
+	def := `{"nodes": [
+		{"id": "user", "kind": "http", "request": {"method": "GET", "url": "https://users.example.com/v1"},
+		 "sample": {"body": {"key": 1}}},
+		{"id": "respond", "kind": "transform", "switch": {
+		 "cases": [{"when": "nodes.user.body.key = 1", "status": 400, "body": "{ 'error': 'bad key' }"}],
+		 "otherwise": {"status": 200, "body": "nodes.user.body"}}}],
+		"edges": [{"from": "user", "to": "respond"}]}`
+	if pv := previewOf(t, def, "respond", nil); !sameJSON(t, pv.Gives, `{"status": 400, "body": {"error": "bad key"}}`) || problemCodes(pv) != "" {
+		t.Errorf("respond gives %s, problems %s", pv.Gives, problemCodes(pv))
+	}
+	broken := strings.Replace(def, "nodes.user.body.key = 1", "$number('x') = 1", 1)
+	if pv := previewOf(t, broken, "respond", nil); problemCodes(pv) != "/nodes/1/switch/cases/0/when evaluation_failed" || pv.Gives != nil {
+		t.Errorf("broken: problems %s, gives %s", problemCodes(pv), pv.Gives)
+	}
+}
+
 // A step with no sample is named, never guessed at: what it would get back
 // just isn't there to read.
 func TestSimulate_NamesMissingSamples(t *testing.T) {

@@ -137,23 +137,20 @@ func (a *api) ServeWorkflow(ctx context.Context, req gen.ServeWorkflowRequestObj
 	case err != nil:
 		return nil, refusal(err)
 	}
+	// An answer goes out as it is, a failed run's unhandled one too.
+	if out.Answer != 0 {
+		return servedAnswer{status: out.Answer, body: out.Output}, nil
+	}
 	if f := out.Failure; f != nil {
 		return nil, &problem{
-			status: servedStatus[f.Code], code: f.Code, detail: f.Detail,
+			status: runner.Status(f.Code), code: f.Code, detail: f.Detail,
 			node: f.Node, instance: "/v1/runs/" + out.Run.ID,
 		}
 	}
-	return servedOutput(out.Output), nil
-}
-
-// servedStatus answers a served run that failed, by its failure's code.
-var servedStatus = map[string]int{
-	runner.CodeUpstream: http.StatusBadGateway,
-	runner.CodeTimeout:  http.StatusGatewayTimeout,
-	runner.CodeWorkflow: http.StatusInternalServerError,
-	runner.CodeInternal: http.StatusInternalServerError,
-	// The caller hung up, so no one reads this; it's for the access log.
-	runner.CodeCancelled: http.StatusServiceUnavailable,
+	return nil, &problem{
+		status: http.StatusInternalServerError, code: runner.CodeWorkflow, instance: "/v1/runs/" + out.Run.ID,
+		detail: "The workflow has no response, so it gives no answer. Join the steps that answer to its response, and publish again.",
+	}
 }
 
 // refusal answers the runner refusing to start a run: the input, or the
@@ -175,16 +172,21 @@ func refusal(err error) error {
 	return err
 }
 
-// servedOutput answers with a run's output as it is. The generated response
-// type is a json.RawMessage under another name, which encoding/json would
-// send as base64.
-type servedOutput json.RawMessage
+// servedAnswer answers with the answer a run gave: its status, and its body
+// as it is. The generated response types are 200 only, and json.RawMessage
+// under another name, which encoding/json would send as base64.
+type servedAnswer struct {
+	status int
+	body   json.RawMessage // empty: none
+}
 
-func (o servedOutput) VisitServeWorkflowResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+func (a servedAnswer) VisitServeWorkflowResponse(w http.ResponseWriter) error {
+	if len(a.body) > 0 {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	w.WriteHeader(a.status)
 	// The status is out, so a failed write can't change the answer.
-	_, _ = w.Write(o)
+	_, _ = w.Write(a.body)
 	return nil
 }
 
@@ -192,7 +194,7 @@ func runSummaryOut(r store.Run) (gen.RunSummary, error) {
 	out := gen.RunSummary{
 		ID: r.ID, WorkflowID: r.WorkflowID, Revision: r.Revision,
 		Trigger: gen.RunSummaryTrigger(r.Trigger), Status: gen.RunSummaryStatus(r.Status),
-		StartedAt: r.StartedAt.UTC(),
+		Answered: r.Answered, StartedAt: r.StartedAt.UTC(),
 	}
 	if r.EndedAt != nil {
 		out.EndedAt = r.EndedAt.UTC()
@@ -205,7 +207,7 @@ func runOut(r store.Run) (gen.Run, error) {
 	return gen.Run{
 		ID: s.ID, WorkflowID: s.WorkflowID, Revision: s.Revision,
 		Trigger: gen.RunTrigger(s.Trigger), Status: gen.RunStatus(s.Status),
-		Error: s.Error, StartedAt: s.StartedAt, EndedAt: s.EndedAt,
+		Answered: s.Answered, Error: s.Error, StartedAt: s.StartedAt, EndedAt: s.EndedAt,
 		Input: r.Input, Output: r.Output, OutputTruncated: r.OutputTruncated,
 	}, err
 }

@@ -26,10 +26,25 @@ import (
 // Program is a checked and compiled workflow. It can be run any number of
 // times, concurrently.
 type Program struct {
-	nodes  []node
-	edges  []edge
-	output *transform.Expr    // nil when the definition has none
-	input  *jsonschema.Schema // nil when the definition has no input_schema
+	nodes    []node
+	edges    []edge
+	response *response          // nil when the definition has none
+	output   *transform.Expr    // nil when the definition has none
+	input    *jsonschema.Schema // nil when the definition has no input_schema
+}
+
+// response is where a run's answer comes from: the answers, each a status
+// and the line it takes, and unhandled, for a run that gives none.
+type response struct {
+	answers   []answerLine    // in the definition's order
+	unhandled *transform.Expr // nil when there's none
+}
+
+// answerLine is an answer, given when node from answers through output on:
+// a status, or 0 for 2xx and for a transform's one output.
+type answerLine struct {
+	status   int
+	from, on int
 }
 
 type node struct {
@@ -47,8 +62,12 @@ type node struct {
 	idempotent bool
 	outputs    []int // the statuses besides 2xx it answers with
 
-	// transform nodes
-	expr *transform.Expr
+	// transform nodes: an expr, or a switch, whose otherwise is never nil.
+	// whole says every expression in it compiled.
+	expr      *transform.Expr
+	cases     []switchCase
+	otherwise *switchCase
+	whole     bool
 
 	in        []int // edges into this node
 	out       []int // edges out of it
@@ -58,6 +77,14 @@ type node struct {
 type param struct {
 	name  string
 	value *transform.Template
+}
+
+// switchCase is one of a switch's cases, or its otherwise, whose when is
+// nil.
+type switchCase struct {
+	when   *transform.Condition
+	status int
+	body   *transform.Expr // nil: no body
 }
 
 type edge struct {
@@ -105,8 +132,11 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 			for _, o := range n.Outputs {
 				pn.outputs = append(pn.outputs, o.Status)
 			}
+		case n.Kind == workflow.NodeKindTransform && n.Switch != nil:
+			pn.cases, pn.otherwise, pn.whole = c.cases(ptr+"/switch", n.Switch)
 		case n.Kind == workflow.NodeKindTransform && n.Expr != "":
 			pn.expr = c.expr(ptr+"/expr", n.Expr)
+			pn.whole = pn.expr != nil
 		}
 	}
 	for k, e := range d.Edges {
@@ -143,6 +173,19 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 		p.edges[k].from, p.edges[k].to = from, to
 		p.nodes[from].out = append(p.nodes[from].out, k)
 		p.nodes[to].in = append(p.nodes[to].in, k)
+	}
+	if r := d.Response; r != nil {
+		p.response = &response{}
+		// A from that names no node is a problem, so such a program never runs.
+		for k, a := range r.Answers {
+			p.response.answers = append(p.response.answers, answerLine{status: a.Status, from: index[a.From], on: a.On})
+			if len(a.Schema) > 0 {
+				c.jsonSchema(fmt.Sprintf("/response/answers/%d/schema", k), a.Schema)
+			}
+		}
+		if r.Unhandled != nil && r.Unhandled.Body != "" {
+			p.response.unhandled = c.expr("/response/unhandled/body", r.Unhandled.Body)
+		}
 	}
 	for i := range p.nodes {
 		p.nodes[i].ancestors = p.ancestors(i)
@@ -189,6 +232,34 @@ func (c *compiler) expr(pointer, src string) *transform.Expr {
 	x, err := transform.Compile(src)
 	c.check(pointer, err)
 	return x
+}
+
+// cases compiles a switch: its cases, its otherwise, and whether every
+// expression in them compiled.
+func (c *compiler) cases(pointer string, s *workflow.Switch) ([]switchCase, *switchCase, bool) {
+	whole := true
+	body := func(ptr, src string) *transform.Expr {
+		if src == "" {
+			return nil
+		}
+		x := c.expr(ptr+"/body", src)
+		whole = whole && x != nil
+		return x
+	}
+	out := make([]switchCase, len(s.Cases))
+	for k, sc := range s.Cases {
+		ptr := fmt.Sprintf("%s/cases/%d", pointer, k)
+		var when *transform.Condition
+		if sc.When != "" { // a missing condition is validation's problem
+			var err error
+			when, err = transform.CompileCondition(sc.When)
+			c.check(ptr+"/when", err)
+		}
+		whole = whole && when != nil
+		out[k] = switchCase{when: when, status: sc.Status, body: body(ptr, sc.Body)}
+	}
+	otherwise := &switchCase{status: s.Otherwise.Status, body: body(pointer+"/otherwise", s.Otherwise.Body)}
+	return out, otherwise, whole
 }
 
 func (c *compiler) template(pointer, src string) *transform.Template {

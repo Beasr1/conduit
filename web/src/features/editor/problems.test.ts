@@ -1,11 +1,17 @@
 import { expect, test } from "vitest";
 
 import {
+  addAnswer,
+  joinAnswer,
+  removeAnswer,
   removeEdges,
   removeNodes,
   renameNode,
+  setUnhandled,
+  updateCase,
   updateEdge,
   updateNode,
+  updateOtherwise,
 } from "@/features/editor/edits";
 import {
   follow,
@@ -62,6 +68,43 @@ test.each<[string, Place]>([
   ["/edges/0/when", { on: "connection", index: 0, field: "when" }],
   ["/output", { on: "response", field: "output" }],
   ["/output_schema", { on: "response", field: "output_schema" }],
+  ["/response/answers", { on: "response", field: "answers" }],
+  ["/response/answers/2/from", { on: "response", field: "from", answer: 2 }],
+  ["/response/answers/0/on", { on: "response", field: "on", answer: 0 }],
+  ["/response/unhandled/body", { on: "response", field: "unhandled" }],
+  ["/response/from", { on: "workflow" }],
+  ["/nodes/1/switch", { on: "step", index: 1, field: "switch" }],
+  [
+    "/nodes/1/switch/cases/2/when",
+    { on: "step", index: 1, field: "case_when", case: 2 },
+  ],
+  [
+    "/nodes/1/switch/cases/0/status",
+    { on: "step", index: 1, field: "case_status", case: 0 },
+  ],
+  [
+    "/nodes/1/switch/cases/0/body",
+    { on: "step", index: 1, field: "case_body", case: 0 },
+  ],
+  [
+    "/nodes/1/switch/otherwise/status",
+    { on: "step", index: 1, field: "otherwise_status" },
+  ],
+  [
+    "/nodes/1/switch/otherwise/body",
+    { on: "step", index: 1, field: "otherwise_body" },
+  ],
+  ["/nodes/1/switch/cases", { on: "step", index: 1, field: "switch" }],
+  [
+    "/response/answers/1/status",
+    { on: "response", field: "status", answer: 1 },
+  ],
+  [
+    "/response/answers/0/schema",
+    { on: "response", field: "schema", answer: 0 },
+  ],
+  ["/response/answers/01/status", { on: "response", field: "answers" }],
+  ["/response", { on: "workflow" }],
   ["/input_schema", { on: "settings", field: "input_schema" }],
   ["/sample_input", { on: "settings", field: "sample_input" }],
   ["/nodes/0/sample", { on: "step", index: 0, field: "sample" }],
@@ -219,6 +262,56 @@ test("a problem goes once what it's about changes", () => {
   ).toBeUndefined();
 });
 
+test("an answer's problem goes once that answer changes, and its line's once the line moves", () => {
+  const answered: Definition = {
+    ...specExample,
+    response: { answers: [{ status: 200, from: "zz" }, { status: 99 }] },
+  };
+  const status: Place = { on: "response", field: "status", answer: 1 };
+  expect(follow(status, answered, addAnswer(answered, 404))).toEqual(status);
+  expect(follow(status, answered, removeAnswer(answered, 1))).toBeUndefined();
+  const from: Place = { on: "response", field: "from", answer: 0 };
+  expect(follow(from, answered, addAnswer(answered, 404))).toEqual(from);
+  expect(
+    follow(from, answered, joinAnswer(answered, 0, "crm")),
+  ).toBeUndefined();
+  // One about the answers as a whole goes once any of them changes.
+  const answers: Place = { on: "response", field: "answers" };
+  expect(follow(answers, answered, setUnhandled(answered, "1"))).toEqual(
+    answers,
+  );
+  expect(follow(answers, answered, addAnswer(answered, 404))).toBeUndefined();
+  // And one in a case, once that case changes.
+  const cased: Definition = {
+    ...specExample,
+    nodes: [
+      {
+        id: "a",
+        kind: "transform",
+        switch: {
+          cases: [{ when: "", status: 400 }],
+          otherwise: { status: 200 },
+        },
+      },
+    ],
+  };
+  const when: Place = { on: "step", index: 0, field: "case_when", case: 0 };
+  expect(
+    follow(
+      when,
+      cased,
+      updateOtherwise(cased, 0, (o) => ({ ...o, body: "1" })),
+    ),
+  ).toEqual(when);
+  expect(
+    follow(
+      when,
+      cased,
+      updateCase(cased, 0, 0, (c) => ({ ...c, when: "true" })),
+    ),
+  ).toBeUndefined();
+});
+
 test("the response, the settings and the workflow stay where they are", () => {
   const after = removeNodes(specExample, [0]);
   for (const place of [
@@ -243,9 +336,77 @@ const broken: Definition = {
     { from: "a", to: "a" },
     { from: "a", to: "Bad", on: 409 },
   ],
+  response: {
+    answers: [
+      { status: 99, from: "zz", on: 409 },
+      { status: 99, from: "a" },
+    ],
+  },
 };
 
 test.each([
+  [
+    "/response/answers/0/from",
+    "required",
+    "Join a step to this answer: drag from the step's point to the answer's.",
+  ],
+  ["/response/answers/0/from", "unknown_node", "No step has the id “zz”."],
+  [
+    "/response/answers/0/on",
+    "unknown_output",
+    "zz has no 409 response. Join this answer from another of its points.",
+  ],
+  [
+    "/response/answers/0/on",
+    "not_allowed",
+    "A transform step has one point, so its line into an answer names no response.",
+  ],
+  [
+    "/response/answers/1/from",
+    "not_allowed",
+    "An HTTP step's response is what it got, so each of its responses gives one answer. To pick among several, join a transform step that does.",
+  ],
+  [
+    "/response/answers/1/from",
+    "never_given",
+    "a never gives 99: add a case for it, or join another step to it.",
+  ],
+  ["/response/answers", "required", "Add an answer: a status the API gives."],
+  [
+    "/response/unhandled/body",
+    "required",
+    "Write its body, or use Conduit's problem details instead.",
+  ],
+  ["/nodes/0/switch/cases/0/when", "required", "Add a condition."],
+  ["/nodes/0/switch/cases/0/status", "required", "Give it a status."],
+  ["/nodes/0/switch/otherwise/status", "required", "Give it a status."],
+  [
+    "/nodes/0/switch/cases/0/status",
+    "invalid_status",
+    "A status from 200 to 599.",
+  ],
+  [
+    "/nodes/0/switch",
+    "not_allowed",
+    "A transform step has an expression or cases, not both.",
+  ],
+  [
+    "/nodes/1/switch",
+    "not_allowed",
+    "An HTTP step sends a request, and has no cases.",
+  ],
+  ["/response/answers/0/status", "required", "Give the answer a status."],
+  ["/response/answers/0/status", "invalid_status", "A status from 200 to 599."],
+  [
+    "/response/answers/1/status",
+    "duplicate_answer",
+    "Another answer already has this status.",
+  ],
+  [
+    "/output",
+    "not_allowed",
+    "A workflow with a response has no output: the steps joined to its answers give them.",
+  ],
   ["/nodes/0/expr", "required", "Add an expression."],
   ["/nodes/1/request/url", "required", "Add a URL."],
   ["/nodes/1/id", "duplicate_id", "Another step already has this id."],

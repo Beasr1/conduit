@@ -314,8 +314,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Run a workflow's published revision and answer with its output
-         * @description The body is the run's input. A run that fails answers with problem details naming the node; `instance` is the run, at /v1/runs/{id}. Served runs time out after 30 s.
+         * Run a workflow's published revision and answer with the answer it gives
+         * @description The body is the run's input. A run answers with the answer it gave, its status and its body. A run that gives none, as a node failed, or it took no line into the response, or lines from two nodes, answers with its response's default, if it has one, at the status of the cause, 502 an upstream failed, 504 a timeout, 500 otherwise. Without one, or with no response, it answers that status with problem details naming what failed; `instance` is the run, at /v1/runs/{id}. A revision saved with an output answers 200 with it. Served runs time out after 30 s.
          */
         post: operations["serveWorkflow"];
         delete?: never;
@@ -467,11 +467,13 @@ export interface components {
              * @description Absent while the run goes on.
              */
             ended_at?: string;
+            /** @description The status of the answer the run gave, its own once it succeeded, or its response's unhandled once it failed, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none. */
+            answered?: number;
         };
         Run: components["schemas"]["RunSummary"] & {
             /** @description The input, as sent. */
             input: unknown;
-            /** @description The output, once the run succeeded. Over 256 KiB, its first 256 KiB as a string, and output_truncated is true. */
+            /** @description The body of the answer the run gave, unless it has none. Over 256 KiB, its first 256 KiB as a string, and output_truncated is true. */
             output?: unknown;
             output_truncated?: boolean;
             /** @description What each node did, in the order they ended. Only from GET /v1/runs/{id}. */
@@ -580,6 +582,24 @@ export interface components {
             timeout_ms?: number;
             retry?: components["schemas"]["Retry"];
         };
+        Case: {
+            /** @description JSONata, cast to a boolean as an edge's condition is. */
+            when?: string;
+            status: number;
+            /** @description JSONata whose value is the body. Absent means none. */
+            body?: string;
+        };
+        /** @description What a switch gives when no case holds. */
+        Otherwise: {
+            status: number;
+            /** @description JSONata whose value is the body. Absent means none. */
+            body?: string;
+        };
+        /** @description A transform node's cases, in place of an expr. The first case whose condition holds gives its status and body, else otherwise does, so the node's value is {status, body}. */
+        Switch: {
+            cases?: components["schemas"]["Case"][];
+            otherwise: components["schemas"]["Otherwise"];
+        };
         Sample: {
             /** @description Absent means 200. Only a node's 2xx sample has one; an output's sample takes the output's. */
             status?: number;
@@ -602,8 +622,10 @@ export interface components {
             kind: components["schemas"]["NodeKind"];
             /** @description The call an http node makes. */
             request?: components["schemas"]["HTTPRequest"];
-            /** @description A transform node's JSONata. Its value becomes the node's body. */
+            /** @description A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch. */
             expr?: string;
+            /** @description A transform node's cases, in place of an expr. */
+            switch?: components["schemas"]["Switch"];
             /** @description An http node's made-up or redacted 2xx response, which previews read in place of a real one. Runs ignore it. */
             sample?: components["schemas"]["Sample"];
             /** @description An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node. */
@@ -616,6 +638,29 @@ export interface components {
             on?: number;
             /** @description A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source succeeded, answering through the edge's output, and this is true. Absent means true. */
             when?: string;
+        };
+        Answer: {
+            /** @description The HTTP status the answer has. Listed once in a response. */
+            status: number;
+            /** @description The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs. */
+            from?: string;
+            /** @description The output of from that the line leaves from, as an edge's. Absent means 2xx, and a transform's only output. */
+            on?: number;
+            /** @description A JSON Schema (2020-12) the body is promised to match. Checked when saved, not enforced on runs yet. */
+            schema?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description What the API answers a run that gives no answer. Its status is the cause's, 502 when an upstream failed, 504 when the run or a node ran out of time, 500 otherwise, and its body is this. */
+        Unhandled: {
+            /** @description JSONata over the run as it stood, every node that succeeded, and error, {code, detail, node}. */
+            body: string;
+        };
+        /** @description What the workflow's API answers. Each answer is a status, joined by one line from the node that gives it; a run that takes one line answers with it. A run that takes none, or lines from two nodes, or in which a node fails, gives no answer, and fails; unhandled, if there is one, answers it. */
+        Response: {
+            /** @description The answers the API can give, each a status, the line it takes, and the shape promised with it. */
+            answers?: components["schemas"]["Answer"][];
+            unhandled?: components["schemas"]["Unhandled"];
         };
         /** @description A point on the canvas. A missing coordinate reads as 0. */
         Position: {
@@ -634,13 +679,15 @@ export interface components {
         Definition: {
             nodes: components["schemas"]["Node"][];
             edges?: components["schemas"]["Edge"][];
-            /** @description JSONata over the finished run. Its value is the run's result. */
+            /** @description Kept for revisions saved with it, as response replaces it. JSONata over the finished run; such a definition answers 200 with its value. A definition has an output or a response, not both. */
             output?: string;
+            /** @description What the workflow's API answers. */
+            response?: components["schemas"]["Response"];
             /** @description A JSON Schema (2020-12) that run input must match. A served workflow answers input that doesn't with 400. Its $refs can only point inside it. */
             input_schema?: {
                 [key: string]: unknown;
             };
-            /** @description A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet. */
+            /** @description Kept for revisions saved with it, as response replaces it. A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet. */
             output_schema?: {
                 [key: string]: unknown;
             };
@@ -1147,7 +1194,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The run's output. null when the workflow has no output expression. */
+            /** @description The run's answer, when its status is 200. An answer with another status comes the same way, with that status. */
             200: {
                 headers: {
                     [name: string]: unknown;

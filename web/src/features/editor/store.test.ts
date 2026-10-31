@@ -64,6 +64,30 @@ test("opening the workflow's settings puts away what was picked, and a pick clos
   expect(store.getState().panel).toBeUndefined();
 });
 
+test("a revision saved with an output opens with it moved into a step", () => {
+  const store = createEditorStore({ ...specExample, output: "nodes.crm.body" });
+  expect(store.getState().moved).toBe("respond");
+  expect(store.getState().draft.response).toEqual({
+    answers: [{ status: 200, from: "respond" }],
+  });
+  expect(createEditorStore(specExample).getState().moved).toBeUndefined();
+});
+
+test("a refused line is told until the next edit, pick or show", () => {
+  const store = createEditorStore(specExample);
+  const { refuse } = store.getState();
+  refuse({ step: "orders", answer: 0 });
+  expect(store.getState().refused).toEqual({ step: "orders", answer: 0 });
+  store.getState().edit((d) => connect(d, "user", "crm"));
+  expect(store.getState().refused).toBeUndefined();
+  refuse({ step: "orders" });
+  store.getState().pick("nodes", [{ id: "crm", selected: true }]);
+  expect(store.getState().refused).toBeUndefined();
+  refuse({ step: "orders" });
+  store.getState().show("nodes", RESPONSE);
+  expect(store.getState().refused).toBeUndefined();
+});
+
 test("the response card stays picked through edits", () => {
   const store = createEditorStore(specExample);
   store.getState().pick("nodes", [{ id: RESPONSE, selected: true }]);

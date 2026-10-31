@@ -17,7 +17,7 @@ type DefinitionNode = components["schemas"]["Node"];
 export const NODE_WIDTH = 240;
 export const NODE_HEIGHT = 72;
 // The room between one rank of the layout and the next.
-const RANK_GAP = 80;
+export const RANK_GAP = 80;
 // The least distance between two handles' centres, so a 24 px circle around
 // each touches no other (design.md, the floor).
 const HANDLE_GAP = 24;
@@ -50,13 +50,14 @@ export const RESPONSE = "#response";
 
 // A node component finds what to draw through data.index, its place in
 // definition.nodes, and an edge's panel through its place in
-// definition.edges. The response card isn't a node of the definition; its
-// index is -1.
+// definition.edges. The response card isn't a node of the definition, nor
+// a line into it an edge: their index is -1, and a line's answer is its
+// place in the response's answers, as is its point's id on the card.
 export type FlowNode = Node<
   { index: number },
   "http" | "transform" | "unknown" | "response"
 >;
-export type FlowEdge = Edge<{ index: number }>;
+export type FlowEdge = Edge<{ index: number; answer?: number }>;
 
 export interface Flow {
   nodes: FlowNode[];
@@ -69,8 +70,8 @@ export interface Flow {
 
 // toFlow is the canvas's view of a definition: a node for each node, an edge
 // for each edge it can draw, each where the definition places it or, failing
-// that, where the layout does. The same definition always gives the same
-// picture.
+// that, where the layout does, and the lines into the response's answers,
+// last. The same definition always gives the same picture.
 export function toFlow(definition: Definition): Flow {
   // A draft may be saved with problems, such as two nodes sharing an id, but
   // the canvas needs a key per node. "#" can't appear in a valid id, so a key
@@ -142,6 +143,24 @@ export function toFlow(definition: Definition): Flow {
       data: { index: i },
     };
   });
+  // Each answer's line is drawn once its step and the output it leaves on
+  // are there, into the answer's own point, and the layout leaves it out:
+  // the card isn't laid out with the steps, but put after them.
+  for (const [k, a] of (definition.response?.answers ?? []).entries()) {
+    const source = a.from === undefined ? undefined : keyOf.get(a.from);
+    if (a.from === undefined || source === undefined) continue;
+    const handles = handlesOf(nodeOf.get(a.from) ?? { id: "", kind: "http" });
+    const handle = a.on ? String(a.on) : (handles[0] ?? "");
+    if (!handles.includes(handle)) continue;
+    edges.push({
+      id: `${source}->${RESPONSE}:${k}`,
+      source,
+      target: RESPONSE,
+      sourceHandle: handle,
+      targetHandle: String(k),
+      data: { index: -1, answer: k },
+    });
+  }
   return { nodes, edges, undrawn };
 }
 
@@ -162,9 +181,10 @@ export function freeSpot(at: XYPosition, placed: XYPosition[]): XYPosition {
 
 // responseCard is the card that ends the graph: what the workflow answers.
 // It goes after the rightmost step, level with the middle of them all, and
-// can be picked but not dragged, connected or deleted. The canvas adds it,
-// since it isn't a node of the definition.
-export function responseCard(nodes: FlowNode[]): FlowNode {
+// is as tall as its answers and + Add need, as a step is for its responses.
+// It can be picked, and a line drawn into it, but it can't be dragged or
+// deleted. The canvas adds it, since it isn't a node of the definition.
+export function responseCard(nodes: FlowNode[], answers: number): FlowNode {
   const xs = nodes.map((n) => n.position.x);
   const ys = nodes.map((n) => n.position.y);
   const position =
@@ -174,15 +194,15 @@ export function responseCard(nodes: FlowNode[]): FlowNode {
           x: Math.max(...xs) + NODE_WIDTH + RANK_GAP,
           y: (Math.min(...ys) + Math.max(...ys)) / 2,
         };
+  const height = Math.max(NODE_HEIGHT, (answers + 1) * HANDLE_GAP);
   return {
     id: RESPONSE,
     type: "response",
     position,
     width: NODE_WIDTH,
-    height: NODE_HEIGHT,
-    measured: { width: NODE_WIDTH, height: NODE_HEIGHT },
+    height,
+    measured: { width: NODE_WIDTH, height },
     draggable: false,
-    connectable: false,
     deletable: false,
     data: { index: -1 },
   };

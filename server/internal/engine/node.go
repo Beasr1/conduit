@@ -234,23 +234,66 @@ func escapeURLValue(prefix, v string) (string, error) {
 // httpEntry is an http node's part of the data document. Header names are
 // lower case, as HTTP/2 sends them, and repeated fields are joined by commas.
 func httpEntry(res *upstream.Response) (json.RawMessage, error) {
-	headers := make(map[string]string, len(res.Header))
-	for k, v := range res.Header {
+	return responseEntry(res.Status, res.Header, res.Body)
+}
+
+// responseEntry is an http node's part of the data document from what it
+// got back: its status, headers and body.
+func responseEntry(status int, header http.Header, body json.RawMessage) (json.RawMessage, error) {
+	headers := make(map[string]string, len(header))
+	for k, v := range header {
 		headers[strings.ToLower(k)] = strings.Join(v, ", ")
 	}
 	return json.Marshal(struct {
 		Status  int               `json:"status"`
 		Headers map[string]string `json:"headers"`
 		Body    json.RawMessage   `json:"body"` // nil marshals as null
-	}{res.Status, headers, res.Body})
+	}{status, headers, body})
 }
 
 func (r *run) transform(n *node, doc []byte) outcome {
-	v, err := n.expr.Eval(r.ctx, doc)
+	v, _, err := n.give(r.ctx, doc)
 	if err != nil {
-		return outcome{err: fmt.Errorf("expr: %w", err)}
+		return outcome{err: err}
 	}
 	return outcome{result: NodeResult{Body: v}, entry: bodyEntry(v)}
+}
+
+// give is what transform node n gives over doc: its expr's value, or its
+// switch's {"status": …, "body": …}, from the first case whose condition
+// holds, else from otherwise; a body left out is none. A failure says, in
+// words and as a pointer below the node, where it is.
+func (n *node) give(ctx context.Context, doc []byte) (json.RawMessage, string, error) {
+	if n.otherwise == nil {
+		v, err := n.expr.Eval(ctx, doc)
+		if err != nil {
+			return nil, "/expr", fmt.Errorf("expr: %w", err)
+		}
+		return v, "", nil
+	}
+	c, name, ptr := n.otherwise, "otherwise", "/switch/otherwise"
+	for k := range n.cases {
+		holds, err := n.cases[k].when.Eval(ctx, doc)
+		if err != nil {
+			return nil, fmt.Sprintf("/switch/cases/%d/when", k), fmt.Errorf("case %d: when: %w", k+1, err)
+		}
+		if holds {
+			c, name, ptr = &n.cases[k], fmt.Sprintf("case %d", k+1), fmt.Sprintf("/switch/cases/%d", k)
+			break
+		}
+	}
+	var body json.RawMessage
+	if c.body != nil {
+		var err error
+		if body, err = c.body.Eval(ctx, doc); err != nil {
+			return nil, ptr + "/body", fmt.Errorf("%s: body: %w", name, err)
+		}
+	}
+	v, err := json.Marshal(struct {
+		Status int             `json:"status"`
+		Body   json.RawMessage `json:"body,omitempty"` // none: left out
+	}{c.status, body})
+	return v, "", err
 }
 
 // bodyEntry is a transform node's part of the data document: its value, as

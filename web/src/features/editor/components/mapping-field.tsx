@@ -79,32 +79,12 @@ export function MappingField({
 
   return (
     <>
-      <section className="flex flex-col gap-1.5 text-sm">
-        <h3 className="font-medium">Input</h3>
-        <p className="text-muted-foreground">
-          What it reads: the run&apos;s input, and what the steps before it got
-          back. Pick a field to put its path in the {label.toLowerCase()}.
-        </p>
-        {preview.isPending ? (
-          <Waiting />
-        ) : preview.isError ? (
-          <Failed message={preview.error.message} />
-        ) : (
-          <>
-            <Problems preview={preview.data.preview} of={preview.data.of} />
-            <div className="max-h-72 overflow-auto rounded-md bg-muted p-2">
-              <DataTree
-                value={preview.data.preview.reads}
-                onPick={insert}
-                folded={foldedOf(
-                  preview.data.preview.reads,
-                  open(preview.data.of),
-                )}
-              />
-            </div>
-          </>
-        )}
-      </section>
+      <Reads
+        into={`the ${label.toLowerCase()}`}
+        preview={preview}
+        open={open}
+        onPick={insert}
+      />
       <Field data-invalid={problems.length > 0}>
         <FieldLabel htmlFor={id}>{label}</FieldLabel>
         {/* TODO(plan 10): a JSONata editor replaces this textarea. */}
@@ -135,6 +115,51 @@ export function MappingField({
 
 // foldedOf is the paths, in what a preview reads, of the steps not among
 // open: the tree starts them folded.
+// Reads is what an expression reads, simulated over the samples: the run's
+// input, and what the steps before it got back, as a tree whose fields
+// give their path, which goes into what into names. The steps open names
+// start unfolded.
+export function Reads({
+  into,
+  preview,
+  open,
+  onPick,
+}: {
+  into: string;
+  preview: ReturnType<typeof usePreview>;
+  open: (of: Definition) => string[];
+  onPick: (path: string) => void;
+}) {
+  return (
+    <section className="flex flex-col gap-1.5 text-sm">
+      <h3 className="font-medium">Input</h3>
+      <p className="text-muted-foreground">
+        What it reads: the run&apos;s input, and what the steps before it got
+        back. Pick a field to put its path in {into}.
+      </p>
+      {preview.isPending ? (
+        <Waiting />
+      ) : preview.isError ? (
+        <Failed message={preview.error.message} />
+      ) : (
+        <>
+          <Problems preview={preview.data.preview} of={preview.data.of} />
+          <div className="max-h-72 overflow-auto rounded-md bg-muted p-2">
+            <DataTree
+              value={preview.data.preview.reads}
+              onPick={onPick}
+              folded={foldedOf(
+                preview.data.preview.reads,
+                open(preview.data.of),
+              )}
+            />
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function foldedOf(reads: unknown, open: string[]): Set<string> {
   const nodes =
     typeof reads === "object" && reads !== null && "nodes" in reads

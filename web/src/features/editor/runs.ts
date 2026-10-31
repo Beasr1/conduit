@@ -117,7 +117,8 @@ export function took(ms: number): string {
 }
 
 // runSaid is how a run went, in a few words: "running", "succeeded in
-// 1.2 s", "failed: …".
+// 1.2 s, answered 404", "failed: …", and "; Unhandled answered 502" when
+// its response's unhandled answered its failure.
 export function runSaid(run: RunSummary): string {
   const ms =
     run.ended_at === undefined
@@ -128,9 +129,9 @@ export function runSaid(run: RunSummary): string {
     case "running":
       return "running";
     case "succeeded":
-      return `succeeded${time}`;
+      return `succeeded${time}${run.answered ? `, answered ${run.answered}` : ""}`;
     case "failed":
-      return `failed${time}${run.error ? `: ${run.error.detail}` : ""}`;
+      return `failed${time}${run.error ? `: ${run.error.detail}` : ""}${run.answered ? `; Unhandled answered ${run.answered}` : ""}`;
     default:
       return run.status;
   }

@@ -130,9 +130,9 @@ function stream(nodes: NodeEvent[], run: Run) {
   );
 }
 
-// serveRun answers a run's start, its events and the run itself, as the
-// server does, and keeps what each start asked for.
-function serveRun() {
+// serveRun answers a run's start, its events and the run itself, ending as
+// end, as the server does, and keeps what each start asked for.
+function serveRun(end: Run = ended) {
   const asked: StartRun[] = [];
   let done = false;
   server.use(
@@ -145,10 +145,10 @@ function serveRun() {
     ),
     http.get("/api/v1/runs/r-1/events", () => {
       done = true;
-      return stream(events, ended);
+      return stream(events, end);
     }),
     http.get("/api/v1/runs/r-1", () =>
-      HttpResponse.json<Run>(done ? ended : started),
+      HttpResponse.json<Run>(done ? end : started),
     ),
   );
   return asked;
@@ -216,6 +216,86 @@ test("Run starts the run with its input, and the canvas follows it to its end", 
       /: succeeded in 300 ms\. The draft has changed since\.$/,
     ),
   ).toBeTruthy();
+});
+
+test("the response card marks the answer the run gave, and its panel shows it", async () => {
+  renderEditor({
+    ...branched,
+    response: { answers: [{ status: 201, from: "create_user" }] },
+  });
+  serveRun({ ...ended, answered: 201, output: { id: "10" } });
+  await run();
+  expect(
+    await screen.findByText(
+      /^Run of revision 1, started .*: succeeded in 300 ms, answered 201$/,
+    ),
+  ).toBeTruthy();
+  const card = screen.getByTestId("rf__node-#response");
+  await waitFor(() =>
+    expect(
+      within(card).getByText(", the answer it gave").parentElement?.textContent,
+    ).toBe("201, the answer it gave"),
+  );
+  expect(
+    screen
+      .getByTestId("rf__edge-create_user->#response:0")
+      .getAttribute("class"),
+  ).not.toContain("untaken");
+
+  fireEvent.click(within(card).getByText("Response"));
+  const panel = await screen.findByRole("complementary", { name: "Response" });
+  expect(
+    within(panel).getByText("In this run: succeeded in 300 ms, answered 201"),
+  ).toBeTruthy();
+  expect(within(panel).getByText(/"id": "10"/)).toBeTruthy();
+});
+
+test("a line into the response that a run didn't reach is dashed", async () => {
+  renderEditor({
+    ...branched,
+    response: { answers: [{ status: 200, from: "orders" }] },
+  });
+  serveRun({
+    ...ended,
+    status: "failed",
+    error: { code: "workflow_error", detail: "no answer: orders was skipped" },
+  });
+  await run();
+  expect(
+    await screen.findByText(
+      /^Run of revision 1, started .*: failed in 300 ms: no answer: orders was skipped$/,
+    ),
+  ).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      screen.getByTestId("rf__edge-orders->#response:0").getAttribute("class"),
+    ).toContain("untaken"),
+  );
+});
+
+test("of two answers a step gives, the line into the one the run didn't give is dashed", async () => {
+  renderEditor({
+    ...branched,
+    response: {
+      answers: [
+        { status: 200, from: "create_user" },
+        { status: 201, from: "create_user" },
+      ],
+    },
+  });
+  serveRun({ ...ended, answered: 201, output: { id: "10" } });
+  await run();
+  expect(
+    await screen.findByText(
+      /^Run of revision 1, started .*: succeeded in 300 ms, answered 201$/,
+    ),
+  ).toBeTruthy();
+  const line = (k: number) =>
+    screen
+      .getByTestId(`rf__edge-create_user->#response:${k}`)
+      .getAttribute("class") ?? "";
+  await waitFor(() => expect(line(0)).toContain("untaken"));
+  expect(line(1)).not.toContain("untaken");
 });
 
 test("a step's tabs say what it sent and got, and what it got can be kept as the sample", async () => {

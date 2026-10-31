@@ -50,8 +50,8 @@ func (ps Problems) Error() string {
 	return b.String()
 }
 
-// Validate checks a definition's structure: ids, kinds, requests, edges and
-// cycles. It reports every problem at once.
+// Validate checks a definition's structure: ids, kinds, requests, edges,
+// cycles and its response. It reports every problem at once.
 func Validate(d *Definition) Problems {
 	var v validator
 	if len(d.Nodes) > MaxNodes {
@@ -77,7 +77,8 @@ func Validate(d *Definition) Problems {
 		v.checkNode(p, n)
 	}
 
-	v.checkEdges(d.Edges, d.Nodes, index)
+	edges, cyclic := v.checkEdges(d.Edges, d.Nodes, index)
+	v.checkResponse(d, index, edges, cyclic)
 	if len(d.SampleInput) > maxSample {
 		v.add("/sample_input", "too_large", "a sample input is at most %d KiB; this one is %d KiB", maxSample>>10, kib(len(d.SampleInput)))
 	}
@@ -108,12 +109,20 @@ func (v *validator) checkNode(p string, n Node) {
 		if n.Expr != "" {
 			v.add(p+"/expr", "not_allowed", "an http node has a request, not an expr")
 		}
+		if n.Switch != nil {
+			v.add(p+"/switch", "not_allowed", "an http node has a request, not a switch")
+		}
 	case NodeKindTransform:
 		if n.Request != nil {
 			v.add(p+"/request", "not_allowed", "a transform node has an expr, not a request")
 		}
-		if n.Expr == "" {
-			v.add(p+"/expr", "required", "a transform node needs an expr")
+		switch {
+		case n.Expr != "" && n.Switch != nil:
+			v.add(p+"/switch", "not_allowed", "a transform node has an expr or a switch, not both")
+		case n.Switch != nil:
+			v.checkSwitch(p+"/switch", n.Switch)
+		case n.Expr == "":
+			v.add(p+"/expr", "required", "a transform node needs an expr, or a switch")
 		}
 	default:
 		v.add(p+"/kind", "invalid_kind", "the kind %q isn't http or transform", n.Kind)
@@ -131,6 +140,29 @@ func (v *validator) checkNode(p string, n Node) {
 		v.checkOutputs(p+"/outputs", n.Outputs)
 	case n.Kind == NodeKindTransform:
 		v.add(p+"/outputs", "not_allowed", "a transform node has one output, so it lists none")
+	}
+}
+
+// checkSwitch checks a transform node's switch: each case's condition and
+// status, and otherwise's status. A status may repeat, as two conditions
+// can give one answer.
+func (v *validator) checkSwitch(p string, s *Switch) {
+	for k, c := range s.Cases {
+		q := fmt.Sprintf("%s/cases/%d", p, k)
+		if strings.TrimSpace(c.When) == "" {
+			v.add(q+"/when", "required", "a case needs a condition")
+		}
+		v.checkCaseStatus(q+"/status", c.Status)
+	}
+	v.checkCaseStatus(p+"/otherwise/status", s.Otherwise.Status)
+}
+
+func (v *validator) checkCaseStatus(p string, status int) {
+	switch {
+	case status == 0:
+		v.add(p, "required", "a case needs a status")
+	case status < 200 || status > 599:
+		v.add(p, "invalid_status", "a case's status is 200 to 599; %d isn't", status)
 	}
 }
 
@@ -286,10 +318,12 @@ func PointerTokens(pointer string) []string {
 
 type edgeRef struct {
 	index, from, to int
+	on              int // the output of from it leaves from: a status, or 0 for 2xx
 }
 
-func (v *validator) checkEdges(edges []Edge, nodes []Node, index map[string]int) {
-	var good []edgeRef
+// checkEdges checks each edge, and gives back those whose ends are nodes,
+// once per output, and whether any of them is on a cycle.
+func (v *validator) checkEdges(edges []Edge, nodes []Node, index map[string]int) (good []edgeRef, cyclic bool) {
 	// Two nodes are joined at most once per output of the first.
 	seen := make(map[[3]int]int, len(edges))
 	for k, e := range edges {
@@ -319,7 +353,7 @@ func (v *validator) checkEdges(edges []Edge, nodes []Node, index map[string]int)
 			continue
 		}
 		seen[key] = k
-		good = append(good, edgeRef{index: k, from: from, to: to})
+		good = append(good, edgeRef{index: k, from: from, to: to, on: e.On})
 	}
 
 	// An edge is on a cycle when both ends are in the same strongly connected
@@ -332,8 +366,10 @@ func (v *validator) checkEdges(edges []Edge, nodes []Node, index map[string]int)
 	for _, e := range good {
 		if comp[e.from] == comp[e.to] {
 			v.add(fmt.Sprintf("/edges/%d", e.index), "cycle", "the edge %s → %s is part of a cycle", edges[e.index].From, edges[e.index].To)
+			cyclic = true
 		}
 	}
+	return good, cyclic
 }
 
 func (v *validator) endpoint(p, id string, index map[string]int) (int, bool) {

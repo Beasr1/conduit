@@ -231,18 +231,36 @@ func TestServe(t *testing.T) {
 	call := func(path, extra, output string) string {
 		return fmt.Sprintf(`{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE%s"%s}}], "output": %q}`, path, extra, output)
 	}
+	// picks answers through a transform that picks among 200 and 201.
+	picks := func(expr string) string {
+		return `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/ok"}}, {"id": "r", "kind": "transform", "expr": "` + expr + `"}],
+		  "edges": [{"from": "a", "to": "r"}], "response": {"answers": [{"status": 200, "from": "r"}, {"status": 201, "from": "r"}]}}`
+	}
+	// unhandled answers a's failure with the body given.
+	unhandled := func(body string) string {
+		return `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/fail"}}],
+		  "response": {"answers": [{"status": 200, "from": "a"}], "unhandled": {"body": "` + body + `"}}}`
+	}
 	tests := []struct {
 		name, def    string
 		status, code string
 		node         string
-		output       string // the output in full
+		answer       int
+		output       string // the answer's body in full
 	}{
-		{"succeeds", call("/ok", "", "nodes.a.body.n + 1"), "succeeded", "", "", "2"},
-		{"an upstream fails", call("/fail", "", "1"), "failed", CodeUpstream, "a", ""},
-		{"an attempt times out", call("/slow", `, "timeout_ms": 50`, "1"), "failed", CodeTimeout, "a", ""},
-		{"the run times out", call("/slow", "", "1"), "failed", CodeTimeout, "", ""},
-		{"an expression fails", call("/ok", "", "$number('one')"), "failed", CodeWorkflow, "", ""},
-		{"the output is kept in full but stored capped", call("/big", "", "nodes.a.body"), "succeeded", "", "", big},
+		{"succeeds", call("/ok", "", "nodes.a.body.n + 1"), "succeeded", "", "", 200, "2"},
+		{"an upstream fails", call("/fail", "", "1"), "failed", CodeUpstream, "a", 0, ""},
+		{"an attempt times out", call("/slow", `, "timeout_ms": 50`, "1"), "failed", CodeTimeout, "a", 0, ""},
+		{"the run times out", call("/slow", "", "1"), "failed", CodeTimeout, "", 0, ""},
+		{"an expression fails", call("/ok", "", "$number('one')"), "failed", CodeWorkflow, "", 0, ""},
+		{"the output is kept in full but stored capped", call("/big", "", "nodes.a.body"), "succeeded", "", "", 200, big},
+		{"it answers through its response", picks("{ 'status': 201, 'body': nodes.a.body.n }"), "succeeded", "", "", 201, "1"},
+		{"an answer with no body", picks("{ 'status': 200 }"), "succeeded", "", "", 200, ""},
+		{"no answer it gives", picks("{ 'status': 404 }"), "failed", CodeWorkflow, "", 0, ""},
+		{
+			"unhandled answers a failure, with its cause's status", unhandled("{ 'error': error.code, 'at': error.node }"),
+			"failed", CodeUpstream, "a", 502, `{"error":"upstream_failed","at":"a"}`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -255,16 +273,19 @@ func TestServe(t *testing.T) {
 			if out.Run.Status != tt.status || out.Run.Trigger != "served" || out.Run.EndedAt == nil {
 				t.Errorf("run = %+v", out.Run)
 			}
+			if out.Answer != tt.answer || string(out.Output) != tt.output {
+				t.Errorf("answer %d %.40s; want %d %.40s", out.Answer, out.Output, tt.answer, tt.output)
+			}
 			if tt.code == "" {
-				if out.Failure != nil || string(out.Output) != tt.output {
-					t.Errorf("failure %+v, output %.40s; want output %.40s", out.Failure, out.Output, tt.output)
+				if out.Failure != nil {
+					t.Errorf("failure %+v", out.Failure)
 				}
 			} else if out.Failure == nil || out.Failure.Code != tt.code || out.Failure.Node != tt.node {
-				t.Errorf("failure = %+v, want code %s on node %q", out.Failure, tt.code, tt.node)
+				t.Errorf("failure = %+v; want code %s on node %q", out.Failure, tt.code, tt.node)
 			}
 			stored, err := db.Run(t.Context(), out.Run.ID)
-			if err != nil || stored.Status != tt.status {
-				t.Fatalf("stored run = %+v, %v", stored, err)
+			if err != nil || stored.Status != tt.status || stored.Answered != tt.answer || out.Run.Answered != tt.answer {
+				t.Fatalf("stored run = %+v, %v; returned answered %d", stored, err, out.Run.Answered)
 			}
 			if tt.code != "" {
 				if f := decode[Failure](t, stored.Error); f != *out.Failure {
@@ -277,6 +298,29 @@ func TestServe(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// An unhandled that fails leaves the run's failure to answer, and says why.
+func TestServe_AnUnhandledThatFails(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error": "down"}`, http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	r := newRunner(t, Options{})
+	w := saveWorkflow(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}}],
+	  "response": {"answers": [{"status": 200, "from": "a"}], "unhandled": {"body": "$number(error.code)"}}}`)
+	out, err := r.Serve(t.Context(), w.Slug, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Answer != 0 || out.Output != nil || out.Failure == nil || out.Failure.Code != CodeUpstream ||
+		!strings.Contains(out.Failure.Detail, "; unhandled failed too: unhandled: ") {
+		t.Errorf("answer %d %s, failure %+v", out.Answer, out.Output, out.Failure)
+	}
+	if stored, err := db.Run(t.Context(), out.Run.ID); err != nil || stored.Answered != 0 || decode[Failure](t, stored.Error) != *out.Failure {
+		t.Errorf("stored run = %+v, %v", stored, err)
 	}
 }
 

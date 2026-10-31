@@ -80,6 +80,84 @@ func TestValidate_AcceptsOutputs(t *testing.T) {
 	}
 }
 
+// A workflow answers through its response: each answer a status, joined by
+// one line from the node that gives it.
+func TestValidate_AcceptsResponses(t *testing.T) {
+	t.Parallel()
+	// user answers 2xx or 404, on to found or gone.
+	branched := `{"id": "user", "kind": "http", "request": {"method": "GET", "url": "https://api.example.com/v1"}, "outputs": [{"status": 404}]},
+		{"id": "found", "kind": "transform", "expr": "1"}, {"id": "gone", "kind": "transform", "expr": "2"}`
+	branches := `[{"from": "user", "to": "found"}, {"from": "user", "to": "gone", "on": 404}]`
+	for name, def := range map[string]string{
+		"one answer": `{"nodes": [{"id": "respond", "kind": "transform", "expr": "1"}],
+			"response": {"answers": [{"status": 200, "from": "respond", "schema": {"type": "object"}}]}}`,
+		"one node picking among several": `{"nodes": [{"id": "respond", "kind": "transform", "expr": "1"}],
+			"response": {"answers": [{"status": 200, "from": "respond"}, {"status": 400, "from": "respond"}]}}`,
+		"each output of an http node to its own": `{"nodes": [` + branched + `],
+			"response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "on": 404}]}}`,
+		"branches one node keeps apart": `{"nodes": [` + branched + `], "edges": ` + branches + `,
+			"response": {"answers": [{"status": 200, "from": "found"}, {"status": 404, "from": "gone"}]}}`,
+		"a switch giving the answers it's joined to": `{"nodes": [{"id": "respond", "kind": "transform",
+			"switch": {"cases": [{"when": "input.id = 0", "status": 404, "body": "{ 'error': 'gone' }"}], "otherwise": {"status": 200}}}],
+			"response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}]}}`,
+		"unhandled": `{"nodes": [{"id": "respond", "kind": "transform", "expr": "1"}],
+			"response": {"answers": [{"status": 200, "from": "respond"}], "unhandled": {"body": "{ 'error': error.detail }"}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if ps := Validate(decode(t, def)); len(ps) > 0 {
+				t.Fatalf("Validate() = %v, want no problems", ps)
+			}
+		})
+	}
+}
+
+// Whether two answers' lines can be taken in one run is read from the
+// graph: a node runs once any line into it is taken, so only one node's
+// different outputs keep two lines apart. crm runs after orders or prefs;
+// prefs' 400 leads to test_400.
+func TestValidate_TwoAnswersInOneRun(t *testing.T) {
+	t.Parallel()
+	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
+	nodes := `[{"id": "people", "kind": "http", ` + get + `}, {"id": "orders", "kind": "http", ` + get + `},
+		{"id": "prefs", "kind": "http", ` + get + `, "outputs": [{"status": 400}]}, {"id": "crm", "kind": "http", ` + get + `, "outputs": [{"status": 400}]},
+		{"id": "test_400", "kind": "http", ` + get + `}, {"id": "transform", "kind": "transform", "expr": "1"}, {"id": "bad_400", "kind": "transform", "expr": "2"}]`
+	edges := `{"from": "people", "to": "orders"}, {"from": "people", "to": "prefs"}, {"from": "orders", "to": "crm"}, {"from": "prefs", "to": "crm"},
+		{"from": "crm", "to": "transform"}, {"from": "crm", "to": "bad_400", "on": 400}`
+	response := `{"answers": [{"status": 200, "from": "transform"}, {"status": 400, "from": "bad_400"}]}`
+	tests := []struct {
+		name, edges, want string
+	}{
+		// crm's 2xx and 400 keep transform and bad_400 apart.
+		{"kept apart by crm", edges, ""},
+		// prefs answering 400 runs test_400, then transform, and crm still
+		// runs after orders: crm's 400 runs bad_400 too.
+		{
+			"both reached when prefs answers 400", edges + `, {"from": "prefs", "to": "test_400", "on": 400}, {"from": "test_400", "to": "transform"}`,
+			"/response/answers/1/from overlap: 200 (transform) and 400 (bad_400) can both be reached in one run: merge them into one node",
+		},
+		// transform runs on either of crm's outputs, so its 2xx keeps nothing
+		// apart.
+		{
+			"both reached when transform reads either of crm's outputs", edges + `, {"from": "crm", "to": "transform", "on": 400}`,
+			"/response/answers/1/from overlap: 200 (transform) and 400 (bad_400) can both be reached in one run: merge them into one node",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ps := Validate(decode(t, `{"nodes": `+nodes+`, "edges": [`+tt.edges+`], "response": `+response+`}`))
+			var got []string
+			for _, p := range ps {
+				got = append(got, p.Pointer+" "+p.Code+": "+p.Detail)
+			}
+			if strings.Join(got, "\n") != tt.want {
+				t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), tt.want)
+			}
+		})
+	}
+}
+
 // Positions are the editor's business. One for a node that isn't in the
 // workflow is ignored, not reported.
 func TestValidate_IgnoresPositions(t *testing.T) {
@@ -321,6 +399,97 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 			name: "a sample input over 64 KiB",
 			def:  `{"nodes": [], "sample_input": "` + strings.Repeat("x", 64<<10) + `"}`,
 			want: []string{"/sample_input too_large"},
+		},
+		{
+			name: "an answer no node is joined to",
+			def:  `{"nodes": [], "response": {"answers": [{"status": 200}]}}`,
+			want: []string{"/response/answers/0/from required"},
+		},
+		{
+			name: "an answer from a node that doesn't exist",
+			def:  `{"nodes": [], "response": {"answers": [{"status": 200, "from": "zz"}]}}`,
+			want: []string{"/response/answers/0/from unknown_node"},
+		},
+		{
+			name: "an answer on an output its node doesn't have",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `}], "response": {"answers": [{"status": 404, "from": "a", "on": 404}]}}`,
+			want: []string{"/response/answers/0/on unknown_output"},
+		},
+		{
+			name: "an answer naming a transform's output",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "from": "a", "on": 404}]}}`,
+			want: []string{"/response/answers/0/on not_allowed"},
+		},
+		{
+			name: "a response with no answers",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {}}`,
+			want: []string{"/response/answers required"},
+		},
+		{
+			name: "an answer with no status",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"from": "a"}]}}`,
+			want: []string{"/response/answers/0/status required"},
+		},
+		{
+			name: "an answer's status outside 200 to 599",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 99, "from": "a"}]}}`,
+			want: []string{"/response/answers/0/status invalid_status"},
+		},
+		{
+			name: "two answers with one status",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "from": "a"}, {"status": 200, "from": "a"}]}}`,
+			want: []string{"/response/answers/1/status duplicate_answer"},
+		},
+		{
+			name: "one output of an http node joined to two answers",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `}], "response": {"answers": [{"status": 200, "from": "a"}, {"status": 201, "from": "a"}]}}`,
+			want: []string{"/response/answers/1/from not_allowed"},
+		},
+		{
+			name: "two answers one run could both reach",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}, {"id": "c", "kind": "transform", "expr": "3"}],
+			       "edges": [{"from": "a", "to": "b"}, {"from": "a", "to": "c", "when": "false"}],
+			       "response": {"answers": [{"status": 200, "from": "b"}, {"status": 400, "from": "c"}]}}`,
+			want: []string{"/response/answers/1/from overlap"},
+		},
+		{
+			name: "a switch status no answer it's joined to has",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "switch": {"cases": [{"when": "true", "status": 404}, {"when": "false", "status": 418}], "otherwise": {"status": 500}}}],
+			       "response": {"answers": [{"status": 404, "from": "a"}, {"status": 200, "from": "a"}]}}`,
+			want: []string{"/nodes/0/switch/cases/1/status unknown_answer", "/nodes/0/switch/otherwise/status unknown_answer", "/response/answers/1/from never_given"},
+		},
+		{
+			name: "a case with no condition and a bad status",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "switch": {"cases": [{"status": 99}, {"when": "true", "status": 0}, {"when": "true", "status": 600}], "otherwise": {"status": 0}}}]}`,
+			want: []string{"/nodes/0/switch/cases/0/when required", "/nodes/0/switch/cases/0/status invalid_status", "/nodes/0/switch/cases/1/status required", "/nodes/0/switch/cases/2/status invalid_status", "/nodes/0/switch/otherwise/status required"},
+		},
+		{
+			name: "a transform with an expr and a switch",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1", "switch": {"otherwise": {"status": 200}}}]}`,
+			want: []string{"/nodes/0/switch not_allowed"},
+		},
+		{
+			name: "an http node with a switch",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "switch": {"otherwise": {"status": 200}}}]}`,
+			want: []string{"/nodes/0/switch not_allowed"},
+		},
+		{
+			// Reach isn't judged on a loop: the loop is what's wrong.
+			name: "answers from a loop",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}],
+			       "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "a"}],
+			       "response": {"answers": [{"status": 200, "from": "a"}, {"status": 400, "from": "b"}]}}`,
+			want: []string{"/edges/0 cycle", "/edges/1 cycle"},
+		},
+		{
+			name: "unhandled with no body",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "from": "a"}], "unhandled": {"body": " "}}}`,
+			want: []string{"/response/unhandled/body required"},
+		},
+		{
+			name: "an output beside a response",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "output": "1", "response": {"answers": [{"status": 200, "from": "a"}]}}`,
+			want: []string{"/output not_allowed"},
 		},
 		{
 			name: "every problem at once",

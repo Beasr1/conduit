@@ -152,14 +152,67 @@ test("the response card goes after the rightmost step, level with the middle", (
       },
     },
   });
-  const card = responseCard(nodes);
+  const card = responseCard(nodes, 1);
   expect(card.position).toEqual({ x: 600 + NODE_WIDTH + 80, y: 100 });
+  // A line can be drawn into it, though it can't be moved or deleted.
   expect(card).toMatchObject({
     draggable: false,
-    connectable: false,
     deletable: false,
+    height: NODE_HEIGHT,
   });
-  expect(responseCard([]).position).toEqual({ x: 0, y: 0 });
+  expect(card.connectable).not.toBe(false);
+  // It grows to fit its answers and + Add, 24 px apiece.
+  expect(responseCard(nodes, 3).height).toBe(96);
+  expect(responseCard([], 0).position).toEqual({ x: 0, y: 0 });
+});
+
+test("each answer's line leaves from its step, on its output, into the answer's point", () => {
+  const branched = {
+    ...spec,
+    nodes: spec.nodes.map((n) =>
+      n.id === "user" ? { ...n, outputs: [{ status: 404 }] } : n,
+    ),
+  };
+  const line = (k: number, source: string, sourceHandle: string) => ({
+    id: `${source}->#response:${k}`,
+    source,
+    target: "#response",
+    sourceHandle,
+    targetHandle: String(k),
+    data: { index: -1, answer: k },
+  });
+  const flow = toFlow({
+    ...branched,
+    response: {
+      answers: [
+        { status: 200, from: "crm" },
+        { status: 404, from: "user", on: 404 },
+        { status: 409 },
+      ],
+    },
+  });
+  expect(flow.edges.slice(-2)).toEqual([
+    line(0, "crm", "2xx"),
+    line(1, "user", "404"),
+  ]);
+  expect(flow.undrawn).toEqual([]);
+  // A transform's leaves from its one point.
+  expect(
+    toFlow({
+      nodes: [{ id: "a", kind: "transform", expr: "1" }],
+      response: { answers: [{ status: 200, from: "a" }] },
+    }).edges,
+  ).toEqual([line(0, "a", "out")]);
+  // They don't move a step, and none is drawn from a step that isn't there,
+  // or on a response its step doesn't have.
+  const answers = (from: string, on?: number) => ({
+    answers: [{ status: 200, from, on }],
+  });
+  expect(toFlow({ ...spec, response: answers("crm") }).nodes).toEqual(
+    toFlow(spec).nodes,
+  );
+  for (const response of [answers("gone"), answers("crm", 404)])
+    expect(toFlow({ ...spec, response }).edges).toEqual(toFlow(spec).edges);
 });
 
 test("a draft saved with problems still draws", () => {

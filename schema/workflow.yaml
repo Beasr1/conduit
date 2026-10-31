@@ -27,7 +27,11 @@ components:
             $ref: "#/components/schemas/Edge"
         output:
           type: string
-          description: JSONata over the finished run. Its value is the run's result.
+          description: Kept for revisions saved with it, as response replaces it. JSONata over the finished run; such a definition answers 200 with its value. A definition has an output or a response, not both.
+        response:
+          $ref: "#/components/schemas/Response"
+          description: What the workflow's API answers.
+          x-go-type-skip-optional-pointer: false
         input_schema:
           type: object
           additionalProperties: true
@@ -35,7 +39,7 @@ components:
         output_schema:
           type: object
           additionalProperties: true
-          description: A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet.
+          description: Kept for revisions saved with it, as response replaces it. A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet.
         sample_input:
           description: A made-up run input, any JSON, that previews read. Runs ignore it. At most 64 KiB.
           x-go-type: json.RawMessage
@@ -84,7 +88,11 @@ components:
           x-go-type-skip-optional-pointer: false
         expr:
           type: string
-          description: A transform node's JSONata. Its value becomes the node's body.
+          description: A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch.
+        switch:
+          $ref: "#/components/schemas/Switch"
+          description: A transform node's cases, in place of an expr.
+          x-go-type-skip-optional-pointer: false
         sample:
           $ref: "#/components/schemas/Sample"
           description: An http node's made-up or redacted 2xx response, which previews read in place of a real one. Runs ignore it.
@@ -180,6 +188,96 @@ components:
         idempotent:
           type: boolean
           description: The upstream treats repeats of this request as one, so a POST or PATCH may be retried too. They're then sent with an Idempotency-Key header.
+
+    Response:
+      type: object
+      additionalProperties: false
+      description: What the workflow's API answers. Each answer is a status, joined by one line from the node that gives it; a run that takes one line answers with it. A run that takes none, or lines from two nodes, or in which a node fails, gives no answer, and fails; unhandled, if there is one, answers it.
+      properties:
+        answers:
+          type: array
+          maxItems: 50
+          description: The answers the API can give, each a status, the line it takes, and the shape promised with it.
+          items:
+            $ref: "#/components/schemas/Answer"
+        unhandled:
+          $ref: "#/components/schemas/Unhandled"
+          x-go-type-skip-optional-pointer: false
+
+    Answer:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: integer
+          minimum: 200
+          maximum: 599
+          description: The HTTP status the answer has. Listed once in a response.
+        from:
+          type: string
+          description: The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs.
+        on:
+          type: integer
+          description: The output of from that the line leaves from, as an edge's. Absent means 2xx, and a transform's only output.
+        schema:
+          type: object
+          additionalProperties: true
+          description: A JSON Schema (2020-12) the body is promised to match. Checked when saved, not enforced on runs yet.
+
+    Unhandled:
+      type: object
+      required: [body]
+      additionalProperties: false
+      description: What the API answers a run that gives no answer. Its status is the cause's, 502 when an upstream failed, 504 when the run or a node ran out of time, 500 otherwise, and its body is this.
+      properties:
+        body:
+          type: string
+          description: JSONata over the run as it stood, every node that succeeded, and error, {code, detail, node}.
+
+    Switch:
+      type: object
+      required: [otherwise]
+      additionalProperties: false
+      description: A transform node's cases, in place of an expr. The first case whose condition holds gives its status and body, else otherwise does, so the node's value is {status, body}.
+      properties:
+        cases:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/Case"
+        otherwise:
+          $ref: "#/components/schemas/Otherwise"
+
+    Case:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        when:
+          type: string
+          description: JSONata, cast to a boolean as an edge's condition is.
+        status:
+          type: integer
+          minimum: 200
+          maximum: 599
+        body:
+          type: string
+          description: JSONata whose value is the body. Absent means none.
+
+    Otherwise:
+      type: object
+      required: [status]
+      additionalProperties: false
+      description: What a switch gives when no case holds.
+      properties:
+        status:
+          type: integer
+          minimum: 200
+          maximum: 599
+        body:
+          type: string
+          description: JSONata whose value is the body. Absent means none.
 
     Edge:
       type: object

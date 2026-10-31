@@ -3,10 +3,12 @@
 Status: accepted 2026-10-28, with all seven questions answered (Answers, at
 the end); D10, D11 and D13 accepted with it, and D14 waits for 07. Phase A
 is committed (69bb36e), and so is Phase B, its last step in eabb7b6. Phase D
-now comes before C: its samples, previews, outputs by status and a step's
-blocks are committed (f9e7484, e98e50a, 2026-10-30), and its API's answers
-are planned for after C. Phase C, runs, is built, not yet committed
-(2026-10-30). Building Phase A raised question 8, since answered.
+came before C: its samples, previews, outputs by status and a step's blocks
+are committed (f9e7484, e98e50a, 2026-10-30), and so is Phase C, runs
+(ad89609, 2026-10-30), and D's API's answers, after C (2026-10-31).
+Next, decided 2026-11-01: strict joins, then a step's Unhandled block;
+then Phase E, the browser test. Building Phase A raised question 8, since
+answered.
 
 ## Goal
 
@@ -290,7 +292,7 @@ Found along the way:
 - [x] Sign-in, sign-out, and the `401` path in the app.
 - [x] The workflow list: list, create, open.
 
-**Phase B: the editor** (in progress)
+**Phase B: the editor** (built; Phase B, as built)
 - [x] `ui` in `schema/workflow.yaml`.
 - [x] `toFlow`, placing nodes that have no position, and their tests.
 - [x] Nodes, edges, forms, the workflow's settings (input schema, output).
@@ -458,7 +460,7 @@ wireframe, not a design: the look stays plan 11's.
 - [x] Failing tests first; Chromium through nginx, light and dark, with
       screenshots.
 - [x] Docs: design.md's floor (connecting without dragging is Connect to),
-      web.md, and Phase D, as built.
+      web.md, and A step's blocks, as built.
 
 Decided with you on 2026-10-30 (night), from wireframes:
 - **Blocks, with `+ Add`**: the request on the left, a block per response
@@ -506,7 +508,7 @@ Done means the steps above, `just check` green, and your 404 example
 clicked through: user's 404 block opens its tab, Connect to joins it to
 create_user, and the line opens its condition.
 
-**Phase C: runs** (after D; detailed 2026-10-30, late night, from wireframes; built, not yet committed)
+**Phase C: runs** (after D; detailed 2026-10-30, late night, from wireframes; built)
 - [x] A test upstream, `server/cmd/testupstream`: a small server answering
       known requests, a user by id or a 404, orders, preferences, a contact
       created with 201, a slow answer and a failing one, so runs repeat
@@ -629,38 +631,78 @@ Samples, decided with you on 2026-10-28:
   response is wrong. Several kept samples could refine it; OpenAPI schemas
   take over in 07.
 
-**Phase D: the API's answers** (2026-10-30, your call; after C)
+**Phase D: the API's answers** (2026-10-30, your call; after C; reworked and built 2026-10-31)
 
 The response card is the overview of everything the workflow's API can
-answer, and each answer is one status with one shape. Today the API
-answers 200 with one output, whose shape changes with the way the run
-went: through user's 2xx it answers `200 {"id", "email"}`, through its
-404 `200 {}`, an unclear contract (your point). Its errors are written
-only in the API's schema.
-- [ ] An answer is a status, joined to by one step's line. That step makes
-      its body, a transform's value or an HTTP step's response body, and
-      its exact shape is edited there. A run that takes the line gives the
-      answer. Each answer keeps a schema, the shape a caller is promised.
-- [ ] One line per answer. Branches that should give the same answer meet
-      in a merger step first, a transform that reads whichever ran, so the
-      answer has one shape. Drawing a second line into an answer offers to
-      put a merger in front of it.
-- [ ] Today's output moves into a step: the card holds no JSONata. A
-      workflow's `output` becomes a transform step joined to 200, and its
-      output schema becomes 200's; saved workflows are converted the same
-      way.
-- [ ] Validation: an answer's status is listed once, it takes one line,
-      and a line into the card names an answer the workflow has.
-- [ ] The canvas: the card's answers are blocks on its left, where lines
-      arrive: 200 first, then each one added, then `+ Add`. Below them,
-      "also 400 · 502 · 504", the answers Conduit gives on its own.
-- [ ] The panel, the overview: each answer, the step that makes its body
-      (a click opens it), that body previewed over the samples of every
-      way into it, so a shape that changes with the branch shows, and its
-      schema; then Conduit's own answers, each saying when it's given and
-      the body a caller gets.
-- [ ] A served run answers with its answer's status and body.
-- [ ] Failing tests first; Chromium through nginx.
+answer, and every run gives exactly one answer, with one status and one
+shape. Before it, the API answered 200 with one output whatever the run
+did: in your "Fixes check", prefs answering 400 still answered
+`200 {"msg": "yo"}`.
+- [x] The definition's `response`: its `answers`, each a status (200 to
+      599), the step joined to it (`from`), the response of that step its
+      line leaves on (`on`, as an edge's), and a schema, the shape a caller
+      is promised (checked when saved, not on runs yet); and `unhandled`.
+      `output` and `output_schema` stay for the revisions saved with them:
+      such a definition answers 200 with its output, as before, and one has
+      a response or an output, not both.
+- [x] A line per answer: each answer has its own point on the card, and
+      one line, from the step that gives it, whose result is the body: a
+      transform's value, an HTTP step's response body. Each output of an
+      HTTP step can answer through its own, 2xx to 200 and 404 to 404. A
+      transform joined to several answers picks one: with a switch, or
+      with JSONata giving `{ "status": …, "body": … }`.
+- [x] The switch: a transform has an `expr`, or a `switch` of `cases`, each
+      a condition, a status and a body, JSONata all, ending with
+      `otherwise`, which every switch has. The first case whose condition
+      holds gives the answer, else Otherwise.
+- [x] Validation: each answer's step exists and has the response its line
+      leaves on; each status is listed once; an output of an HTTP step
+      gives one answer, as its result is the response it got; a switch's
+      statuses are answers it's joined to, and it gives each of those; two
+      answers one run can reach are a problem, to merge; each schema is a
+      JSON Schema; unhandled has a body.
+- [x] The engine gives each run its answer once its steps have ended,
+      through the one line into the response it took. None taken, two, a
+      status the step isn't joined to, or a value that isn't
+      `{status, body}`, fails the run as the workflow's fault,
+      `workflow_error`. A definition with neither a response nor an output
+      succeeds and answers nothing.
+- [x] Unhandled answers a run that gives no answer: a step fails or
+      times out, no answer is reached, or two are. Its body is JSONata over
+      the run with its `error`; its status is the cause's, 502 when an
+      upstream failed, 504 when time ran out, 500 otherwise. Bad input
+      (400), a bad token (401), busy (503) and a cancelled run stay
+      Conduit's.
+- [x] A run records the status it answered (`answered`, a column on
+      `runs`), unhandled's when that answered; a served run answers with
+      that status and the body, else with Conduit's problem details.
+- [x] The canvas: the card is drawn as a step is, mirrored: its answers as
+      blocks on the left, each a point a line arrives at, then + Add; on
+      the right, the steps that answer, and "also 4xx · 5xx", the answers
+      Conduit gives on its own, with ", your unhandled body" when there's one. A
+      line dropped anywhere on an answer's block joins it. Connect to lists
+      each answer with no line yet.
+- [x] The card's panel, the overview: each answer, the step that gives it
+      (a click opens it), Disconnect, and its schema; Add an answer;
+      Unhandled, or Write your own; then Conduit's own answers, each saying
+      when it's given and what body a caller gets.
+- [x] The switch's panel: what the step reads, once; each case's
+      condition, status and body, moved and removed; Otherwise's; then what
+      it answers over the samples. Use cases makes a transform a switch,
+      and so does joining one that gives one value to a second answer:
+      Otherwise keeps its expression as the first answer's body, and a case
+      for the new status waits to be filled.
+- [x] An output becomes a step: a definition with an output opens with a
+      transform step, `respond`, holding it, run after the steps it reads,
+      joined to 200, its output schema 200's; saved, it stays so.
+- [x] A run on the canvas marks the answer it gave, and dashes the lines
+      into the others.
+- [x] A line the response refuses says why, under the card.
+- [x] A body that is `$$`, or reads the steps' headers, gets a note once
+      it answers: it sends callers what the run read, upstream headers
+      included.
+- [x] Failing tests first; mutation checks; Chromium through nginx.
+- [ ] Chromium through `just dev`, the test upstream answering.
 
 Decided with you on 2026-10-30 (late night), from wireframes:
 - **The card shows every answer: yours, and Conduit's own.** Listing only
@@ -668,48 +710,182 @@ Decided with you on 2026-10-30 (late night), from wireframes:
   200, so a user that isn't found couldn't answer 404. Only your answers,
   with Conduit's in the docs, was the last.
 - **One status, one shape**, so a caller reads the card as an API's
-  reference: what each status means, and what comes with it.
-- **Lines into the card pick the answer.** A condition per answer was the
-  other way: the same contract, but the canvas wouldn't show which branch
-  gives which answer.
-- **The card is an overview; the step joined to an answer makes its
-  body.** The first draft gave each answer a JSONata body on the card; you
-  put the exact response at the step instead.
+  reference, and the format and structure of the contract stay consistent.
+- **One exit per status** (corrected 2026-10-31): each answer takes one
+  line, from the one step that gives it, so branches that answer the same
+  status meet in a step first. This said "one exit" at first: one step,
+  joined to the card by one line, making every answer, and a line per
+  answer turned down, as two answers a run could reach together would
+  have to be found. That was my reading of your "only one exit point for
+  the status code"; your "Fixes check", its 200s merged into one step and
+  its 400s into another, showed you meant one per status. Two answers a
+  run can reach together are found when saved (as built, below).
+- **The card is an overview; the steps joined to it make the answers.** The
+  first draft gave each answer a JSONata body on the card.
 - **Today's output moves into a step**, so every answer is made the same
-  way. Keeping it on the card for a plain 200 was the other option: no
-  extra step, but two ways to make a 200.
-- **One line per answer, with a merger for several branches.** Several
-  lines into one answer with a warning was the other option.
-- **Built after runs.**
+  way. Keeping it on the card for a plain 200 was the other option.
+- **No fallbacks, and no order on the card.** 200 answering only when
+  nothing else is reached, and the first answer on the card winning, were
+  both turned down: the person configuring decides. Unhandled
+  (2026-10-31) isn't one: it answers only a run that gives no answer, at
+  its cause's status.
+- **A run that reaches no answer answers 500**, the workflow's fault, with
+  a link to the run, or with unhandled's body. 200 with an empty body
+  was the other.
+- **A workflow may answer 400 itself**, beside Conduit's own 400 for input
+  that doesn't match the schema; the card shows both, and a caller tells
+  them apart by the body.
+- **Built now, after C.**
+
+A line per answer, decided with you on 2026-10-31 (your "Fixes check"):
+- **Each status has its own point, and takes one line.** A step joined to
+  two picks between them with a switch. Two answers one run can reach are
+  a problem when saved, "merge them into one node", and a run that
+  reaches two fails. One line into the card, a switch picking every
+  status, was the other option: two answers could never both be reached,
+  but every branch would have to meet in that one step.
+
+The switch, decided with you on 2026-10-31 (your idea):
+- **The step that answers can be a switch**: cases checked in order, the
+  first whose condition holds answering. Step Functions' Choice state takes
+  JSONata conditions the same way, and n8n's Switch has a rule per output
+  (sources.md).
+- **Built right after the card**, in this phase.
+- **Cases in the step**, so each status is checked when saved. A builder
+  over one JSONata expression, reading cases back out of it, was the other.
+- **Otherwise is required, and editable**, so a run that reaches a switch
+  always answers. Step Functions' Default is "Optional, Recommended", the
+  run failing without one, and n8n's fallback is off by default; that was
+  the other option.
+- **Joining a step that gives one value to a second answer turns it into
+  a switch** (from your "Fixes check": `transform` gave `$$`, and the 400
+  from `crm` had nowhere to go). Leaving the step as it was, and warning,
+  was the other option: runs would fail until its expression gave
+  `{status, body}`.
+- **A refused line says why**, under the card: "200 takes one line, from
+  respond. To answer 200 from spare too, merge them into one step."
+  Joining the line to the step that answers, by itself, was the other
+  option: quicker, but the line would land where it wasn't dropped. (Asked
+  while the card took one line; it held for a line per answer.)
+- **`$$` in an answer is warned about, not refused.** OWASP's API Security
+  Top 10 lists an endpoint exposing sensitive properties, and advises
+  against generic methods like `to_json()` (sources.md). The run's record
+  keeps the whole state for debugging.
+
+The default, now Unhandled, decided with you on 2026-10-31 (your idea):
+- **It answers any run that gives no answer**: a step fails (an upstream
+  error, a timeout, an expression that breaks), no answer is reached, or
+  two are. Bad input (400), a bad token (401) and busy (503) stay
+  Conduit's, as no run happens. Only when no answer is reached was the
+  other option, a step that fails keeping Conduit's own 500, 502 or 504.
+- **Your body, the status by cause**: 502 when an upstream failed, 504
+  when it timed out, 500 otherwise, as RFC 9110 defines them (sources.md),
+  so callers and their retries still read it right. Your body and one
+  status of yours was the other option: simpler, but a timeout and a
+  broken expression would look the same to a caller.
+- **Renamed Unhandled** (2026-11-01, your call): `response.unhandled` in
+  the definition and Unhandled in the panel, the word a step's Unhandled
+  block uses (below), so one idea has one name. `default` was never
+  committed.
 
 Decided while drafting, yours to overrule:
-1. **The card's order decides between answers**: when a run takes lines
-   into several, the first on the card wins. n8n answers with the first
-   Respond to Webhook node to run and ignores a later one (sources.md), but
-   steps here run in parallel, so which comes first isn't fixed; the card's
-   order is.
-2. **The answer is given when the run ends**, its steps all finished, as a
-   served run answers now. n8n and Logic Apps can answer midway, and go on
-   running.
-3. **An answer's schema stays on the card**: it's the contract a caller is
-   promised, while the body is the step's.
-4. **The editor tells; the person configuring merges** (your question,
-   2026-10-30). Most answers have one line in and need no merger. For a
-   merger's lines, the editor says from the graph whether they can come
-   together in one run: never, when they rest on different responses of
-   one step before them (user's 2xx, and create_user reached only through
-   its 404); maybe, through parallel branches or a condition it can't
-   judge. It offers a start to the merger's JSONata, whichever ran or both
-   side by side, and the answer's preview shows every way in. Merging by
-   itself, such as a deep merge of objects, would pick the shape for you:
-   the unclear contract this avoids.
+1. **Each answer holds its line**, `from` and `on`, rather than an edge
+   ending at the card, so edges stay between steps.
+2. **A step that picks with JSONata gives `{ "status", "body" }`**, as a
+   Lambda behind API Gateway's proxy integration returns its `statusCode`
+   and `body`, its own example a 400 for missing parameters (sources.md),
+   so one JSONata decides both; a switch gives the same. Only those two
+   keys: a third, such as `headers`, fails the run rather than being
+   ignored, so it can mean something later. Its status is a whole number
+   however the JSON writes it.
+3. **An output of an HTTP step gives one answer**: its result is the
+   response it got, so a problem says one output joined to two answers
+   needs a transform to pick. Each output can have an answer of its own.
+4. **A definition with neither a response nor an output succeeds and
+   answers nothing**, so a workflow being built runs from the editor;
+   served, it answers 500, "The workflow has no response". Publishing
+   doesn't refuse it: a revision publishes when it has no problems, and
+   refusing would add a check only publishing makes.
+5. **Runs that succeeded before `answered` existed answered 200**, so the
+   migration records that.
+6. **Converting an output marks the draft as changed**, so saving keeps it,
+   and says why.
+7. **The lines lead, and the cases follow** (changed while building):
+   joining a switch to an answer adds a case for it, and a case whose
+   status the step isn't joined to is a problem, "respond isn't joined to
+   a 409 answer". The draft had a case with a new status add the answer
+   to the response, but the answer would then have no line.
 
-Open: what the API answers when a run takes no line into the card (Logic
-Apps answers 502, "even if the workflow finishes successfully"; 200 with
-null is the other way); headers per answer; whether an answer may take a
-status Conduit gives on its own (400, 502, 504); whether a step's failure
-can lead to an answer (the "failed" output left open with outputs); the
-names in the definition, settled when it's built.
+Open: headers per answer, a case's later; enforcing each answer's schema on
+runs, which OWASP also advises (sources.md); an OpenAPI document for
+callers, built from the card (07); a Merge action, making one step of two
+that answer one status.
+
+**Phase D: strict joins, then Unhandled** (2026-11-01, your calls; next,
+in that order)
+
+Your "Fixes check" showed both. A step ran once every step with a line into
+it had ended, if any of those lines was taken (the roadmap's edges rule),
+so crm ran on orders' 2xx while prefs answered 400. And a failing step
+stops the run, with nowhere to map what it got back: "a 'failed' output"
+was left open (Phase D, outputs, above).
+
+Strict joins, decided with you on 2026-11-01:
+- **A line into a step is a dependency**: a step runs only when each step
+  with a line into it answered through a block joined to it, and that
+  line's condition held. Otherwise it's skipped, and skips cascade.
+  Airflow waits by default "for all upstream (direct parents) tasks for a
+  task to be successful", and BPMN's parallel join "until each incoming
+  sequence is taken" (sources.md).
+- **Lines from one step are alternatives**, your idea: join a step's 2xx
+  and its Unhandled both to the next step, and the next runs whichever it
+  took. Following either of two steps, the any-line rule until now, waits
+  for a step type of its own, the Merge above, or an option; Airflow and
+  BPMN both offer that kind too (sources.md).
+- **What it costs**: a step can't follow both arms of a branch. Your
+  success_200, after test_400 (prefs 400) and crm (prefs 2xx), can never
+  run, and the editor will say so.
+- [ ] The engine: a step runs once each step with a line into it took
+      one of them.
+- [ ] Validation: a step's route is, for each step before it, the blocks
+      it may answer through. A route that leaves a step no block can
+      never run, a problem; two answers can both be reached only when
+      their routes agree, which ends the false alarms (as built, below).
+- [ ] The editor names that problem, "success_200 can never run: it needs
+      prefs to answer 400 and 2xx"; the roadmap's rule and plan 02 change.
+
+A step's Unhandled, decided with you on 2026-11-01:
+- **Every step has an Unhandled block**, a strip along the bottom of its
+  card, muted and saying "fails the run" until something is joined to it.
+  It takes what the step's other blocks don't: a status with no block;
+  the connection, or a timeout, after its retries; a body over the cap,
+  or a 2xx body that isn't JSON; an address the SSRF guard refuses; and
+  its own JSONata failing, in its URL, query, headers, body, expr or a
+  case. n8n, Make and Step Functions all send a step's failure on, each
+  as an opt-in; Step Functions catches its JSONata errors too
+  (sources.md).
+- **Joined, the run goes on** down its lines. The step still shows
+  failed, with Unhandled marked, and the run succeeds if it answers. Not
+  joined, the run fails as it does now, and the response's Unhandled
+  answers.
+- **It hands on** `nodes.<step>.error`, `{code, detail}`, with `status`,
+  `headers` and `body` when the upstream answered a status with no
+  block: where a step's own result gets mapped.
+- **It doesn't take** a line's condition failing, as the step has
+  answered; a transform's `{status, body}` that isn't one of its answers;
+  the run's own time; a cancelled run; or our bugs. The response's
+  Unhandled answers those.
+- **Joined straight to an answer**, the body is the step's, as with any
+  block, and it joins one answer at most. Its panel warns that callers
+  get whatever the upstream sent, stack traces included (OWASP API8,
+  sources.md).
+- **The response card's Unhandled** becomes the same strip, with no point.
+- **In the definition**, an edge or an answer's line gets
+  `unhandled: true`, beside `on`; a caught failure keeps its step
+  `failed`, with `caught: true` in its error. A preview after an
+  Unhandled line reads a made-up `error`.
+- [ ] The engine, validation, runs and previews.
+- [ ] The strips, their panels and the run's marks.
 
 **Phase E: the browser test**
 - [ ] Playwright, against the test upstream (built in C), and the Done flow.
@@ -1127,7 +1303,7 @@ After step 4, what it noticed, fixed at your ask (2026-10-30):
   permission check refused the delete, as it can't be undone. The SQL is
   for you to run.
 
-## Phase D, as built (so far)
+## Samples and previews, as built
 
 Samples and the Preview, the first four steps of D (2026-10-30). The order
 and the tab's name were yours (Decided with you); the rest was decided
@@ -1357,6 +1533,117 @@ Seen, not fixed:
 - A call the SSRF guard refuses reads "failed: no answer", where "blocked"
   is truer; the reason beside it says so.
 - Keep as sample keeps headers a sample doesn't need, such as date.
+
+## The API's answers, as built
+
+"Phase D: the API's answers", built on 2026-10-31: the definition,
+validation, the engine, runs, serving, unhandled, and the editor's card
+and switch. The first build took one line into the card for every answer;
+it was reworked to a line per answer the same day, before it was
+committed. Decided while building:
+- **Two answers one run can reach are found from the graph.** A step needs
+  the outputs on every path to it; two answers are apart only when they
+  need different outputs of one step, as crm's 2xx and its 400 are.
+  Conditions on lines aren't weighed, as whether two JSONata conditions can
+  both hold isn't known before a run; a run that reaches two answers
+  anyway fails. In your "Fixes check", success_200 → 200 beside
+  bad_400 → 400 is a problem: prefs answering 400 runs test_400, then
+  success_200, while crm, which runs once orders' line is taken, can
+  still answer 400. Reducing a step's paths to what they share also
+  raises false alarms: with the calls in a row, people → prefs → orders
+  → crm, no run reaches both, yet it's flagged (a throwaway test,
+  2026-11-01). Strict joins end both (Phase D, next).
+- **A run's answer is checked once its steps have ended**, and each way it
+  can miss fails the run as `workflow_error`, served 500 with the run's
+  link unless unhandled answers: "no answer: no line into the response
+  was taken"; "two answers: 200 from found and 404 from gone were both
+  reached"; "not an answer: respond gave no {status, body} object", "…
+  gave "headers", besides status and body", "… gave no whole number as its
+  status", "… gave the status 418, and it's joined to 200 or 404".
+- **A switch's errors name their field**, "case 2: when: …" or "otherwise:
+  body: …", so a problem points at it, in a run and in a preview.
+- **Unhandled reads the steps that succeeded and `error`,
+  `{code, detail, node}`**, with 5 seconds of its own after the run. One
+  that fails adds "; unhandled failed too: …" to the run's error, and
+  Conduit's problem details answer. The question said `step`; `node` is
+  what a run's error already calls it.
+- **`/serve` answers with the run's status and body as they are**, as
+  `application/json`; an answer with no body has no Content-Type. A
+  revision with neither a response nor an output answers 500: "The workflow
+  has no response, so it gives no answer."
+- **`answered` is on every run**: the run bar says "succeeded in 14 ms,
+  answered 404", or "failed in 500 ms: user answered 503; Unhandled
+  answered 502"; the card marks the answer given, and dashes the lines
+  into the others.
+- **The card is mirrored**, as the wireframe was: the answers on the left,
+  each block a point, a dot on its edge, so a line dropped anywhere on the
+  block joins it; on the right "Response", "From respond, spare" or
+  "Nothing answers yet", and "also 4xx · 5xx, your unhandled body". The
+  first
+  build had the answers on the right, and one point for the card.
+- **Conduit's own answers are 400, 401, 404, 500, 502, 503 and 504**, as
+  `/serve` takes a token: the card says "also 4xx · 5xx", and the panel
+  lists each, with when it's given; 500, 502 and 504 add "unless
+  Unhandled answers". The wireframe's "also 400 · 502 · 504" left out four.
+- **Joining**: a drag from a step's point to an answer, or Response 404 in
+  Connect to. An answer that has its line refuses a second, and Connect to
+  offers only answers with none. Disconnect in the panel, or Delete on the
+  line, takes it away, and the answer stays. Renaming the step takes its
+  lines along; deleting it, or the response a line leaves on, takes them
+  away.
+- **The output's move**: `respond`, or `respond_2` when that's taken, runs
+  after each step the output reads, on every one of their responses, so it
+  runs whichever way they answered, as the output did. It goes after the
+  rightmost of them that's placed. The header says "The output moved into
+  a step, respond, joined to the response" until the first save.
+- **A refused line** makes the card say, under it: "200 takes one line,
+  from respond. To answer 200 from spare too, merge them into one step.";
+  off any answer, "Let go on the answer spare gives: 200 or 400."; with no
+  answers yet, "Add an answer with + Add, then join spare to it." It stays
+  until the next edit, pick, drag or click on the canvas, and it's a
+  status, so a screen reader hears it. A step with nothing to join says,
+  under Then: "Each answer on the response takes one line, and has it: to
+  answer from here, merge this step with the one that gives the answer."
+- **The switch's panel** shows what the step reads once, and a field
+  picked from it goes where the cursor was last, or, before any field has
+  had it, into the first case's condition. A new case's status is an
+  answer the step is joined to that no case gives yet, else Otherwise's. A
+  status field takes only a whole number from 200 to 599, and says so
+  otherwise. The step's card says what it answers: "400 · 404 · else 200".
+- **The note on bodies that send the run** is a text match, as the browser
+  doesn't parse JSONata: `$$` or `nodes` whole, or a step's `headers`;
+  `$$.input.id` and `nodes.user.body` pass. It's under the expression of a
+  step that answers, every switch's bodies, as its cases exist to answer,
+  and Unhandled's.
+- **Problems** mark the card, show under their part of the panel, and the
+  list names them: "Response · 404 · its line", "Response · Unhandled",
+  "respond · Case 2 · When".
+- **Checked**: `just check` (formatting, lint, race tests and coverage
+  floors, 352 web tests, typecheck, the build, generated code), and the Go
+  tests again uncached; the workflow package's floor rose to 96. 27 Go
+  mutations and 41 web ones, each caught in the end: two Go and three web
+  only after a test was added or tightened. Chromium through nginx, light
+  and dark: `pw-cases`, a switch joined to 200 and 400, its card ("400 ·
+  else 200") and panel ("It answers 400" over the sample); runs with key 1
+  and key 2 answering 400 and 200, each marked, the other line dashed; 409
+  added, and a line from spare dropped on its block, off the point; a line
+  onto 200 refused, with its note; `/serve` answering
+  `400 {"error":"bad key"}` and `200 {"key":2}`; `pw-default`, its
+  upstream unreachable, served
+  `502 {"error":"upstream_failed","step":"user"}`; and your "Fixes check"
+  opened, nothing saved. No CSP violations and no console problems. Not
+  run: Chromium through `just dev` with the test upstream, as `just up`
+  was running and they share Postgres.
+
+Seen, not fixed:
+- An answer's schema field repeats its status ("404", then "404 schema"),
+  as each field needs a name of its own.
+- A moved output's lines fan in from every response of each step it reads,
+  which crowds a step with many responses.
+- The card cuts its line short during a run: "In this run: succeeded in…".
+- Your "Fixes check" was saved, revisions 18 to 24, while the card took
+  one line, so its 200 has no line now; joined again, it shows the
+  problem above.
 
 ## Out of scope
 

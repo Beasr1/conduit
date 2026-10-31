@@ -79,7 +79,7 @@ func TestEndToEnd(t *testing.T) {
 	r = send(http.MethodGet, "/v1/runs/"+run.ID, "")
 	want(r, http.StatusOK, "get the run")
 	got := strict[gen.Run](t, r.body)
-	if got.Revision != 2 || string(got.Output) != `{"greeting":"Hello, Ada"}` || len(got.Nodes) != 2 ||
+	if got.Revision != 2 || got.Answered != 200 || string(got.Output) != `{"greeting":"Hello, Ada"}` || len(got.Nodes) != 2 ||
 		got.Nodes[0].Response.Status != 200 || got.Nodes[0].Request.Headers["authorization"] != "[redacted]" {
 		t.Errorf("run = %s", r.body)
 	}

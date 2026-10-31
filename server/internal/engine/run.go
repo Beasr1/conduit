@@ -6,11 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"math"
 	"net/http"
 	"runtime/debug"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Beasr1/conduit/server/internal/upstream"
+	"github.com/Beasr1/conduit/server/internal/workflow"
 )
 
 // Options tune an Engine. Zero values mean the defaults.
@@ -47,10 +53,14 @@ const (
 
 // Result is a finished run.
 type Result struct {
-	Status Status          // succeeded, failed or cancelled
-	Output json.RawMessage // the output expression's value, after success
-	Err    error           // why the run didn't succeed: a *NodeError when a node failed it
-	Nodes  []NodeResult    // one per node, in declaration order
+	Status Status // succeeded, failed or cancelled
+	// What the run answers, after success: a status, and a body unless it
+	// has none. A definition with neither a response nor an output answers
+	// 0, nothing.
+	Answer int
+	Output json.RawMessage
+	Err    error        // why the run didn't succeed: a *NodeError when a node failed it
+	Nodes  []NodeResult // one per node, in declaration order
 }
 
 // NodeResult is how one node ended.
@@ -233,7 +243,7 @@ func (r *run) schedule() *Result {
 	case cause != nil:
 		res.Status, res.Err = StatusCancelled, cause
 	default:
-		res.Output, res.Err = r.output()
+		res.Answer, res.Output, res.Err = r.answer()
 		res.Status = StatusSucceeded
 		if res.Err != nil {
 			res.Status = StatusFailed
@@ -333,11 +343,135 @@ func (r *run) emit(i int, kind EventKind, attempt int, result *NodeResult) {
 	}
 }
 
+// answer is what the run answers: the answer whose line it took, or the
+// output of a definition saved with one, as a 200. A run takes an answer's
+// line when its node answered through its output. Taking none, or lines
+// from two outputs, fails the run, and so does a node joined to several
+// answers that picked none of them.
+func (r *run) answer() (int, json.RawMessage, error) {
+	if r.p.output != nil {
+		out, err := r.output()
+		if err != nil {
+			return 0, nil, err
+		}
+		return http.StatusOK, out, nil
+	}
+	resp := r.p.response
+	if resp == nil {
+		return 0, nil, nil
+	}
+	// The answers taken, by the output they're joined to.
+	type joined struct {
+		from, on int
+		statuses []int
+	}
+	var taken []joined
+	for _, a := range resp.answers {
+		n := r.nodes[a.from].result
+		if n.Status != StatusSucceeded || outputOf(n.HTTPStatus) != a.on {
+			continue
+		}
+		i := slices.IndexFunc(taken, func(j joined) bool { return j.from == a.from && j.on == a.on })
+		if i < 0 {
+			taken = append(taken, joined{from: a.from, on: a.on})
+			i = len(taken) - 1
+		}
+		taken[i].statuses = append(taken[i].statuses, a.status)
+	}
+	switch len(taken) {
+	case 0:
+		return 0, nil, errors.New("no answer: no line into the response was taken")
+	case 1:
+	default:
+		a, b := taken[0], taken[1]
+		return 0, nil, fmt.Errorf("two answers: %d from %s and %d from %s were both reached",
+			a.statuses[0], r.p.nodes[a.from].id, b.statuses[0], r.p.nodes[b.from].id)
+	}
+	j := taken[0]
+	n := r.nodes[j.from].result
+	if len(j.statuses) == 1 && r.p.nodes[j.from].otherwise == nil {
+		return j.statuses[0], n.Body, nil
+	}
+	return pick(n.ID, n.Body, j.statuses)
+}
+
+// pick reads the answer node id picked among statuses: its result v is
+// {"status": …, "body": …}, the status one of them. A body left out is none.
+func pick(id string, v json.RawMessage, statuses []int) (int, json.RawMessage, error) {
+	var picked map[string]json.RawMessage
+	if json.Unmarshal(v, &picked) != nil || picked == nil {
+		return 0, nil, fmt.Errorf("not an answer: %s gave no {status, body} object", id)
+	}
+	for _, k := range slices.Sorted(maps.Keys(picked)) {
+		if k != "status" && k != "body" {
+			return 0, nil, fmt.Errorf("not an answer: %s gave %q, besides status and body", id, k)
+		}
+	}
+	// A whole number, however the JSON writes it: 404, 404.0 or 4.04e2.
+	var status *float64
+	if json.Unmarshal(picked["status"], &status) != nil || status == nil || *status != math.Trunc(*status) {
+		return 0, nil, fmt.Errorf("not an answer: %s gave no whole number as its status", id)
+	}
+	if !slices.Contains(statuses, int(*status)) {
+		return 0, nil, fmt.Errorf("not an answer: %s gave the status %s, and it's joined to %s", id, picked["status"], statusList(statuses))
+	}
+	return int(*status), picked["body"], nil
+}
+
+// statusList is statuses in words: "200", "200 or 404", "200, 404 or 409".
+func statusList(statuses []int) string {
+	words := make([]string, len(statuses))
+	for i, s := range statuses {
+		words[i] = strconv.Itoa(s)
+	}
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " or " + words[len(words)-1]
+}
+
+// Unhandled is what the response's unhandled answers a run that gave no
+// answer: its body, JSONata evaluated over the run as it stood, its input
+// and every node that succeeded, with failure, the run's {code, detail,
+// node}, as error. ok says whether the response has one.
+func (p *Program) Unhandled(ctx context.Context, input json.RawMessage, nodes []NodeResult, failure json.RawMessage) (body json.RawMessage, ok bool, err error) {
+	if p.response == nil || p.response.unhandled == nil {
+		return nil, false, nil
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			body, err = nil, &PanicError{Value: v, Stack: debug.Stack()}
+		}
+	}()
+	var parts []docPart
+	for i, n := range nodes {
+		if n.Status != StatusSucceeded || i >= len(p.nodes) {
+			continue
+		}
+		entry := bodyEntry(n.Body)
+		if p.nodes[i].kind == workflow.NodeKindHTTP {
+			if entry, err = responseEntry(n.HTTPStatus, n.Header, n.Body); err != nil {
+				return nil, true, fmt.Errorf("unhandled: %w", err)
+			}
+		}
+		parts = append(parts, docPart{id: p.nodes[i].id, entry: entry})
+	}
+	if len(input) == 0 {
+		input = json.RawMessage("null")
+	}
+	doc, err := document(input, parts)
+	if err != nil {
+		return nil, true, fmt.Errorf("unhandled: %w", err)
+	}
+	doc = append(append(append(doc[:len(doc)-1], `,"error":`...), failure...), '}')
+	if body, err = p.response.unhandled.Eval(ctx, doc); err != nil {
+		return nil, true, fmt.Errorf("unhandled: %w", err)
+	}
+	return body, true, nil
+}
+
 // output evaluates the output expression over every node that succeeded.
 func (r *run) output() (out json.RawMessage, err error) {
-	if r.p.output == nil {
-		return nil, nil
-	}
 	defer func() {
 		if v := recover(); v != nil {
 			out, err = nil, &PanicError{Value: v, Stack: debug.Stack()}

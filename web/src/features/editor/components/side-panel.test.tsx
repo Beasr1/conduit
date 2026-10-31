@@ -87,22 +87,6 @@ test("a connection says which response it leaves from, and whether it's taken", 
   expect(asked[0]?.node).toBeUndefined();
 });
 
-test("the response card says what the output reads, and opens it", async () => {
-  renderEditor({ ...specExample, output: "nodes.crm.body" });
-  expect(await screen.findByText("Reads crm")).toBeTruthy();
-  fireEvent.click(screen.getByText("Response"));
-  const panel = await screen.findByRole("complementary", { name: "Response" });
-  expect(within(panel).getByLabelText("Output")).toHaveProperty(
-    "value",
-    "nodes.crm.body",
-  );
-
-  type("Output", '{ "user": nodes.user.body, "crm": nodes.crm.body }');
-  expect(await screen.findByText("Reads user, crm")).toBeTruthy();
-  type("Output", "");
-  expect(await screen.findByText("No output yet")).toBeTruthy();
-});
-
 test("the input schema is kept once it's a JSON object", async () => {
   renderEditor(specExample);
   const open = async () => {

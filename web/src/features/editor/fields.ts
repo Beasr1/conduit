@@ -44,7 +44,7 @@ type Schema = Record<string, unknown>;
 
 // What a JSON field's text reads as: a value once it's whole, nothing for
 // no text, and a reason for text that doesn't count yet.
-interface Read<T> {
+export interface Read<T> {
   value?: T;
   error?: string;
 }

@@ -139,6 +139,9 @@ export function EditorHeader({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
+  // A revision saved with an output opens with it moved into a step, which
+  // is a change to save until the first save.
+  const moved = useEditor((s) => s.moved);
   const status: ReactNode[] = [];
   if (save.isPending) status.push("Saving…");
   else if (save.isError && !newer)
@@ -147,6 +150,10 @@ export function EditorHeader({
     );
   else if (dirty) status.push("Unsaved changes");
   else if (save.isSuccess) status.push("Saved");
+  if (moved && saved === opened.definition)
+    status.push(
+      `The output moved into a step, ${moved}, joined to the response`,
+    );
   if (newer)
     status.push(
       workflow.latest_revision > base

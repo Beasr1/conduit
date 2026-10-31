@@ -144,10 +144,9 @@ test("picking a field of the input puts its path where the cursor is", async () 
   );
 });
 
-test("a transform step and the response card preview what they give", async () => {
+test("a transform step previews what it gives", async () => {
   renderEditor({
     nodes: [{ id: "merge", kind: "transform", expr: "{ 'who': 'ADA' }" }],
-    output: "nodes.merge.body",
   });
   server.use(
     http.post("/api/v1/preview", () =>
@@ -167,11 +166,4 @@ test("a transform step and the response card preview what they give", async () =
     await within(step).findByRole("heading", { name: "It gives" }),
   ).toBeTruthy();
   expect(within(step).getByText(/"who": "ADA"/)).toBeTruthy();
-
-  await close();
-  await open("Response");
-  const card = await screen.findByRole("complementary", { name: "Response" });
-  expect(
-    await within(card).findByRole("heading", { name: "It answers" }),
-  ).toBeTruthy();
 });

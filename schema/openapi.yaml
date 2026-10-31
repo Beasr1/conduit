@@ -430,8 +430,8 @@ paths:
   /serve/{slug}:
     post:
       operationId: serveWorkflow
-      summary: Run a workflow's published revision and answer with its output
-      description: The body is the run's input. A run that fails answers with problem details naming the node; `instance` is the run, at /v1/runs/{id}. Served runs time out after 30 s.
+      summary: Run a workflow's published revision and answer with the answer it gives
+      description: The body is the run's input. A run answers with the answer it gave, its status and its body. A run that gives none, as a node failed, or it took no line into the response, or lines from two nodes, answers with its response's default, if it has one, at the status of the cause, 502 an upstream failed, 504 a timeout, 500 otherwise. Without one, or with no response, it answers that status with problem details naming what failed; `instance` is the run, at /v1/runs/{id}. A revision saved with an output answers 200 with it. Served runs time out after 30 s.
       parameters:
         - name: slug
           in: path
@@ -446,7 +446,7 @@ paths:
               x-go-type: json.RawMessage
       responses:
         "200":
-          description: The run's output. null when the workflow has no output expression.
+          description: The run's answer, when its status is 200. An answer with another status comes the same way, with that status.
           content:
             application/json:
               schema:
@@ -796,6 +796,9 @@ components:
           type: string
           format: date-time
           description: Absent while the run goes on.
+        answered:
+          type: integer
+          description: The status of the answer the run gave, its own once it succeeded, or its response's unhandled once it failed, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
 
     Run:
       allOf:
@@ -807,7 +810,7 @@ components:
               description: The input, as sent.
               x-go-type: json.RawMessage
             output:
-              description: The output, once the run succeeded. Over 256 KiB, its first 256 KiB as a string, and output_truncated is true.
+              description: The body of the answer the run gave, unless it has none. Over 256 KiB, its first 256 KiB as a string, and output_truncated is true.
               x-go-type: json.RawMessage
             output_truncated:
               type: boolean

@@ -55,6 +55,31 @@ func (e NodeKind) Valid() bool {
 	}
 }
 
+// Answer defines model for Answer.
+type Answer struct {
+	// From The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs.
+	From string `json:"from,omitempty"`
+
+	// On The output of from that the line leaves from, as an edge's. Absent means 2xx, and a transform's only output.
+	On int `json:"on,omitempty"`
+
+	// Schema A JSON Schema (2020-12) the body is promised to match. Checked when saved, not enforced on runs yet.
+	Schema map[string]interface{} `json:"schema,omitempty"`
+
+	// Status The HTTP status the answer has. Listed once in a response.
+	Status int `json:"status"`
+}
+
+// Case defines model for Case.
+type Case struct {
+	// Body JSONata whose value is the body. Absent means none.
+	Body   string `json:"body,omitempty"`
+	Status int    `json:"status"`
+
+	// When JSONata, cast to a boolean as an edge's condition is.
+	When string `json:"when,omitempty"`
+}
+
 // Definition A workflow. A node runs once its parents have finished and at least one edge into it was taken.
 type Definition struct {
 	Edges []Edge `json:"edges,omitempty"`
@@ -63,11 +88,14 @@ type Definition struct {
 	InputSchema map[string]interface{} `json:"input_schema,omitempty"`
 	Nodes       []Node                 `json:"nodes"`
 
-	// Output JSONata over the finished run. Its value is the run's result.
+	// Output Kept for revisions saved with it, as response replaces it. JSONata over the finished run; such a definition answers 200 with its value. A definition has an output or a response, not both.
 	Output string `json:"output,omitempty"`
 
-	// OutputSchema A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet.
+	// OutputSchema Kept for revisions saved with it, as response replaces it. A JSON Schema (2020-12) describing the output. Checked when saved, not enforced on runs yet.
 	OutputSchema map[string]interface{} `json:"output_schema,omitempty"`
+
+	// Response What the workflow's API answers.
+	Response *Response `json:"response,omitempty"`
 
 	// SampleInput A made-up run input, any JSON, that previews read. Runs ignore it. At most 64 KiB.
 	SampleInput json.RawMessage `json:"sample_input,omitempty"`
@@ -115,7 +143,7 @@ type HTTPRequestMethod string
 
 // Node defines model for Node.
 type Node struct {
-	// Expr A transform node's JSONata. Its value becomes the node's body.
+	// Expr A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch.
 	Expr string `json:"expr,omitempty"`
 
 	// ID Unique in the workflow. Expressions read the node's result as nodes.<id>.
@@ -130,10 +158,20 @@ type Node struct {
 
 	// Sample An http node's made-up or redacted 2xx response, which previews read in place of a real one. Runs ignore it.
 	Sample *Sample `json:"sample,omitempty"`
+
+	// Switch A transform node's cases, in place of an expr.
+	Switch *Switch `json:"switch,omitempty"`
 }
 
 // NodeKind defines model for NodeKind.
 type NodeKind string
+
+// Otherwise What a switch gives when no case holds.
+type Otherwise struct {
+	// Body JSONata whose value is the body. Absent means none.
+	Body   string `json:"body,omitempty"`
+	Status int    `json:"status"`
+}
 
 // Output defines model for Output.
 type Output struct {
@@ -148,6 +186,15 @@ type Output struct {
 type Position struct {
 	X float64 `json:"x"`
 	Y float64 `json:"y"`
+}
+
+// Response What the workflow's API answers. Each answer is a status, joined by one line from the node that gives it; a run that takes one line answers with it. A run that takes none, or lines from two nodes, or in which a node fails, gives no answer, and fails; unhandled, if there is one, answers it.
+type Response struct {
+	// Answers The answers the API can give, each a status, the line it takes, and the shape promised with it.
+	Answers []Answer `json:"answers,omitempty"`
+
+	// Unhandled What the API answers a run that gives no answer. Its status is the cause's, 502 when an upstream failed, 504 when the run or a node ran out of time, 500 otherwise, and its body is this.
+	Unhandled *Unhandled `json:"unhandled,omitempty"`
 }
 
 // Retry Retries transport errors, timeouts, 429 and 5xx responses, with backoff and Retry-After honoured.
@@ -171,8 +218,22 @@ type Sample struct {
 	Status int `json:"status,omitempty"`
 }
 
+// Switch A transform node's cases, in place of an expr. The first case whose condition holds gives its status and body, else otherwise does, so the node's value is {status, body}.
+type Switch struct {
+	Cases []Case `json:"cases,omitempty"`
+
+	// Otherwise What a switch gives when no case holds.
+	Otherwise Otherwise `json:"otherwise"`
+}
+
 // UI defines model for UI.
 type UI struct {
 	// Positions Where each node sits on the editor's canvas, keyed by node id. A node without one is laid out by the editor; a position for a node that isn't in the workflow is ignored.
 	Positions map[string]Position `json:"positions,omitempty"`
+}
+
+// Unhandled What the API answers a run that gives no answer. Its status is the cause's, 502 when an upstream failed, 504 when the run or a node ran out of time, 500 otherwise, and its body is this.
+type Unhandled struct {
+	// Body JSONata over the run as it stood, every node that succeeded, and error, {code, detail, node}.
+	Body string `json:"body"`
 }

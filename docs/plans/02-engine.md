@@ -75,10 +75,15 @@ types into `server/internal/workflow/definition.gen.go`.
     with `{{ jsonata }}` placeholders. A placeholder ends at the first `}}`.
   - `body` is one JSONata expression, sent as JSON.
 - **`transform` nodes:** one JSONata `expr`. Its value becomes the node's
-  `body`.
+  `body`. Since plan 04's answers (2026-10-31), a `switch` can take the
+  `expr`'s place: `cases`, each a condition, a status and a body, then an
+  `otherwise`; the first case that holds gives `{status, body}`.
 - **`edges`:** `when` is optional, cast to a boolean the way `$boolean()`
   does, and true when absent.
-- **`output`:** JSONata over every node that succeeded.
+- **`output`:** JSONata over every node that succeeded. Since plan 04's
+  answers (2026-10-30), kept for the revisions saved with one: a definition
+  answers through its `response`, each answer joined to the node that gives
+  it.
 - **What expressions see:** `{ input, nodes: { <id>: { status, headers, body } } }`.
   - A transform node's entry has only `body`.
   - Header names are lower case.
@@ -137,7 +142,11 @@ types into `server/internal/workflow/definition.gen.go`.
    - Run statuses are succeeded, failed or cancelled; cancelled means the
      caller stopped it.
 5. **Output.** `output` is evaluated after a successful run, over every node
-   that succeeded.
+   that succeeded. Since plan 04's answers, a run answers through the one
+   line into its response it took: with that node's result, or the
+   `{status, body}` it gives when it's joined to several answers. Taking
+   none, or two, fails the run; then the response's unhandled, if it has
+   one, answers, at the status the failure's cause is served with.
 6. **Events.**
    - Each event is `{run, node, kind, attempt, at}`.
    - Kinds: started, retrying, succeeded, failed, skipped, cancelled.

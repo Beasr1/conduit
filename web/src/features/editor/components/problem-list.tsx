@@ -28,6 +28,12 @@ const fieldNames: Record<StepField, string> = {
   idempotent: "Idempotent",
   sample: "2xx response",
   outputs: "Responses",
+  switch: "Cases",
+  case_when: "When",
+  case_status: "Status",
+  case_body: "Body",
+  otherwise_status: "Otherwise · Status",
+  otherwise_body: "Otherwise · Body",
 };
 
 const everywhere = () => true;
@@ -44,6 +50,8 @@ const fieldIds: Partial<Record<StepField, string>> = {
   sample: "step-sample-body",
   outputs: "step-output-status",
   expr: "step-expr",
+  otherwise_status: "step-otherwise-status",
+  otherwise_body: "step-otherwise-body",
 };
 
 // fieldOf is the element a problem's field is drawn as, once its panel is
@@ -66,12 +74,28 @@ function fieldOf(
       }
       const status = statusOf(place, draft);
       if (status !== undefined) return `step-sample-${status}-body`;
+      if (place.case !== undefined && field?.startsWith("case_"))
+        return `step-case-${place.case}-${field.slice("case_".length)}`;
       return fieldIds[field ?? "id"] ?? "step-id";
     }
     case "connection":
       return "connection-when";
     case "response":
-      return place.field === "output" ? "response-output" : "response-schema";
+      switch (place.field) {
+        case "from":
+        case "on":
+          return `response-answer-${place.answer}-from`;
+        case "unhandled":
+          return "response-unhandled";
+        case "answers":
+          return "response-add-answer";
+        case "status":
+          return `response-answer-${place.answer}-remove`;
+        case "schema":
+          return `response-answer-${place.answer}-schema`;
+        default:
+          return undefined;
+      }
     case "settings":
       return place.field === "input_schema"
         ? "workflow-input-schema"
@@ -193,6 +217,33 @@ function statusOf(place: Place, draft: Definition): number | undefined {
   return draft.nodes[place.index]?.outputs?.[place.output]?.status;
 }
 
+// responsePart is the part of the response a problem is in, in the screen's
+// words: an answer by its status, or its place when it has none.
+function responsePart(
+  place: Extract<Place, { on: "response" }>,
+  draft: Definition,
+): string {
+  const k = place.answer ?? -1;
+  const status = draft.response?.answers?.[k]?.status;
+  switch (place.field) {
+    case "from":
+    case "on":
+      return `${status ?? `Answer ${k + 1}`} · its line`;
+    case "answers":
+      return "Answers";
+    case "unhandled":
+      return "Unhandled";
+    case "status":
+      return status === undefined ? `Answer ${k + 1}` : `${status} answer`;
+    case "schema":
+      return `${status ?? `Answer ${k + 1}`} schema`;
+    case "output":
+      return "Output";
+    case "output_schema":
+      return "Output schema";
+  }
+}
+
 // Where says where a problem is, in the screen's words.
 export function Where({ place, draft }: { place: Place; draft: Definition }) {
   switch (place.on) {
@@ -204,11 +255,13 @@ export function Where({ place, draft }: { place: Place; draft: Definition }) {
           ? undefined
           : status !== undefined
             ? `${status} response`
-            : place.name === undefined
-              ? fieldNames[place.field]
-              : place.field === "headers"
-                ? `Request header “${place.name}”`
-                : `Query parameter “${place.name}”`;
+            : place.case !== undefined
+              ? `Case ${place.case + 1} · ${fieldNames[place.field]}`
+              : place.name === undefined
+                ? fieldNames[place.field]
+                : place.field === "headers"
+                  ? `Request header “${place.name}”`
+                  : `Query parameter “${place.name}”`;
       return (
         <>
           <span className="font-mono">{id}</span>
@@ -233,9 +286,7 @@ export function Where({ place, draft }: { place: Place; draft: Definition }) {
       );
     }
     case "response":
-      return (
-        <>Response · {place.field === "output" ? "Output" : "Output schema"}</>
-      );
+      return <>Response · {responsePart(place, draft)}</>;
     case "settings":
       return (
         <>

@@ -29,7 +29,13 @@ export type StepField =
   | "attempts"
   | "idempotent"
   | "sample"
-  | "outputs";
+  | "outputs"
+  | "switch"
+  | "case_when"
+  | "case_status"
+  | "case_body"
+  | "otherwise_status"
+  | "otherwise_body";
 
 // The fields an HTTP step's Request tab holds: the call and its body.
 export const REQUEST_FIELDS: ReadonlySet<StepField | undefined> = new Set([
@@ -43,11 +49,25 @@ export const REQUEST_FIELDS: ReadonlySet<StepField | undefined> = new Set([
   "idempotent",
 ]);
 
+// The parts of the response a problem can be about: its line (from, on),
+// its answers as a whole, one answer's status or schema, and the output and
+// output schema of a revision saved with them.
+export type ResponseField =
+  | "from"
+  | "on"
+  | "answers"
+  | "status"
+  | "schema"
+  | "unhandled"
+  | "output"
+  | "output_schema";
+
 // Place is where a problem is: in a step or a connection, by its place in
 // the definition; in the response card or the workflow's settings; or in the
 // workflow as a whole. A header's or query parameter's problem names it, and
 // one in a response besides 2xx, or its sample, has the response's place in
-// the step's outputs.
+// the step's outputs, and one in a case its place in the switch's. One in an
+// answer has the answer's place in the response's.
 export type Place =
   | {
       on: "step";
@@ -55,9 +75,10 @@ export type Place =
       field?: StepField;
       name?: string;
       output?: number;
+      case?: number;
     }
   | { on: "connection"; index: number; field?: "when" | "on" }
-  | { on: "response"; field: "output" | "output_schema" }
+  | { on: "response"; field: ResponseField; answer?: number }
   | { on: "settings"; field: "input_schema" | "sample_input" }
   | { on: "workflow" };
 
@@ -79,6 +100,15 @@ export function placeOf(pointer: string): Place {
       : { on: "connection", index: Number(i) };
   if (top === "output" || top === "output_schema")
     return { on: "response", field: top };
+  if (top === "response" && i === "unhandled")
+    return { on: "response", field: "unhandled" };
+  if (top === "response" && i === "answers") {
+    const [k, part] = rest;
+    if (!isIndex(k)) return { on: "response", field: "answers" };
+    const field =
+      part === "from" || part === "on" || part === "schema" ? part : "status";
+    return { on: "response", field, answer: Number(k) };
+  }
   if (top === "input_schema" || top === "sample_input")
     return { on: "settings", field: top };
   return { on: "workflow" };
@@ -96,7 +126,32 @@ const requestParts = new Map<string, StepField>([
   ["timeout_ms", "timeout"],
 ]);
 
-function stepPlace(index: number, [part, sub, name]: string[]): Place {
+// switchPlace is the place a pointer below a step's switch names: a case's
+// condition, status or body, otherwise's status or body, or the switch.
+// The tokens after "switch" are sub, k and part: "cases", "1", "when".
+function switchPlace(
+  index: number,
+  sub: string | undefined,
+  k: string | undefined,
+  part: string | undefined,
+): Place {
+  const step = { on: "step", index } as const;
+  if (sub === "otherwise")
+    return {
+      ...step,
+      field: k === "body" ? "otherwise_body" : "otherwise_status",
+    };
+  if (sub !== "cases" || !isIndex(k)) return { ...step, field: "switch" };
+  const field =
+    part === "when"
+      ? "case_when"
+      : part === "body"
+        ? "case_body"
+        : "case_status";
+  return { ...step, field, case: Number(k) };
+}
+
+function stepPlace(index: number, [part, sub, name, end]: string[]): Place {
   const step = { on: "step", index } as const;
   if (part === "id" || part === "kind" || part === "expr" || part === "sample")
     return { ...step, field: part };
@@ -108,6 +163,7 @@ function stepPlace(index: number, [part, sub, name]: string[]): Place {
           field: name === "sample" ? "sample" : "outputs",
           output: Number(sub),
         };
+  if (part === "switch") return switchPlace(index, sub, name, end);
   if (part !== "request") return step;
   if (sub === "headers" || sub === "query")
     return name === undefined
@@ -226,6 +282,22 @@ function partOf(d: Definition, place: Place): unknown {
           const map = r?.[place.field];
           return place.name === undefined ? map : map?.[place.name];
         }
+        case "switch":
+          return n?.switch;
+        case "case_when":
+        case "case_status":
+        case "case_body": {
+          const c = n?.switch?.cases?.[place.case ?? -1];
+          return place.field === "case_when"
+            ? c?.when
+            : place.field === "case_status"
+              ? c?.status
+              : c?.body;
+        }
+        case "otherwise_status":
+          return n?.switch?.otherwise.status;
+        case "otherwise_body":
+          return n?.switch?.otherwise.body;
       }
       return undefined;
     }
@@ -233,7 +305,25 @@ function partOf(d: Definition, place: Place): unknown {
       const e = d.edges?.[place.index];
       return place.field === undefined ? e : e?.[place.field];
     }
-    case "response":
+    case "response": {
+      const r = d.response;
+      const answer = r?.answers?.[place.answer ?? -1];
+      switch (place.field) {
+        case "output":
+        case "output_schema":
+          return d[place.field];
+        case "answers":
+          return r?.answers;
+        case "from":
+        case "on":
+        case "status":
+        case "schema":
+          return answer?.[place.field];
+        case "unhandled":
+          return r?.unhandled;
+      }
+      return undefined;
+    }
     case "settings":
       return d[place.field];
     default:
@@ -262,8 +352,13 @@ export function say(problem: ProblemError, of: Definition): string {
       return `The editor doesn't know steps of the kind “${kind}”.`;
     }
     case "not_allowed":
+      if (place.on === "response") return responseNotAllowed(place.field);
       if (place.on === "connection")
         return "A transform step has no responses for a connection to leave from.";
+      if (place.on === "step" && place.field === "switch")
+        return of.nodes[place.index]?.kind === "http"
+          ? "An HTTP step sends a request, and has no cases."
+          : "A transform step has an expression or cases, not both.";
       if (place.on === "step" && place.field === "expr")
         return "An HTTP step sends a request, and has no expression.";
       if (place.on === "step" && place.field === "sample")
@@ -274,12 +369,40 @@ export function say(problem: ProblemError, of: Definition): string {
         return "A transform step gives one value, so it has no other responses.";
       return "A transform step has an expression, and sends no request.";
     case "invalid_status":
+      if (
+        place.on === "response" ||
+        (place.on === "step" &&
+          place.field !== "outputs" &&
+          place.field !== "sample")
+      )
+        return "A status from 200 to 599.";
       return place.on === "step" && place.field === "outputs"
         ? "A status from 300 to 599: 2xx is every HTTP step's."
         : "A status from 200 to 299: this is the 2xx response.";
     case "duplicate_output":
       return "This step already has a response for that status.";
+    case "duplicate_answer":
+      return "Another answer already has this status.";
+    case "unknown_answer": {
+      const n = place.on === "step" ? of.nodes[place.index] : undefined;
+      const status =
+        place.on === "step" && place.field === "otherwise_status"
+          ? n?.switch?.otherwise.status
+          : n?.switch?.cases?.[place.on === "step" ? (place.case ?? -1) : -1]
+              ?.status;
+      return `${n?.id} isn't joined to a ${status} answer: join it to one on the response card, or pick a status it's joined to.`;
+    }
+    case "never_given": {
+      const a = answerOf(place, of);
+      return `${a?.from} never gives ${a?.status}: add a case for it, or join another step to it.`;
+    }
+    case "overlap":
+      return sentence(problem.detail.replace(/one node$/, "one step"));
     case "unknown_output": {
+      if (place.on === "response") {
+        const a = answerOf(place, of);
+        return `${a?.from} has no ${a?.on} response. Join this answer from another of its points.`;
+      }
       const edge =
         place.on === "connection" ? of.edges?.[place.index] : undefined;
       return `${edge?.from} has no ${edge?.on} response. Add one with + Add on the step, or draw the connection from another.`;
@@ -303,6 +426,8 @@ export function say(problem: ProblemError, of: Definition): string {
     case "cycle":
       return "This connection closes a loop, so a step would wait for itself.";
     case "unknown_node": {
+      if (place.on === "response")
+        return `No step has the id “${answerOf(place, of)?.from}”.`;
       const [, k, end] = tokens(problem.pointer);
       const edge = of.edges?.[Number(k)];
       return `No step has the id “${end === "from" ? edge?.from : edge?.to}”.`;
@@ -316,9 +441,42 @@ export function say(problem: ProblemError, of: Definition): string {
   }
 }
 
+// answerOf is the answer a problem in the response is about.
+function answerOf(place: Place, of: Definition) {
+  return place.on === "response"
+    ? of.response?.answers?.[place.answer ?? -1]
+    : undefined;
+}
+
+// responseNotAllowed is what's wrong with the part of the response a
+// not_allowed problem is about.
+function responseNotAllowed(field: ResponseField): string {
+  switch (field) {
+    case "on":
+      return "A transform step has one point, so its line into an answer names no response.";
+    case "from":
+      return "An HTTP step's response is what it got, so each of its responses gives one answer. To pick among several, join a transform step that does.";
+    default:
+      return "A workflow with a response has no output: the steps joined to its answers give them.";
+  }
+}
+
 function required(place: Place): string | undefined {
   if (place.on === "connection")
     return "A connection needs a step at each end.";
+  if (place.on === "response")
+    switch (place.field) {
+      case "from":
+        return "Join a step to this answer: drag from the step's point to the answer's.";
+      case "answers":
+        return "Add an answer: a status the API gives.";
+      case "status":
+        return "Give the answer a status.";
+      case "unhandled":
+        return "Write its body, or use Conduit's problem details instead.";
+      default:
+        return undefined;
+    }
   if (place.on !== "step") return undefined;
   switch (place.field) {
     case "id":
@@ -337,6 +495,11 @@ function required(place: Place): string | undefined {
       return "Add the sample's body; null for none.";
     case "outputs":
       return "Give the response a status.";
+    case "case_when":
+      return "Add a condition.";
+    case "case_status":
+    case "otherwise_status":
+      return "Give it a status.";
     default:
       return undefined;
   }

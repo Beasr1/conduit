@@ -1,12 +1,23 @@
 import type { XYPosition } from "@xyflow/react";
 
-import { toFlow } from "@/features/editor/flow";
+import {
+  freeSpot,
+  handlesOf,
+  NODE_WIDTH,
+  RANK_GAP,
+  toFlow,
+} from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 
+type Answer = components["schemas"]["Answer"];
+type Case = components["schemas"]["Case"];
 type Definition = components["schemas"]["Definition"];
 type Edge = components["schemas"]["Edge"];
 type Node = components["schemas"]["Node"];
+type Otherwise = components["schemas"]["Otherwise"];
 type Position = components["schemas"]["Position"];
+type Response = components["schemas"]["Response"];
+type Switch = components["schemas"]["Switch"];
 
 // The definition's rule for a node id, from schema/workflow.yaml. The editor
 // checks an id against it as it's typed; the server checks it again and
@@ -103,6 +114,310 @@ export function connect(
   return { ...d, edges: [...(d.edges ?? []), edge] };
 }
 
+// joinedTo is the places in the response's answers of those joined to
+// output on of node from (2xx, or a transform's one, when there's none):
+// the answers that output gives.
+export function joinedTo(d: Definition, from: string, on?: number): number[] {
+  return (d.response?.answers ?? []).flatMap((a, k) =>
+    a.from === from && (a.on ?? 0) === (on ?? 0) ? [k] : [],
+  );
+}
+
+// canJoin says whether a line may be drawn into answer k: each takes one. A
+// line from a step that's gone can be drawn again.
+export function canJoin(d: Definition, k: number): boolean {
+  const a = d.response?.answers?.[k];
+  return a !== undefined && (!a.from || !d.nodes.some((n) => n.id === a.from));
+}
+
+// refusal is why a line from step into answer k can't be drawn: the
+// answer's status, and the other step its one line is from. Undefined when
+// the line can be drawn, or already is.
+export function refusal(
+  d: Definition,
+  step: string,
+  k: number,
+): { status: number; from: string } | undefined {
+  const a = d.response?.answers?.[k];
+  if (!a?.from || a.from === step || canJoin(d, k)) return undefined;
+  return { status: a.status, from: a.from };
+}
+
+// joinAnswer joins node from, on its output on (2xx, or a transform's one,
+// when there's none), to answer k, in place of any line it had. A
+// transform joined to a second answer picks between them, so it becomes a
+// switch: otherwise keeps its expression as the first answer's body, and a
+// case for the new status waits to be filled. A switch gets a case for a
+// status it doesn't give yet.
+export function joinAnswer(
+  d: Definition,
+  k: number,
+  from: string,
+  on?: number,
+): Definition {
+  const answers = d.response?.answers;
+  const answer = answers?.[k];
+  if (!answers || !answer) return d;
+  const before = joinedTo(d, from, on).filter((j) => j !== k);
+  const line = {
+    ...unjoined(answer),
+    from,
+    ...(on === undefined ? {} : { on }),
+  };
+  const joined = {
+    ...d,
+    response: { ...d.response, answers: answers.with(k, line) },
+  };
+  const index = d.nodes.findIndex((n) => n.id === from);
+  const node = d.nodes[index];
+  if (node?.kind !== "transform") return joined;
+  if (node.switch)
+    return updateNode(joined, index, (n) => withCase(n, answer.status));
+  const first = answers[before[0] ?? -1]?.status;
+  if (first === undefined) return joined;
+  return updateNode(joined, index, (n) =>
+    withCase(toSwitch(n, first), answer.status),
+  );
+}
+
+// leaveAnswer takes away the line into answer k; the answer stays.
+export function leaveAnswer(d: Definition, k: number): Definition {
+  const answers = d.response?.answers;
+  const a = answers?.[k];
+  if (!answers || !a || (a.from === undefined && a.on === undefined)) return d;
+  return {
+    ...d,
+    response: { ...d.response, answers: answers.with(k, unjoined(a)) },
+  };
+}
+
+// unjoinWhere takes away the lines into the answers lost picks.
+function unjoinWhere(d: Definition, lost: (a: Answer) => boolean): Definition {
+  const answers = d.response?.answers;
+  if (!answers?.some(lost)) return d;
+  return {
+    ...d,
+    response: {
+      ...d.response,
+      answers: answers.map((a) => (lost(a) ? unjoined(a) : a)),
+    },
+  };
+}
+
+// unjoined is an answer without its line.
+function unjoined(a: Answer): Answer {
+  return a.schema
+    ? { status: a.status, schema: a.schema }
+    : { status: a.status };
+}
+
+// addAnswer gives the response an answer for status, after its others, with
+// no line yet.
+export function addAnswer(d: Definition, status: number): Definition {
+  const r = d.response ?? {};
+  return {
+    ...d,
+    response: { ...r, answers: [...(r.answers ?? []), { status }] },
+  };
+}
+
+// removeAnswer takes away answer k. A response left with neither an answer
+// nor unhandled goes.
+export function removeAnswer(d: Definition, k: number): Definition {
+  const r = d.response;
+  if (!r?.answers?.[k]) return d;
+  return withResponse(d, {
+    ...r,
+    answers: r.answers.filter((_, i) => i !== k),
+  });
+}
+
+// setAnswerSchema gives answer k a schema; undefined removes it. A schema it
+// already has gives back the draft itself.
+export function setAnswerSchema(
+  d: Definition,
+  k: number,
+  schema: Answer["schema"],
+): Definition {
+  const r = d.response;
+  const before = r?.answers?.[k];
+  if (!r?.answers || !before) return d;
+  if (JSON.stringify(before.schema) === JSON.stringify(schema)) return d;
+  const after: Answer = { ...before };
+  if (schema === undefined) delete after.schema;
+  else after.schema = schema;
+  return { ...d, response: { ...r, answers: r.answers.with(k, after) } };
+}
+
+// setUnhandled gives the response an unhandled whose body is body;
+// undefined removes it. A body it already has gives back the draft itself.
+export function setUnhandled(
+  d: Definition,
+  body: string | undefined,
+): Definition {
+  const r = d.response ?? {};
+  if (r.unhandled?.body === body) return d;
+  const next = { ...r };
+  if (body === undefined) delete next.unhandled;
+  else next.unhandled = { body };
+  return withResponse(d, next);
+}
+
+// withResponse puts r in place of the response. One with neither an answer
+// nor unhandled goes.
+function withResponse(d: Definition, r: Response): Definition {
+  if ((r.answers ?? []).length > 0 || r.unhandled) return { ...d, response: r };
+  const next = { ...d };
+  delete next.response;
+  return next;
+}
+
+// toSwitch turns transform node n's expression into the otherwise of a
+// switch, with status, and no cases yet.
+export function toSwitch(n: Node, status: number): Node {
+  const next: Node = {
+    ...n,
+    switch: { otherwise: { status, ...(n.expr ? { body: n.expr } : {}) } },
+  };
+  delete next.expr;
+  return next;
+}
+
+// withCase gives switch node n a case for status, its condition to fill,
+// unless a case or its otherwise gives status already.
+function withCase(n: Node, status: number): Node {
+  const s = n.switch;
+  if (!s) return n;
+  const gives = [s.otherwise.status, ...(s.cases ?? []).map((c) => c.status)];
+  if (gives.includes(status)) return n;
+  return {
+    ...n,
+    switch: { ...s, cases: [...(s.cases ?? []), { when: "", status }] },
+  };
+}
+
+// addCase gives switch node index a case for status, after its others.
+export function addCase(
+  d: Definition,
+  index: number,
+  status: number,
+): Definition {
+  return updateSwitch(d, index, (s) => ({
+    ...s,
+    cases: [...(s.cases ?? []), { when: "", status }],
+  }));
+}
+
+// updateCase puts what change makes of case k in its place.
+export function updateCase(
+  d: Definition,
+  index: number,
+  k: number,
+  change: (c: Case) => Case,
+): Definition {
+  return updateSwitch(d, index, (s) => {
+    const c = s.cases?.[k];
+    return c && s.cases ? { ...s, cases: s.cases.with(k, change(c)) } : s;
+  });
+}
+
+// removeCase takes case k away.
+export function removeCase(
+  d: Definition,
+  index: number,
+  k: number,
+): Definition {
+  return updateSwitch(d, index, (s) => ({
+    ...s,
+    cases: (s.cases ?? []).filter((_, i) => i !== k),
+  }));
+}
+
+// moveCase moves case k to place to, as the first that holds answers.
+export function moveCase(
+  d: Definition,
+  index: number,
+  k: number,
+  to: number,
+): Definition {
+  return updateSwitch(d, index, (s) => {
+    const cases = [...(s.cases ?? [])];
+    const [c] = cases.splice(k, 1);
+    if (!c || to < 0 || to > cases.length) return s;
+    cases.splice(to, 0, c);
+    return { ...s, cases };
+  });
+}
+
+// updateOtherwise puts what change makes of a switch's otherwise in its
+// place.
+export function updateOtherwise(
+  d: Definition,
+  index: number,
+  change: (o: Otherwise) => Otherwise,
+): Definition {
+  return updateSwitch(d, index, (s) => ({
+    ...s,
+    otherwise: change(s.otherwise),
+  }));
+}
+
+function updateSwitch(
+  d: Definition,
+  index: number,
+  change: (s: Switch) => Switch,
+): Definition {
+  return updateNode(d, index, (n) =>
+    n.switch ? { ...n, switch: change(n.switch) } : n,
+  );
+}
+
+// outputToStep moves a definition's output, kept from the revisions saved
+// with one, into a transform step, respond, joined to the response's one
+// answer, 200, the output schema that answer's. The step runs after the
+// steps the output reads, whichever way each answers, and goes after the
+// rightmost of them that's placed. Without an output, or beside a response,
+// it gives back the draft itself; else the step's id too.
+export function outputToStep(d: Definition): {
+  draft: Definition;
+  step?: string;
+} {
+  if (!d.output || d.response) return { draft: d };
+  const ids = new Set(d.nodes.map((n) => n.id));
+  let step = "respond";
+  for (let k = 2; ids.has(step); k++) step = `respond_${k}`;
+
+  const read = reads(d, d.output);
+  const edges = read.flatMap((from) => {
+    const node = d.nodes.find((n) => n.id === from);
+    return (node ? handlesOf(node) : []).map((h) => {
+      const on = Number(h);
+      return Number.isInteger(on) ? { from, to: step, on } : { from, to: step };
+    });
+  });
+  const { output, output_schema: schema, ...rest } = d;
+  const moved: Definition = {
+    ...rest,
+    nodes: [...d.nodes, { id: step, kind: "transform", expr: output }],
+    edges: [...(d.edges ?? []), ...edges],
+    response: {
+      answers: [{ status: 200, from: step, ...(schema ? { schema } : {}) }],
+    },
+  };
+
+  const stored = d.ui?.positions ?? {};
+  const placed = read.flatMap((id) => (stored[id] ? [stored[id]] : []));
+  if (placed.length === 0) return { draft: moved, step };
+  const at = freeSpot(
+    {
+      x: Math.max(...placed.map((p) => p.x)) + NODE_WIDTH + RANK_GAP,
+      y: placed.reduce((sum, p) => sum + p.y, 0) / placed.length,
+    },
+    Object.values(stored),
+  );
+  return { draft: move(moved, { [step]: at }), step };
+}
+
 // addOutput gives node index an output for status, after its others.
 export function addOutput(
   d: Definition,
@@ -116,20 +431,22 @@ export function addOutput(
 }
 
 // removeOutput takes node index's output for status away, and with it the
-// edges that leave from it, as removing a node takes its edges.
+// edges that leave from it, as removing a node takes its edges, and the line
+// into the response if it leaves from it.
 export function removeOutput(
   d: Definition,
   index: number,
   status: number,
 ): Definition {
   const id = d.nodes[index]?.id;
-  const removed = updateNode(d, index, (n) => {
+  let removed = updateNode(d, index, (n) => {
     const next = { ...n };
     const outputs = (n.outputs ?? []).filter((o) => o.status !== status);
     if (outputs.length > 0) next.outputs = outputs;
     else delete next.outputs;
     return next;
   });
+  removed = unjoinWhere(removed, (a) => a.from === id && a.on === status);
   if (!removed.edges) return removed;
   return {
     ...removed,
@@ -177,10 +494,10 @@ export function setField<
   return next;
 }
 
-// renameNode gives a node a new id. Its edges and position go with it,
-// unless another node still has the old id: they stay with that node, which
-// the canvas already draws them on. Expressions are text and keep the old
-// id; mentions finds them.
+// renameNode gives a node a new id. Its edges, the line into the response
+// and its position go with it, unless another node still has the old id:
+// they stay with that node, which the canvas already draws them on.
+// Expressions are text and keep the old id; mentions finds them.
 export function renameNode(
   d: Definition,
   index: number,
@@ -197,6 +514,13 @@ export function renameNode(
       from: e.from === from ? to : e.from,
       to: e.to === from ? to : e.to,
     }));
+  if (d.response?.answers)
+    renamed.response = {
+      ...d.response,
+      answers: d.response.answers.map((a) =>
+        a.from === from ? { ...a, from: to } : a,
+      ),
+    };
   if (d.ui?.positions?.[from]) {
     const positions = Object.fromEntries(
       Object.entries(d.ui.positions)
@@ -260,9 +584,9 @@ export function removeEdges(d: Definition, indexes: number[]): Definition {
   return { ...d, edges: (d.edges ?? []).filter((_, i) => !gone.has(i)) };
 }
 
-// removeNodes removes nodes by their places in definition.nodes. The edges
-// and positions of an id that no node has any more go with them; those of a
-// node that shared its id with one that stays don't.
+// removeNodes removes nodes by their places in definition.nodes. The edges,
+// line into the response and positions of an id that no node has any more go
+// with them; those of a node that shared its id with one that stays don't.
 export function removeNodes(d: Definition, indexes: number[]): Definition {
   const gone = new Set(indexes);
   const nodes = d.nodes.filter((_, i) => !gone.has(i));
@@ -273,9 +597,10 @@ export function removeNodes(d: Definition, indexes: number[]): Definition {
   const edges = (d.edges ?? []).filter(
     (e) => !lost.has(e.from) && !lost.has(e.to),
   );
-  if (!d.ui) return { ...d, nodes, edges };
+  const kept = unjoinWhere(d, (a) => a.from !== undefined && lost.has(a.from));
+  if (!d.ui) return { ...kept, nodes, edges };
   const positions = Object.fromEntries(
     Object.entries(d.ui.positions ?? {}).filter(([id]) => !lost.has(id)),
   );
-  return { ...d, nodes, edges, ui: { ...d.ui, positions } };
+  return { ...kept, nodes, edges, ui: { ...d.ui, positions } };
 }

@@ -35,6 +35,11 @@ export function SidePanel({ workflow }: { workflow: string }) {
     selected.edges.length === 1 && selected.nodes.length === 0
       ? selected.edges[0]
       : undefined;
+  // The line into the response opens the response, which says where it's
+  // from.
+  const answering =
+    edge !== undefined &&
+    flow.edges.find((e) => e.id === edge)?.target === RESPONSE;
 
   let title: string;
   let body: ReactNode;
@@ -66,10 +71,13 @@ export function SidePanel({ workflow }: { workflow: string }) {
     title = "Runs";
     body = <RunList workflow={workflow} />;
     close = closePanel;
-  } else if (node === RESPONSE) {
+  } else if (node === RESPONSE || answering) {
     title = "Response";
     body = <ResponseForm />;
-    close = () => pick("nodes", [{ id: RESPONSE, selected: false }]);
+    close =
+      answering && edge !== undefined
+        ? () => pick("edges", [{ id: edge, selected: false }])
+        : () => pick("nodes", [{ id: RESPONSE, selected: false }]);
   } else if (node !== undefined) {
     const index = flow.nodes.find((n) => n.id === node)?.data.index;
     if (index === undefined) return null;

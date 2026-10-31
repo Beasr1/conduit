@@ -391,14 +391,15 @@ func (s *sim) run(i int) {
 			return
 		}
 		s.entry[i] = entry
-	case n.kind == workflow.NodeKindTransform && n.expr != nil:
+	case n.kind == workflow.NodeKindTransform && n.whole:
 		doc, err := document(s.input, s.parts(i))
 		var v json.RawMessage
+		part := "/expr"
 		if err == nil {
-			v, err = n.expr.Eval(s.ctx, doc)
+			v, part, err = n.give(s.ctx, doc)
 		}
 		if err != nil {
-			s.problem("/nodes/"+strconv.Itoa(i)+"/expr", "evaluation_failed", "%s: %v", n.id, err)
+			s.problem("/nodes/"+strconv.Itoa(i)+part, "evaluation_failed", "%s: %v", n.id, err)
 			return
 		}
 		s.entry[i] = bodyEntry(v)
@@ -480,9 +481,10 @@ func (s *sim) step(pv *Preview, t int) {
 		for _, e := range errs {
 			s.problem(ptr+e.pointer, "evaluation_failed", "%v", e.err)
 		}
-	case n.kind == workflow.NodeKindTransform && n.expr != nil:
-		if pv.Gives, err = n.expr.Eval(s.ctx, doc); err != nil {
-			s.problem(ptr+"/expr", "evaluation_failed", "%v", err)
+	case n.kind == workflow.NodeKindTransform && n.whole:
+		var part string
+		if pv.Gives, part, err = n.give(s.ctx, doc); err != nil {
+			s.problem(ptr+part, "evaluation_failed", "%v", err)
 		}
 	}
 }

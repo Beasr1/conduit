@@ -236,14 +236,21 @@ revision synchronously.
 
 | Outcome | Status | Problem `code` |
 |---|---|---|
-| succeeded | `200`, the `output` value | |
+| succeeded | the answer it gave, its status and body (plan 04, 2026-10-30); `200` with the `output` value for a revision saved with one | |
+| succeeded, with no response to answer through | `500` | `workflow_error` |
 | no such slug, or never published | `404` | `not_found` |
 | input fails `input_schema` | `400`, every violation with a pointer | `invalid_input` |
 | an upstream failed (status, transport, decode, too_large, blocked) | `502`, naming the node | `upstream_failed` |
 | the run, or a node's last attempt, timed out | `504`, naming the node | `timeout` |
-| the workflow's own configuration failed: an expression, a template | `500`, naming the node and field (answer 6) | `workflow_error` |
+| the workflow's own configuration failed: an expression, a template, or its answer, none reached, two, or not one of the step's (plan 04) | `500`, naming the node and field (answer 6) | `workflow_error` |
 | our bug: a panic, the database | `500`, details only in the log | `internal_error` |
 | at the run cap | `503` + `Retry-After` | `busy` |
+
+- **A response's unhandled** (plan 04, 2026-10-31) answers a run that failed
+  (`upstream_failed`, `timeout`, `workflow_error`, `internal_error`) with
+  the workflow's own body, at the status above, instead of problem details.
+  It reads the run's `error`, whose detail for our bug stays "Something
+  went wrong on our side."; one that fails leaves the problem to answer.
 
 - **Timing:** served runs time out at 30 s, under the server's 35 s
   `WriteTimeout`, so the `504` gets out before the connection is cut.

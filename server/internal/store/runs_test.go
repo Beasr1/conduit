@@ -58,31 +58,36 @@ func TestRun_StartRecordFinish(t *testing.T) {
 		t.Errorf("orders, which never started = %+v", o)
 	}
 
-	done, err := db.FinishRun(ctx, r.ID, "failed", nil, false, json.RawMessage(`{"code":"upstream_failed","node":"user"}`))
+	done, err := db.FinishRun(ctx, r.ID, "failed", 0, nil, false, json.RawMessage(`{"code":"upstream_failed","node":"user"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if done.Status != "failed" || done.EndedAt == nil || done.Output != nil || string(done.Error) != `{"code": "upstream_failed", "node": "user"}` {
+	if done.Status != "failed" || done.EndedAt == nil || done.Answered != 0 || done.Output != nil || string(done.Error) != `{"code": "upstream_failed", "node": "user"}` {
 		t.Errorf("finished run = %+v", done)
 	}
 	if again, err := db.Run(ctx, r.ID); err != nil || again.Status != "failed" || !again.EndedAt.Equal(*done.EndedAt) {
 		t.Errorf("Run() = %+v, %v", again, err)
 	}
 	// A run ends once.
-	if _, err := db.FinishRun(ctx, r.ID, "succeeded", json.RawMessage(`1`), false, nil); !errors.Is(err, store.ErrNotFound) {
+	if _, err := db.FinishRun(ctx, r.ID, "succeeded", 200, json.RawMessage(`1`), false, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("finishing it again: error = %v, want ErrNotFound", err)
 	}
 }
 
-func TestRun_KeepsTheOutputAndItsFlag(t *testing.T) {
+func TestRun_KeepsTheAnswer(t *testing.T) {
 	t.Parallel()
-	r := startRun(t, create(t))
-	done, err := db.FinishRun(t.Context(), r.ID, "succeeded", json.RawMessage(`"the first 256 KiB"`), true, nil)
+	w := create(t)
+	r := startRun(t, w)
+	done, err := db.FinishRun(t.Context(), r.ID, "succeeded", 404, json.RawMessage(`"the first 256 KiB"`), true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(done.Output) != `"the first 256 KiB"` || !done.OutputTruncated || done.Error != nil {
+	if done.Answered != 404 || string(done.Output) != `"the first 256 KiB"` || !done.OutputTruncated || done.Error != nil {
 		t.Errorf("run = %+v", done)
+	}
+	// A list says what each run answered, without the body.
+	if list, err := db.Runs(t.Context(), w.ID, 1, ""); err != nil || len(list) != 1 || list[0].Answered != 404 || list[0].Output != nil {
+		t.Errorf("Runs() = %+v, %v", list, err)
 	}
 }
 

@@ -185,22 +185,26 @@ export function RunGave({ index }: { index: number }) {
 }
 
 // RunAnswered is what the workflow answered in the run shown, on the
-// response card.
+// response card: the status, which the title says, and the body.
 export function RunAnswered() {
   const id = useEditor((s) => s.run);
   const run = useRun(id).data;
   if (!run) return null;
   return (
     <InRun title={`In this run: ${runSaid(run)}`}>
-      {run.output !== undefined && (
-        <>
-          <p>It answered</p>
-          {run.output_truncated ? (
-            <p className="text-muted-foreground">Its first 256 KiB, as text:</p>
-          ) : null}
-          <JsonBlock value={run.output} />
-        </>
-      )}
+      {run.answered !== undefined &&
+        (run.output === undefined ? (
+          <p className="text-muted-foreground">With no body.</p>
+        ) : (
+          <>
+            <p>
+              {run.output_truncated
+                ? "Its body's first 256 KiB, as text:"
+                : "Its body:"}
+            </p>
+            <JsonBlock value={run.output} />
+          </>
+        ))}
     </InRun>
   );
 }

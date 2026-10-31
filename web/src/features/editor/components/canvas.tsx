@@ -1,6 +1,7 @@
 import {
   Background,
   Controls,
+  type FinalConnectionState,
   Panel,
   ReactFlow,
   useReactFlow,
@@ -14,7 +15,11 @@ import { nodeTypes } from "@/features/editor/components/nodes";
 import { ProblemMark } from "@/features/editor/components/problem-mark";
 import {
   canConnect,
+  canJoin,
   connect,
+  joinAnswer,
+  leaveAnswer,
+  refusal,
   removeEdges,
   removeNodes,
 } from "@/features/editor/edits";
@@ -32,9 +37,12 @@ import {
   useProblemCount,
   useProblems,
 } from "@/features/editor/hooks/use-problems";
-import { useRunSteps } from "@/features/editor/hooks/use-runs";
-import { takenOf } from "@/features/editor/runs";
-import { useEditor } from "@/features/editor/store";
+import { useRun, useRunSteps } from "@/features/editor/hooks/use-runs";
+import { type StepRun, takenOf } from "@/features/editor/runs";
+import { type Refused, useEditor } from "@/features/editor/store";
+import type { components } from "@/gen/schema";
+
+type Definition = components["schemas"]["Definition"];
 
 // The room kept between a picked step and the canvas's edge.
 const MARGIN = 24;
@@ -51,37 +59,67 @@ export function Canvas() {
   const pick = useEditor((s) => s.pick);
   const setPart = useEditor((s) => s.setPart);
   const openPanel = useEditor((s) => s.openPanel);
+  const refuse = useEditor((s) => s.refuse);
 
   const flow = useMemo(() => toFlow(draft), [draft]);
   // Only a node that's moving or selected gets a new object, so the rest
   // aren't redrawn. The response card comes last, after the steps.
+  const answers = draft.response?.answers?.length ?? 0;
   const nodes = useMemo(() => {
     const steps = flow.nodes.map((n): FlowNode => {
       const at = moving[n.id];
       const on = selected.nodes.includes(n.id);
       return at || on ? { ...n, position: at ?? n.position, selected: on } : n;
     });
-    const card = responseCard(flow.nodes);
+    const card = responseCard(flow.nodes, answers);
     const on = selected.nodes.includes(RESPONSE);
     return [...steps, on ? { ...card, selected: true } : card];
-  }, [flow, moving, selected.nodes]);
+  }, [flow, moving, selected.nodes, answers]);
   // A connection with problems is drawn in the problem colour, and its label
   // says so in words too. While a run is shown, one the run didn't take is
-  // dashed, and its name says whether the run took it.
+  // dashed, and its name says whether the run took it. A line into an
+  // answer is taken once the run answered with it: gave is that status, or
+  // -1 while the run goes on.
   const troubled = useProblems((p) => p.on === "connection");
   const steps = useRunSteps();
+  const gave = useRun(
+    useEditor((s) => s.run),
+    (r) => (r.status === "running" ? -1 : (r.answered ?? 0)),
+  ).data;
   const edges = useMemo(() => {
     const wrong = new Set(
       troubled.map((f) => (f.place.on === "connection" ? f.place.index : -1)),
     );
     return flow.edges.map((e): FlowEdge => {
       const on = selected.edges.includes(e.id);
-      const bad = e.data !== undefined && wrong.has(e.data.index);
-      const line = e.data && draft.edges?.[e.data.index];
+      const answer =
+        e.data?.answer === undefined
+          ? undefined
+          : draft.response?.answers?.[e.data.answer];
+      const bad =
+        answer === undefined && e.data !== undefined && wrong.has(e.data.index);
+      const line = answer
+        ? answer.from === undefined
+          ? undefined
+          : {
+              from: answer.from,
+              on: answer.on,
+              to: `the ${answer.status} answer`,
+            }
+        : e.data && draft.edges?.[e.data.index];
+      const into = (): StepRun =>
+        answer
+          ? {
+              state:
+                gave === undefined || gave === -1
+                  ? "waiting"
+                  : gave === answer.status
+                    ? "succeeded"
+                    : "not run",
+            }
+          : (steps?.(line?.to ?? "") ?? { state: "waiting" });
       const taken =
-        steps && line
-          ? takenOf(line.on, steps(line.from), steps(line.to))
-          : undefined;
+        steps && line ? takenOf(line.on, steps(line.from), into()) : undefined;
       if (!on && !bad && taken === undefined) return e;
       const classes = [bad && "problem", taken === false && "untaken"]
         .filter(Boolean)
@@ -100,7 +138,7 @@ export function Canvas() {
           : {}),
       };
     });
-  }, [flow, selected.edges, troubled, steps, draft]);
+  }, [flow, selected.edges, troubled, steps, draft, gave]);
   const settingsProblems = useProblemCount((p) => p.on === "settings");
 
   return (
@@ -141,23 +179,48 @@ export function Canvas() {
       connectOnClick={false}
       // A node keyed with "#" has a missing or shared id, which an edge
       // can't name. An edge leaves from the output whose handle it's drawn
-      // from.
+      // from, and each answer on the response takes one line, into its own
+      // point, whose id is the answer's place.
       isValidConnection={(c) =>
         !c.source.includes("#") &&
-        !c.target.includes("#") &&
-        canConnect(draft, c.source, c.target, onOf(c.sourceHandle))
+        (c.target === RESPONSE
+          ? canJoin(draft, Number(c.targetHandle))
+          : !c.target.includes("#") &&
+            canConnect(draft, c.source, c.target, onOf(c.sourceHandle)))
       }
       onConnect={(c) =>
-        edit((d) => connect(d, c.source, c.target, onOf(c.sourceHandle)))
+        edit((d) =>
+          c.target === RESPONSE
+            ? joinAnswer(
+                d,
+                Number(c.targetHandle),
+                c.source,
+                onOf(c.sourceHandle),
+              )
+            : connect(d, c.source, c.target, onOf(c.sourceHandle)),
+        )
       }
+      // A line the response refuses makes the card say why.
+      onConnectStart={() => refuse(undefined)}
+      onPaneClick={() => refuse(undefined)}
+      onConnectEnd={(event, state) => refuse(refusedLine(draft, state, event))}
       // Edges go first: removing nodes doesn't move the remaining edges, but
-      // the indexes here are for the draft as it is now.
+      // the indexes here are for the draft as it is now. The lines into the
+      // response's answers aren't edges.
       onDelete={({ nodes: gone, edges: cut }) =>
         edit((d) =>
           removeNodes(
             removeEdges(
-              d,
-              cut.flatMap((e) => (e.data ? [e.data.index] : [])),
+              cut.reduce(
+                (left, e) =>
+                  e.data?.answer === undefined
+                    ? left
+                    : leaveAnswer(left, e.data.answer),
+                d,
+              ),
+              cut.flatMap((e) =>
+                e.data && e.target !== RESPONSE ? [e.data.index] : [],
+              ),
             ),
             gone.map((n) => n.data.index),
           ),
@@ -192,6 +255,36 @@ export function Canvas() {
       <KeepPickedInView />
     </ReactFlow>
   );
+}
+
+// refusedLine is a line into the response just refused, for the card to
+// say why: drawn into an answer whose one line is another step's, or let
+// go on the card off an answer's point. Either end can be the card, as a
+// line can be drawn from either end. React Flow names the node only near
+// a point, so a drop anywhere on the card counts.
+function refusedLine(
+  draft: Definition,
+  state: FinalConnectionState,
+  event: MouseEvent | TouchEvent,
+): Refused | undefined {
+  if (state.isValid) return undefined;
+  const from = state.fromNode?.id;
+  const to = state.toNode?.id ?? (droppedOnCard(event) ? RESPONSE : undefined);
+  const step = from === RESPONSE ? to : to === RESPONSE ? from : undefined;
+  if (step === undefined || step === RESPONSE || step.includes("#"))
+    return undefined;
+  const handle = from === RESPONSE ? state.fromHandle?.id : state.toHandle?.id;
+  if (handle == null) return { step };
+  const answer = Number(handle);
+  return refusal(draft, step, answer) ? { step, answer } : undefined;
+}
+
+// droppedOnCard says whether a drag ended over the response card.
+function droppedOnCard(event: MouseEvent | TouchEvent): boolean {
+  const at = "changedTouches" in event ? event.changedTouches[0] : event;
+  if (!at) return false;
+  const under = document.elementFromPoint(at.clientX, at.clientY);
+  return under?.closest(`[data-id="${RESPONSE}"]`) != null;
 }
 
 // KeepPickedInView pans the canvas, as little as it takes, so the one step

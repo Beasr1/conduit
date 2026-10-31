@@ -35,6 +35,23 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+// A served run that failed answers with its cause's status, its unhandled
+// body or its problem alike.
+func TestStatus(t *testing.T) {
+	t.Parallel()
+	for code, want := range map[string]int{
+		CodeUpstream:  http.StatusBadGateway,
+		CodeTimeout:   http.StatusGatewayTimeout,
+		CodeWorkflow:  http.StatusInternalServerError,
+		CodeInternal:  http.StatusInternalServerError,
+		CodeCancelled: http.StatusServiceUnavailable,
+	} {
+		if got := Status(code); got != want {
+			t.Errorf("Status(%s) = %d, want %d", code, got, want)
+		}
+	}
+}
+
 func TestCapped(t *testing.T) {
 	t.Parallel()
 	small := json.RawMessage(`{"a": 1}`)
