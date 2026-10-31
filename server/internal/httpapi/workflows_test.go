@@ -322,6 +322,15 @@ func TestPreview(t *testing.T) {
 		t.Errorf("preview %s", r.body)
 	}
 
+	// A step's Unhandled body, over the step failing, an error made up.
+	caught := strings.Replace(def, `"sample": {"body": {"email": "ada@example.com"}}`, `"sample": {"body": {"email": "ada@example.com"}}, "unhandled": {"body": "nodes.user.error.code"}`, 1)
+	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+caught+`, "node": "user"}`)
+	pv = gen.Preview{}
+	if err := json.Unmarshal(r.body, &pv); err != nil || r.status != http.StatusOK || string(pv.Unhandled.Gives) != `"upstream_failed"` ||
+		!strings.Contains(string(pv.Unhandled.Reads), `"user":{"error"`) {
+		t.Errorf("preview of an Unhandled body = %d %s", r.status, r.body)
+	}
+
 	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, "node": "nope"}`)
 	if p := problemOf(t, r); r.status != http.StatusUnprocessableEntity || pointers(p) != "/node unknown_node" {
 		t.Errorf("preview of a missing step = %d %+v", r.status, p)

@@ -75,8 +75,10 @@ type NodeResult struct {
 	Body json.RawMessage
 	Err  error
 	// Caught says a failed node's Unhandled block took Err, so the run went
-	// on down the lines from that block.
+	// on down the lines from that block. Gave is what the block's body gave
+	// then, if it has one.
 	Caught bool
+	Gave   json.RawMessage
 	// Request is what an http node sent, as built, once its URL, headers and
 	// body rendered. Nothing is redacted here; whoever stores it does that.
 	Request *SentRequest
@@ -400,10 +402,22 @@ func (r *run) answer() (int, json.RawMessage, error) {
 	}
 	j := taken[0]
 	n := r.nodes[j.from].result
-	if len(j.statuses) == 1 && (j.on == workflow.OnUnhandled || r.p.nodes[j.from].otherwise == nil) {
+	if j.on == workflow.OnUnhandled {
+		return j.statuses[0], n.caughtBody(), nil
+	}
+	if len(j.statuses) == 1 && r.p.nodes[j.from].otherwise == nil {
 		return j.statuses[0], n.Body, nil
 	}
 	return pick(n.ID, n.Body, j.statuses)
+}
+
+// caughtBody is the body a node gives through its Unhandled block: what
+// the block's body gave, else what it got.
+func (n NodeResult) caughtBody() json.RawMessage {
+	if n.Gave != nil {
+		return n.Gave
+	}
+	return n.Body
 }
 
 // took is the output node result n answered through, and whether it

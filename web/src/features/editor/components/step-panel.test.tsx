@@ -103,8 +103,10 @@ test("an HTTP step's tabs are its blocks, and its 2xx says how the steps after r
 
   fireEvent.click(tab("2xx"));
   expect(within(panel).queryByRole("textbox", { name: "URL" })).toBeNull();
+  // In the open tab: the hidden Unhandled tab names the body too.
+  const open = within(screen.getByRole("tabpanel"));
   for (const part of ["status", "headers", "body"])
-    expect(within(panel).getByText(`nodes.crm.${part}`)).toBeTruthy();
+    expect(open.getByText(`nodes.crm.${part}`)).toBeTruthy();
   // JSONata reads content-type as a subtraction without them.
   expect(
     within(panel).getByText("nodes.crm.headers.`content-type`"),
@@ -227,7 +229,11 @@ test("the 2xx tab reads the step by the id it has now", async () => {
   const id = screen.getByLabelText("Id");
   type("Id", "contacts");
   fireEvent.blur(id);
-  expect(await screen.findByText("nodes.contacts.body")).toBeTruthy();
+  expect(
+    await within(screen.getByRole("tabpanel")).findByText(
+      "nodes.contacts.body",
+    ),
+  ).toBeTruthy();
 });
 
 test("the URL goes into the step as it's typed", async () => {
@@ -371,7 +377,8 @@ test("a transform step says how the steps after it read its value", async () => 
   const panel = await screen.findByRole("complementary", {
     name: "Transform step",
   });
-  expect(within(panel).getByText("nodes.merge.body")).toBeTruthy();
+  // Its expression says so first; its Unhandled names the same path.
+  expect(within(panel).getAllByText("nodes.merge.body")[0]).toBeTruthy();
 });
 
 // Looking at a step, or typing what doesn't count yet, mustn't count as

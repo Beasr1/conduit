@@ -165,7 +165,9 @@ export function RunGot({
   );
 }
 
-// RunGave is what a transform step gave in the run shown.
+// RunGave is what a transform step gave in the run shown. One whose
+// Unhandled block took its failure gave nothing of its own: its Unhandled
+// says what the block did.
 export function RunGave({ index }: { index: number }) {
   const step = useEditor((s) => s.draft.nodes[index]?.id ?? "");
   const run = useStepRun(step);
@@ -174,10 +176,38 @@ export function RunGave({ index }: { index: number }) {
   return (
     <InRun title={`In this run: ${said(run)}`}>
       {run.error && <p className="text-destructive">{run.error.detail}</p>}
-      {gave && (
+      {gave && run.state === "succeeded" && (
         <>
           <p>It gave</p>
           <JsonBlock value={gave.body} />
+        </>
+      )}
+    </InRun>
+  );
+}
+
+// RunCaught is what a step's Unhandled block took in the run shown, in its
+// Unhandled: the failure, what an HTTP step got with it, and what the
+// block's body gave.
+export function RunCaught({ index }: { index: number }) {
+  const step = useEditor((s) => s.draft.nodes[index]?.id ?? "");
+  const run = useStepRun(step);
+  const got = useRecorded(step)?.response;
+  if (!run?.error?.caught) return null;
+  return (
+    <InRun title={`In this run: ${said(run)}`}>
+      <p className="text-destructive">{run.error.detail}</p>
+      {got?.status !== undefined && (
+        <>
+          <p>It got {got.status}</p>
+          <Headers headers={got.headers ?? {}} />
+          <JsonBlock value={got.body} />
+        </>
+      )}
+      {got?.gave !== undefined && (
+        <>
+          <p>Its Unhandled body gave</p>
+          <JsonBlock value={got.gave} />
         </>
       )}
     </InRun>

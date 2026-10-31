@@ -16,7 +16,8 @@ on the canvas. A step is drawn as its request and a block per response,
 and a click opens that part. Each answer on the response card takes one
 line, from the step that gives it; a step joined to several picks one with
 its cases, and Unhandled answers a run that gives none. A step's own
-Unhandled block takes its failures, and the run goes on down its line.
+Unhandled block takes its failures, giving a body you write if you write
+one, and the run goes on down its line.
 What is left is in
 docs/plans/04-graph-editor.md; the bigger picture is docs/plans/README.md.
 

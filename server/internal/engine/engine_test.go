@@ -913,7 +913,7 @@ func TestCompile_ReportsExpressionProblemsWithTheRest(t *testing.T) {
 	  "nodes": [
 	    {"id": "a", "kind": "http", "request": {"method": "GET", "url": "https://x.example/{{ input. }}",
 	      "headers": {"X-Key": "{{ $( }}"}, "query": {"q/1": "{{ ) }}"}, "body": "{"}},
-	    {"id": "B", "kind": "transform", "expr": "nodes.a."}
+	    {"id": "B", "kind": "transform", "expr": "nodes.a.", "unhandled": {"body": "("}}
 	  ],
 	  "edges": [{"from": "a", "to": "B", "when": "=="}],
 	  "output": "]"
@@ -936,6 +936,7 @@ func TestCompile_ReportsExpressionProblemsWithTheRest(t *testing.T) {
 		"/nodes/0/request/query/q~11 invalid_expression",
 		"/nodes/0/request/body invalid_expression",
 		"/nodes/1/expr invalid_expression",
+		"/nodes/1/unhandled/body invalid_expression",
 		"/edges/0/when invalid_expression",
 		"/output invalid_expression",
 	}

@@ -24,7 +24,8 @@ type Preview = components["schemas"]["Preview"];
 // whose fields put their path where the cursor is; the expression, applied
 // as it's typed; then the result. A step's request body, a transform's
 // value, a connection's condition and the workflow's output are each
-// written in one.
+// written in one. reads picks what of the preview it reads, its reads but
+// for a step's Unhandled body.
 export function MappingField({
   id,
   label,
@@ -36,6 +37,7 @@ export function MappingField({
   preview,
   open,
   result,
+  reads = (p) => p.reads,
 }: {
   id: string;
   label: string;
@@ -50,6 +52,7 @@ export function MappingField({
   // most likely read; the rest start folded.
   open: (of: Definition) => string[];
   result: (preview: Preview) => ReactNode;
+  reads?: (preview: Preview) => unknown;
 }) {
   const [text, setText] = useState(initial);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -84,6 +87,7 @@ export function MappingField({
         preview={preview}
         open={open}
         onPick={insert}
+        reads={reads}
       />
       <Field data-invalid={problems.length > 0}>
         <FieldLabel htmlFor={id}>{label}</FieldLabel>
@@ -124,11 +128,13 @@ export function Reads({
   preview,
   open,
   onPick,
+  reads = (p) => p.reads,
 }: {
   into: string;
   preview: ReturnType<typeof usePreview>;
   open: (of: Definition) => string[];
   onPick: (path: string) => void;
+  reads?: (preview: Preview) => unknown;
 }) {
   return (
     <section className="flex flex-col gap-1.5 text-sm">
@@ -146,10 +152,10 @@ export function Reads({
           <Problems preview={preview.data.preview} of={preview.data.of} />
           <div className="max-h-72 overflow-auto rounded-md bg-muted p-2">
             <DataTree
-              value={preview.data.preview.reads}
+              value={reads(preview.data.preview)}
               onPick={onPick}
               folded={foldedOf(
-                preview.data.preview.reads,
+                reads(preview.data.preview),
                 open(preview.data.of),
               )}
             />

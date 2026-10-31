@@ -515,6 +515,11 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 			want: []string{"/edges/1 duplicate_edge", "/response/answers/2/from not_allowed"},
 		},
 		{
+			name: "an Unhandled body with no JSONata",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1", "unhandled": {"body": " "}}]}`,
+			want: []string{"/nodes/0/unhandled/body required"},
+		},
+		{
 			name: "an output beside a response",
 			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "output": "1", "response": {"answers": [{"status": 200, "from": "a"}]}}`,
 			want: []string{"/output not_allowed"},

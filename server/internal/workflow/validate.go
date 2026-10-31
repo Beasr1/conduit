@@ -141,6 +141,9 @@ func (v *validator) checkNode(p string, n Node) {
 	case n.Kind == NodeKindTransform:
 		v.add(p+"/outputs", "not_allowed", "a transform node has one output, so it lists none")
 	}
+	if n.Unhandled != nil && strings.TrimSpace(n.Unhandled.Body) == "" {
+		v.add(p+"/unhandled/body", "required", "an Unhandled body needs JSONata: write it, or remove it")
+	}
 }
 
 // checkSwitch checks a transform node's switch: each case's condition and

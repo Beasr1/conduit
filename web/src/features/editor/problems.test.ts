@@ -7,6 +7,7 @@ import {
   removeEdges,
   removeNodes,
   renameNode,
+  setStepUnhandled,
   setUnhandled,
   updateCase,
   updateEdge,
@@ -74,6 +75,10 @@ test.each<[string, Place]>([
   ["/response/answers/0/on", { on: "response", field: "on", answer: 0 }],
   ["/response/answers/1/unhandled", { on: "response", field: "on", answer: 1 }],
   ["/response/unhandled/body", { on: "response", field: "unhandled" }],
+  [
+    "/nodes/1/unhandled/body",
+    { on: "step", index: 1, field: "unhandled_body" },
+  ],
   ["/response/from", { on: "workflow" }],
   ["/nodes/1/switch", { on: "step", index: 1, field: "switch" }],
   [
@@ -137,6 +142,7 @@ test.each<[string, string]>([
   ["/nodes/0/outputs/0/status", "409"],
   ["/nodes/0/outputs/5/status", "add"],
   ["/nodes/0/outputs", "add"],
+  ["/nodes/0/unhandled/body", "unhandled"],
   ["/edges/0/when", "request"],
 ])("%j is on the step's %j", (pointer, part) => {
   const draft: Definition = {
@@ -283,6 +289,13 @@ test("an answer's problem goes once that answer changes, and its line's once the
     answers,
   );
   expect(follow(answers, answered, addAnswer(answered, 404))).toBeUndefined();
+  // One in a step's Unhandled body, once its body changes.
+  const body: Place = { on: "step", index: 0, field: "unhandled_body" };
+  const caught = setStepUnhandled(answered, 0, "");
+  expect(follow(body, caught, addAnswer(caught, 404))).toEqual(body);
+  expect(
+    follow(body, caught, setStepUnhandled(caught, 0, "1")),
+  ).toBeUndefined();
   // And one in a case, once that case changes.
   const cased: Definition = {
     ...specExample,
@@ -426,6 +439,11 @@ test.each([
     "A workflow with a response has no output: the steps joined to its answers give them.",
   ],
   ["/nodes/0/expr", "required", "Add an expression."],
+  [
+    "/nodes/0/unhandled/body",
+    "required",
+    "Write its body, or give what the step got instead.",
+  ],
   ["/nodes/1/request/url", "required", "Add a URL."],
   ["/nodes/1/id", "duplicate_id", "Another step already has this id."],
   [

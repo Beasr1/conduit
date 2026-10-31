@@ -390,10 +390,18 @@ export interface components {
             sends?: components["schemas"]["RenderedRequest"];
             /** @description A transform step's value, or the workflow's output. Absent when it gave none. */
             gives?: unknown;
+            unhandled?: components["schemas"]["UnhandledPreview"];
             /** @description A run would skip the step, or a connection's source, with these samples, as no connection into it is taken. */
             skipped: boolean;
             /** @description What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there. */
             problems: components["schemas"]["ProblemError"][];
+        };
+        /** @description A step with an Unhandled body, failing into the block with an error made up, as a preview calls nothing. */
+        UnhandledPreview: {
+            /** @description What the body reads, the step's own made-up failure among it. */
+            reads: unknown;
+            /** @description What the body gives. Absent when it gave nothing, or failed, as the preview's problems then say. */
+            gives?: unknown;
         };
         /** @description An http step's request, as a run would send it. A part that didn't render is left out, and its problem says why. */
         RenderedRequest: {
@@ -541,6 +549,9 @@ export interface components {
             };
             /** @description null when there was none, or it wasn't JSON. */
             body: unknown;
+            /** @description What the node's Unhandled body gave, once the block took its failure. */
+            gave?: unknown;
+            /** @description The body, or what the Unhandled body gave, was cut to 256 KiB. */
             truncated?: boolean;
         };
         /** @description The data of a `node` event in a run's stream. */
@@ -618,6 +629,11 @@ export interface components {
             /** @description A made-up or redacted response with this status, which previews read. It has no status of its own. */
             sample?: components["schemas"]["Sample"];
         };
+        /** @description What a node gives through its Unhandled block, once the block takes its failure. Without it, the node gives what an http node got back, if anything. */
+        NodeUnhandled: {
+            /** @description JSONata over what the node read and its own failure, nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer. Its value is what the nodes after read as nodes.<id>.body, error, status and headers staying as they are, and the body of an answer joined straight to the block. One that fails fails the run. */
+            body: string;
+        };
         Node: {
             /** @description Unique in the workflow. Expressions read the node's result as nodes.<id>. */
             id: string;
@@ -632,6 +648,7 @@ export interface components {
             sample?: components["schemas"]["Sample"];
             /** @description An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node, and its Unhandled block takes that as it takes every failure of the node's. */
             outputs?: components["schemas"]["Output"][];
+            unhandled?: components["schemas"]["NodeUnhandled"];
         };
         Edge: {
             from: string;

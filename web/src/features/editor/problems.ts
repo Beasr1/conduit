@@ -35,7 +35,8 @@ export type StepField =
   | "case_status"
   | "case_body"
   | "otherwise_status"
-  | "otherwise_body";
+  | "otherwise_body"
+  | "unhandled_body";
 
 // The fields an HTTP step's Request tab holds: the call and its body.
 export const REQUEST_FIELDS: ReadonlySet<StepField | undefined> = new Set([
@@ -174,6 +175,7 @@ function stepPlace(index: number, [part, sub, name, end]: string[]): Place {
           output: Number(sub),
         };
   if (part === "switch") return switchPlace(index, sub, name, end);
+  if (part === "unhandled") return { ...step, field: "unhandled_body" };
   if (part !== "request") return step;
   if (sub === "headers" || sub === "query")
     return name === undefined
@@ -198,6 +200,7 @@ export function stepPartOf(place: Place, draft: Definition): string {
   }
   if (place.field === "sample") return "2xx";
   if (place.field === "outputs") return "add";
+  if (place.field === "unhandled_body") return "unhandled";
   return "request";
 }
 
@@ -308,6 +311,8 @@ function partOf(d: Definition, place: Place): unknown {
           return n?.switch?.otherwise.status;
         case "otherwise_body":
           return n?.switch?.otherwise.body;
+        case "unhandled_body":
+          return n?.unhandled?.body;
       }
       return undefined;
     }
@@ -506,6 +511,8 @@ function required(place: Place): string | undefined {
       return "An HTTP step needs a request.";
     case "expr":
       return "Add an expression.";
+    case "unhandled_body":
+      return "Write its body, or give what the step got instead.";
     case "method":
       return "Pick a method.";
     case "url":

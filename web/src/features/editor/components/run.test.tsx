@@ -570,3 +570,138 @@ test("a run that failed, answered by the response's Unhandled, marks that and no
       .getAttribute("class"),
   ).toContain("untaken");
 });
+
+test("a step's Unhandled tab says what it took in the run, and what its body gave", async () => {
+  renderEditor({
+    ...caughtDef,
+    nodes: caughtDef.nodes.map((n) =>
+      n.id === "user" ? { ...n, unhandled: { body: "{ 'down': true }" } } : n,
+    ),
+  });
+  serveRun(
+    {
+      ...caught,
+      nodes: caught.nodes?.map((n) =>
+        n.node === "user"
+          ? {
+              ...n,
+              response: {
+                ...n.response,
+                body: { error: "down" },
+                gave: { down: true },
+              },
+            }
+          : n,
+      ),
+    },
+    [
+      { node: "user", kind: "started", attempt: 1, at: at(0) },
+      {
+        node: "user",
+        kind: "failed",
+        attempt: 1,
+        at: at(82),
+        http_status: 500,
+        error: userFailed,
+      },
+    ],
+  );
+  await run();
+  await waitFor(() => expect(line("user")).toBe("Unhandled: 500"));
+  fireEvent.click(
+    within(screen.getByTestId("rf__node-user")).getByText("Unhandled"),
+  );
+  const panel = await screen.findByRole("complementary", { name: "HTTP step" });
+  const inRun = await within(panel).findByRole("heading", {
+    name: "In this run: Unhandled: 500",
+  });
+  const section = inRun.parentElement;
+  if (!section) throw new Error("no section");
+  expect(within(section).getByText(userFailed.detail)).toBeTruthy();
+  expect(within(section).getByText("It got 500")).toBeTruthy();
+  expect(within(section).getByText(/"error": "down"/)).toBeTruthy();
+  expect(within(section).getByText("Its Unhandled body gave")).toBeTruthy();
+  expect(within(section).getByText(/"down": true/)).toBeTruthy();
+});
+
+test("a step that failed with no line from its Unhandled shows nothing in that tab", async () => {
+  renderEditor(caughtDef);
+  serveRun({
+    ...caught,
+    status: "failed",
+    error: { ...userFailed, caught: undefined, node: "user" },
+    nodes: caught.nodes?.map((n) =>
+      n.node === "user"
+        ? { ...n, error: { code: userFailed.code, detail: userFailed.detail } }
+        : n,
+    ),
+  });
+  await run();
+  await waitFor(() => expect(line("user")).toBe("failed: 500"));
+  fireEvent.click(
+    within(screen.getByTestId("rf__node-user")).getByText("Unhandled"),
+  );
+  await screen.findByRole("complementary", { name: "HTTP step" });
+  expect(
+    within(screen.getByRole("tabpanel")).queryByRole("heading", {
+      name: /^In this run/,
+    }),
+  ).toBeNull();
+});
+
+test("a transform whose Unhandled took its failure gave nothing of its own", async () => {
+  renderEditor({
+    nodes: [
+      {
+        id: "count",
+        kind: "transform",
+        expr: "$number(input.n)",
+        unhandled: { body: "0" },
+      },
+      { id: "next", kind: "transform", expr: "nodes.count.body + 1" },
+    ],
+    edges: [{ from: "count", to: "next", unhandled: true }],
+  });
+  const failed = {
+    code: "workflow_error" as const,
+    detail: "expr: not a number",
+    caught: true,
+  };
+  serveRun(
+    {
+      ...ended,
+      output: 1,
+      nodes: [
+        {
+          node: "count",
+          status: "failed",
+          attempts: 0,
+          started_at: at(0),
+          ended_at: at(1),
+          response: { body: null, gave: 0 },
+          error: failed,
+        },
+        {
+          node: "next",
+          status: "succeeded",
+          attempts: 0,
+          started_at: at(2),
+          ended_at: at(3),
+          response: { body: 1 },
+        },
+      ],
+    },
+    [
+      { node: "count", kind: "started", attempt: 0, at: at(0) },
+      { node: "count", kind: "failed", attempt: 0, at: at(1), error: failed },
+    ],
+  );
+  await run();
+  await waitFor(() => expect(line("count")).toBe("Unhandled: workflow error"));
+  fireEvent.click(screen.getByText("count"));
+  const panel = await screen.findByRole("complementary", {
+    name: "Transform step",
+  });
+  await within(panel).findByText("Its Unhandled body gave");
+  expect(within(panel).queryByText("It gave")).toBeNull();
+});

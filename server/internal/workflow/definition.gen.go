@@ -167,10 +167,19 @@ type Node struct {
 
 	// Switch A transform node's cases, in place of an expr.
 	Switch *Switch `json:"switch,omitempty"`
+
+	// Unhandled What a node gives through its Unhandled block, once the block takes its failure. Without it, the node gives what an http node got back, if anything.
+	Unhandled *NodeUnhandled `json:"unhandled,omitempty"`
 }
 
 // NodeKind defines model for NodeKind.
 type NodeKind string
+
+// NodeUnhandled What a node gives through its Unhandled block, once the block takes its failure. Without it, the node gives what an http node got back, if anything.
+type NodeUnhandled struct {
+	// Body JSONata over what the node read and its own failure, nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer. Its value is what the nodes after read as nodes.<id>.body, error, status and headers staying as they are, and the body of an answer joined straight to the block. One that fails fails the run.
+	Body string `json:"body"`
+}
 
 // Otherwise What a switch gives when no case holds.
 type Otherwise struct {

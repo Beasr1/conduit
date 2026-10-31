@@ -15,6 +15,13 @@ import (
 	"github.com/Beasr1/conduit/server/internal/workflow"
 )
 
+// UnhandledPreview is what a step's Unhandled body reads and gives in a
+// preview.
+type UnhandledPreview struct {
+	Reads json.RawMessage
+	Gives json.RawMessage
+}
+
 // ErrNoSuchNode is a preview of a step the definition doesn't have.
 var ErrNoSuchNode = errors.New("no step has that id")
 
@@ -37,6 +44,9 @@ type Preview struct {
 	// Skipped says a run would skip the step, or the connection's source:
 	// no connection into it is taken.
 	Skipped bool
+	// Unhandled is a step with an Unhandled body failing into its block, an
+	// error made up: what the body reads, and what it gives.
+	Unhandled *UnhandledPreview
 	// Problems is what kept a part from rendering, each sample missing on
 	// the way, and what's wrong with the definition there, by pointer.
 	Problems workflow.Problems
@@ -377,9 +387,9 @@ func (s *sim) run(i int) {
 	}
 	switch {
 	case s.via[i] == workflow.OnUnhandled:
-		entry, err := madeUpFailure(n)
+		entry, err := s.failed(i)
 		if err != nil {
-			s.problem("/nodes/"+strconv.Itoa(i), "evaluation_failed", "%s: %v", n.id, err)
+			s.problem("/nodes/"+strconv.Itoa(i)+"/unhandled/body", "evaluation_failed", "%s: %v", n.id, err)
 			return
 		}
 		s.entry[i] = entry
@@ -498,6 +508,9 @@ func (s *sim) step(pv *Preview, t int) {
 			s.problem(ptr+part, "evaluation_failed", "%v", err)
 		}
 	}
+	if n.unhandled != nil {
+		s.unhandled(pv, t)
+	}
 }
 
 // output previews the workflow's output, over every node that ran, as a
@@ -524,19 +537,54 @@ func (s *sim) output(pv *Preview) {
 }
 
 // madeUpFailure is node n's part of the data document when it fails into
-// its Unhandled block, as a preview has it: an error, and no answer.
-func madeUpFailure(n *node) (json.RawMessage, error) {
+// its Unhandled block, as a preview has it: an error, no answer, and body,
+// when its Unhandled body gave one.
+func madeUpFailure(n *node, body json.RawMessage) (json.RawMessage, error) {
 	code := CodeWorkflow
 	if n.kind == workflow.NodeKindHTTP {
 		code = CodeUpstream
 	}
-	type failure struct {
-		Code   string `json:"code"`
-		Detail string `json:"detail"`
+	return failureEntry(0, nil, body, code, n.id+" failed: made up, as a preview calls nothing")
+}
+
+// failed is node i's part of the data document as it fails into its
+// Unhandled block in a preview: an error made up, and what its Unhandled
+// body gives over that, when it has one.
+func (s *sim) failed(i int) (json.RawMessage, error) {
+	n := &s.p.nodes[i]
+	entry, err := madeUpFailure(n, nil)
+	if err != nil || n.unhandled == nil {
+		return entry, err
 	}
-	return json.Marshal(struct {
-		Error failure `json:"error"`
-	}{failure{code, n.id + " failed: made up, as a preview calls nothing"}})
+	doc, err := document(s.input, append(s.parts(i), docPart{id: n.id, entry: entry}))
+	if err != nil {
+		return nil, err
+	}
+	gave, err := n.unhandled.Eval(s.ctx, doc)
+	if err != nil {
+		return nil, err
+	}
+	return madeUpFailure(n, gave)
+}
+
+// unhandled previews step t's Unhandled body: over what t reads, with t
+// failing into the block, an error made up.
+func (s *sim) unhandled(pv *Preview, t int) {
+	n := &s.p.nodes[t]
+	ptr := "/nodes/" + strconv.Itoa(t) + "/unhandled/body"
+	entry, err := madeUpFailure(n, nil)
+	var doc json.RawMessage
+	if err == nil {
+		doc, err = document(s.input, append(s.parts(t), docPart{id: n.id, entry: entry}))
+	}
+	if err != nil {
+		s.problem(ptr, "evaluation_failed", "%v", err)
+		return
+	}
+	pv.Unhandled = &UnhandledPreview{Reads: doc}
+	if pv.Unhandled.Gives, err = n.unhandled.Eval(s.ctx, doc); err != nil {
+		s.problem(ptr, "evaluation_failed", "%v", err)
+	}
 }
 
 // sampleEntry is an http node's part of the data document, from a sample

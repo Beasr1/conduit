@@ -300,3 +300,121 @@ func TestSimulate_FailsIntoUnhandled(t *testing.T) {
 		t.Errorf("edge: taken %s, reads %s, problems %s", taken(pv), pv.Reads, problemCodes(pv))
 	}
 }
+
+// A step's Unhandled body gives its value once the block takes its failure:
+// on a transform, a fallback, as a catch's return.
+func TestRun_UnhandledBodyGivesAFallback(t *testing.T) {
+	t.Parallel()
+	p := program(t, "", `{
+	  "nodes": [
+	    {"id": "count", "kind": "transform", "expr": "$number(input.n)", "unhandled": {"body": "0"}},
+	    {"id": "next", "kind": "transform", "expr": "nodes.count.body + 1"}
+	  ],
+	  "edges": [{"from": "count", "to": "next"}, {"from": "count", "to": "next", "unhandled": true}],
+	  "output": "nodes.next.body"
+	}`)
+	for input, want := range map[string]string{`{"n": "2"}`: "3", `{"n": "two"}`: "1"} {
+		res, _ := execute(t, testEngine(Options{}), p, input)
+		if res.Status != StatusSucceeded || string(res.Output) != want {
+			t.Errorf("%s: run %s (%s), output %s, err %v; want %s", input, res.Status, statuses(res), res.Output, res.Err, want)
+		}
+	}
+	res, _ := execute(t, testEngine(Options{}), p, `{"n": "two"}`)
+	if count := res.Nodes[0]; !count.Caught || string(count.Gave) != "0" || count.Body != nil {
+		t.Errorf("count caught %v, gave %s, body %s", count.Caught, count.Gave, count.Body)
+	}
+}
+
+// On an http step, what the body gives is what the steps after read as its
+// body, and what an answer joined straight to the block answers with; its
+// status, headers and error stay.
+func TestRun_UnhandledBodyShapesWhatFollows(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error": "gone"}`)
+	}))
+	t.Cleanup(srv.Close)
+	user := `{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/"},
+	  "unhandled": {"body": "{ 'missing': nodes.user.status, 'why': nodes.user.body.error }"}}`
+	answer := program(t, srv.URL, `{"nodes": [`+user+`],
+	  "response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "unhandled": true}]}}`)
+	res, _ := execute(t, testEngine(Options{}), answer, `{}`)
+	if res.Status != StatusSucceeded || res.Answer != 404 || string(res.Output) != `{"missing":404,"why":"gone"}` {
+		t.Errorf("answer: run %s answered %d %s, err %v", res.Status, res.Answer, res.Output, res.Err)
+	}
+	if string(res.Nodes[0].Body) != `{"error": "gone"}` {
+		t.Errorf("user's body as it got it: %s", res.Nodes[0].Body)
+	}
+	after := program(t, srv.URL, `{"nodes": [`+user+`,
+	    {"id": "next", "kind": "transform", "expr": "{ 'body': nodes.user.body, 'status': nodes.user.status, 'code': nodes.user.error.code }"}],
+	  "edges": [{"from": "user", "to": "next", "unhandled": true}],
+	  "output": "nodes.next.body"}`)
+	res, _ = execute(t, testEngine(Options{}), after, `{}`)
+	if string(res.Output) != `{"body":{"missing":404,"why":"gone"},"status":404,"code":"upstream_failed"}` {
+		t.Errorf("after: run %s, output %s, err %v", res.Status, res.Output, res.Err)
+	}
+	// The response's Unhandled reads it too.
+	failing := program(t, srv.URL, `{"nodes": [`+user+`, {"id": "b", "kind": "transform", "expr": "$number('one')"}],
+	  "edges": [{"from": "user", "to": "b", "unhandled": true}],
+	  "response": {"answers": [{"status": 200, "from": "b"}], "unhandled": {"body": "nodes.user.body"}}}`)
+	res, _ = execute(t, testEngine(Options{}), failing, `{}`)
+	body, ok, err := failing.Unhandled(t.Context(), nil, res.Nodes, json.RawMessage(`{"code": "workflow_error", "detail": "…", "node": "b"}`))
+	if !ok || err != nil || string(body) != `{"missing":404,"why":"gone"}` {
+		t.Errorf("Unhandled() = %s, %v, %v", body, ok, err)
+	}
+}
+
+// An Unhandled body that fails fails the run, saying what the block took,
+// and the body is the cause, the workflow's fault.
+func TestRun_UnhandledBodyThatFails(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	p := program(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}, "unhandled": {"body": "$number('x')"}},
+	    {"id": "b", "kind": "transform", "expr": "1"}],
+	  "edges": [{"from": "a", "to": "b", "unhandled": true}]}`)
+	res, _ := execute(t, testEngine(Options{}), p, `{}`)
+	if res.Status != StatusFailed || statuses(res) != "a failed, b cancelled" || res.Nodes[0].Caught ||
+		!strings.Contains(fmt.Sprint(res.Err), "status 404; then unhandled: body: ") || Classify(res.Err) != CodeWorkflow {
+		t.Errorf("run %s (%s), a caught %v: %v", res.Status, statuses(res), res.Nodes[0].Caught, res.Err)
+	}
+}
+
+// A preview of a step's Unhandled body reads the step failing, an error made
+// up; a step after the block reads what the body gives.
+func TestSimulate_UnhandledBody(t *testing.T) {
+	t.Parallel()
+	def := `{
+	  "nodes": [
+	    {"id": "user", "kind": "http", "request": {"method": "GET", "url": "https://users.example.com/v1"},
+	     "sample": {"body": {"id": "7"}}, "unhandled": {"body": "{ 'why': nodes.user.error.code }"}},
+	    {"id": "fallback", "kind": "transform", "expr": "nodes.user.body"}
+	  ],
+	  "edges": [{"from": "user", "to": "fallback", "unhandled": true}]
+	}`
+	pv := previewOf(t, def, "user", nil)
+	if pv.Unhandled == nil || !sameJSON(t, pv.Unhandled.Gives, `{"why": "upstream_failed"}`) ||
+		!strings.Contains(string(pv.Unhandled.Reads), `"user":{"error":{"code":"upstream_failed"`) || problemCodes(pv) != "" {
+		t.Errorf("user: unhandled %+v, problems %s", pv.Unhandled, problemCodes(pv))
+	}
+	if pv := previewOf(t, def, "fallback", nil); !sameJSON(t, pv.Gives, `{"why": "upstream_failed"}`) {
+		t.Errorf("fallback gives %s, problems %s", pv.Gives, problemCodes(pv))
+	}
+	// One that fails says where, and so does a step after it.
+	broken := func(d *workflow.Definition) { d.Nodes[0].Unhandled.Body = "$number('x')" }
+	if pv := previewOf(t, def, "user", broken); pv.Unhandled == nil || pv.Unhandled.Gives != nil ||
+		problemCodes(pv) != "/nodes/0/unhandled/body evaluation_failed" {
+		t.Errorf("a broken body: unhandled %+v, problems %s", pv.Unhandled, problemCodes(pv))
+	}
+	// fallback then has no user to read either.
+	if pv := previewOf(t, def, "fallback", broken); problemCodes(pv) != "/nodes/0/unhandled/body evaluation_failed, /nodes/1/expr evaluation_failed" {
+		t.Errorf("after a broken body: problems %s", problemCodes(pv))
+	}
+	// A step without one has none to preview.
+	if pv := previewOf(t, def, "fallback", nil); pv.Unhandled != nil {
+		t.Errorf("fallback's unhandled %+v", pv.Unhandled)
+	}
+}

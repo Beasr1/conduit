@@ -26,6 +26,7 @@ import {
   renameNode,
   setAnswerSchema,
   setField,
+  setStepUnhandled,
   setUnhandled,
   toSwitch,
   updateCase,
@@ -230,6 +231,16 @@ test("answers are added at the end, their schemas set, and removed by place", ()
   expect(
     removeAnswer(setUnhandled(addAnswer(spec, 200), "1"), 0).response,
   ).toEqual({ answers: [], unhandled: { body: "1" } });
+});
+
+test("a step's Unhandled body is set, changed and taken away", () => {
+  const set = setStepUnhandled(spec, 3, "{ 'down': true }");
+  expect(set.nodes[3]?.unhandled).toEqual({ body: "{ 'down': true }" });
+  expect(spec.nodes[3]).not.toHaveProperty("unhandled");
+  expect(setStepUnhandled(set, 3, "{ 'down': true }")).toBe(set);
+  expect(setStepUnhandled(set, 3, undefined).nodes[3]).toEqual(spec.nodes[3]);
+  expect(setStepUnhandled(spec, 3, undefined)).toBe(spec);
+  expect(setStepUnhandled(spec, 9, "1")).toBe(spec);
 });
 
 test("unhandled is set, changed and taken away", () => {

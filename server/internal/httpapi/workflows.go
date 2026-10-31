@@ -207,6 +207,9 @@ func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequ
 		return nil, err
 	}
 	out := gen.PreviewDefinition200JSONResponse{Reads: pv.Reads, Gives: pv.Gives, Taken: pv.Taken, Skipped: pv.Skipped, Problems: problemErrors(pv.Problems)}
+	if u := pv.Unhandled; u != nil {
+		out.Unhandled = gen.UnhandledPreview{Reads: u.Reads, Gives: u.Gives}
+	}
 	if s := pv.Sends; s != nil {
 		headers := make(map[string]string, len(s.Header))
 		for name, values := range s.Header {

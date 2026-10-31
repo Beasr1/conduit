@@ -34,6 +34,7 @@ const fieldNames: Record<StepField, string> = {
   case_body: "Body",
   otherwise_status: "Otherwise · Status",
   otherwise_body: "Otherwise · Body",
+  unhandled_body: "Unhandled · Body",
 };
 
 const everywhere = () => true;
@@ -52,6 +53,7 @@ const fieldIds: Partial<Record<StepField, string>> = {
   expr: "step-expr",
   otherwise_status: "step-otherwise-status",
   otherwise_body: "step-otherwise-body",
+  unhandled_body: "step-unhandled-body",
 };
 
 // fieldOf is the element a problem's field is drawn as, once its panel is

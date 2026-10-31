@@ -64,8 +64,9 @@ type node struct {
 	outputs    []int // the statuses besides 2xx it answers with
 
 	// catches says a line leaves its Unhandled block, which then takes its
-	// failures.
-	catches bool
+	// failures. unhandled is the block's body; nil: it gives what it got.
+	catches   bool
+	unhandled *transform.Expr
 
 	// transform nodes: an expr, or a switch, whose otherwise is never nil.
 	// whole says every expression in it compiled.
@@ -142,6 +143,9 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 		case n.Kind == workflow.NodeKindTransform && n.Expr != "":
 			pn.expr = c.expr(ptr+"/expr", n.Expr)
 			pn.whole = pn.expr != nil
+		}
+		if n.Unhandled != nil && n.Unhandled.Body != "" {
+			pn.unhandled = c.expr(ptr+"/unhandled/body", n.Unhandled.Body)
 		}
 	}
 	for k, e := range d.Edges {

@@ -252,6 +252,24 @@ export function setAnswerSchema(
   return { ...d, response: { ...r, answers: r.answers.with(k, after) } };
 }
 
+// setStepUnhandled gives step index's Unhandled block body, what it gives
+// once it takes the step's failure; undefined removes it, so the block gives
+// what the step got. A body it already has gives back the draft itself.
+export function setStepUnhandled(
+  d: Definition,
+  index: number,
+  body: string | undefined,
+): Definition {
+  const n = d.nodes[index];
+  if (!n || n.unhandled?.body === body) return d;
+  return updateNode(d, index, (node) => {
+    const next = { ...node };
+    if (body === undefined) delete next.unhandled;
+    else next.unhandled = { body };
+    return next;
+  });
+}
+
 // setUnhandled gives the response an unhandled whose body is body;
 // undefined removes it. A body it already has gives back the draft itself.
 export function setUnhandled(

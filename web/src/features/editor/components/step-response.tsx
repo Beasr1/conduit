@@ -35,7 +35,8 @@ export function StepResponse({ index }: { index: number }) {
       </dl>
       <p className="text-muted-foreground">
         A status the step has no response for, or a 2xx body that isn&apos;t
-        JSON, fails the step, and with it the run.
+        JSON, goes to its Unhandled, and fails the run unless a line leaves
+        that.
       </p>
     </div>
   );

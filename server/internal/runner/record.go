@@ -145,10 +145,11 @@ type (
 		Truncated bool              `json:"truncated,omitempty"`
 	}
 	responseDoc struct {
-		Status    int               `json:"status,omitempty"`  // http nodes
-		Headers   map[string]string `json:"headers,omitempty"` // http nodes
-		Body      json.RawMessage   `json:"body"`              // null when there was none
-		Truncated bool              `json:"truncated,omitempty"`
+		Status    int               `json:"status,omitempty"`    // http nodes
+		Headers   map[string]string `json:"headers,omitempty"`   // http nodes
+		Body      json.RawMessage   `json:"body"`                // null when there was none
+		Gave      json.RawMessage   `json:"gave,omitempty"`      // what its Unhandled body gave
+		Truncated bool              `json:"truncated,omitempty"` // the body, or what it gave, was capped
 	}
 )
 
@@ -175,14 +176,20 @@ func nodeRecord(runID string, n nodeEnd) (store.NodeRun, error) {
 			return rec, fmt.Errorf("encode the request: %w", err)
 		}
 	}
-	// An http node got an answer, or a transform node gave a value.
-	if res.HTTPStatus != 0 || res.Body != nil {
+	// An http node got an answer, a transform node gave a value, or an
+	// Unhandled body gave one.
+	if res.HTTPStatus != 0 || res.Body != nil || res.Gave != nil {
 		d := responseDoc{Status: res.HTTPStatus, Body: json.RawMessage("null")}
 		if res.HTTPStatus != 0 {
 			d.Headers = headersDoc(res.Header)
 		}
 		if res.Body != nil {
 			d.Body, d.Truncated = capped(res.Body)
+		}
+		if res.Gave != nil {
+			var cut bool
+			d.Gave, cut = capped(res.Gave)
+			d.Truncated = d.Truncated || cut
 		}
 		if rec.Response, err = json.Marshal(d); err != nil {
 			return rec, fmt.Errorf("encode the response: %w", err)

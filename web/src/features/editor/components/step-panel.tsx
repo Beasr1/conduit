@@ -28,8 +28,14 @@ import { useEditor } from "@/features/editor/store";
 // kind the editor doesn't know, in the words that say so. A problem
 // anywhere else shows above them.
 const fieldsOf: Record<string, ReadonlySet<StepField | undefined>> = {
-  http: new Set(["id", ...REQUEST_FIELDS, "sample", "outputs"]),
-  transform: new Set(["id", "expr"]),
+  http: new Set([
+    "id",
+    ...REQUEST_FIELDS,
+    "sample",
+    "outputs",
+    "unhandled_body",
+  ]),
+  transform: new Set(["id", "expr", "unhandled_body"]),
 };
 const unknownKind = new Set<StepField | undefined>(["id", "kind"]);
 
@@ -66,9 +72,12 @@ export function StepSettings({ index }: { index: number }) {
           value={part}
           onValueChange={(value: string) => setPart(value)}
         >
+          {/* The list grows as its tabs wrap, and each tab is as tall as
+              its label: its own height, a share of the list's, would make
+              every one as tall as the rows together. */}
           <TabsList
             activateOnFocus
-            className="flex-wrap group-data-horizontal/tabs:h-auto"
+            className="flex-wrap group-data-horizontal/tabs:h-auto [&>[data-slot=tabs-trigger]]:h-auto"
           >
             <TabsTrigger value="request">
               Request
@@ -91,7 +100,10 @@ export function StepSettings({ index }: { index: number }) {
             <TabsTrigger value="add" aria-label="Add a response">
               + Response
             </TabsTrigger>
-            <TabsTrigger value="unhandled">Unhandled</TabsTrigger>
+            <TabsTrigger value="unhandled">
+              Unhandled
+              <Marked where={(p) => mine(p) && p.field === "unhandled_body"} />
+            </TabsTrigger>
           </TabsList>
           {/* Each stays mounted while hidden, so what's typed survives a
               switch. */}

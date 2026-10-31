@@ -102,6 +102,9 @@ components:
           items:
             $ref: "#/components/schemas/Output"
           description: An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node, and its Unhandled block takes that as it takes every failure of the node's.
+        unhandled:
+          $ref: "#/components/schemas/NodeUnhandled"
+          x-go-type-skip-optional-pointer: false
 
     NodeKind:
       type: string
@@ -237,6 +240,16 @@ components:
         body:
           type: string
           description: JSONata over the run as it stood, every node that succeeded, and error, {code, detail, node}.
+
+    NodeUnhandled:
+      type: object
+      required: [body]
+      additionalProperties: false
+      description: What a node gives through its Unhandled block, once the block takes its failure. Without it, the node gives what an http node got back, if anything.
+      properties:
+        body:
+          type: string
+          description: JSONata over what the node read and its own failure, nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer. Its value is what the nodes after read as nodes.<id>.body, error, status and headers staying as they are, and the body of an answer joined straight to the block. One that fails fails the run.
 
     Switch:
       type: object

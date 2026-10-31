@@ -236,11 +236,16 @@ type NodeResponse struct {
 	// Body null when there was none, or it wasn't JSON.
 	Body json.RawMessage `json:"body"`
 
+	// Gave What the node's Unhandled body gave, once the block took its failure.
+	Gave json.RawMessage `json:"gave,omitempty,omitzero"`
+
 	// Headers http nodes only.
 	Headers map[string]string `json:"headers,omitempty,omitzero"`
 
 	// Status http nodes only.
-	Status    int  `json:"status,omitempty,omitzero"`
+	Status int `json:"status,omitempty,omitzero"`
+
+	// Truncated The body, or what the Unhandled body gave, was cut to 256 KiB.
 	Truncated bool `json:"truncated,omitempty,omitzero"`
 }
 
@@ -287,6 +292,9 @@ type Preview struct {
 
 	// Taken A connection's preview only, whether a run would take it with these samples.
 	Taken *bool `json:"taken,omitempty"`
+
+	// Unhandled A step with an Unhandled body, failing into the block with an error made up, as a preview calls nothing.
+	Unhandled UnhandledPreview `json:"unhandled,omitempty,omitzero"`
 }
 
 // PreviewRequest defines model for PreviewRequest.
@@ -486,6 +494,15 @@ type StartRun struct {
 
 	// Revision The revision to run. Absent means the latest.
 	Revision int `json:"revision,omitempty,omitzero"`
+}
+
+// UnhandledPreview A step with an Unhandled body, failing into the block with an error made up, as a preview calls nothing.
+type UnhandledPreview struct {
+	// Gives What the body gives. Absent when it gave nothing, or failed, as the preview's problems then say.
+	Gives json.RawMessage `json:"gives,omitempty,omitzero"`
+
+	// Reads What the body reads, the step's own made-up failure among it.
+	Reads json.RawMessage `json:"reads"`
 }
 
 // Validation defines model for Validation.

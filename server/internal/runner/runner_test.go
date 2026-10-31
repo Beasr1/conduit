@@ -324,6 +324,31 @@ func TestServe_AnUnhandledThatFails(t *testing.T) {
 	}
 }
 
+// What a transform's Unhandled body gave is recorded, though the transform
+// gave no value of its own.
+func TestServe_ATransformsUnhandledBodyIsRecorded(t *testing.T) {
+	t.Parallel()
+	r := newRunner(t, Options{})
+	w := saveWorkflow(t, "", `{"nodes": [{"id": "count", "kind": "transform", "expr": "$number('two')", "unhandled": {"body": "0"}},
+	    {"id": "next", "kind": "transform", "expr": "nodes.count.body + 1"}],
+	  "edges": [{"from": "count", "to": "next", "unhandled": true}],
+	  "response": {"answers": [{"status": 200, "from": "next"}]}}`)
+	out, err := r.Serve(t.Context(), w.Slug, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Answer != 200 || string(out.Output) != "1" {
+		t.Errorf("answered %d %s, failure %+v", out.Answer, out.Output, out.Failure)
+	}
+	nodes, err := db.NodeRuns(t.Context(), out.Run.ID)
+	if err != nil || len(nodes) != 2 {
+		t.Fatalf("NodeRuns() = %+v, %v", nodes, err)
+	}
+	if got := decode[responseDoc](t, nodes[0].Response); string(got.Gave) != "0" || string(got.Body) != "null" {
+		t.Errorf("count's response = %s", nodes[0].Response)
+	}
+}
+
 // A step's Unhandled block takes its failure: the step is recorded failed
 // and caught, and the run answers through the steps after the block.
 func TestServe_AStepsUnhandledTakesItsFailure(t *testing.T) {
@@ -333,7 +358,7 @@ func TestServe_AStepsUnhandledTakesItsFailure(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	r := newRunner(t, Options{})
-	w := saveWorkflow(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}},
+	w := saveWorkflow(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}, "unhandled": {"body": "{ 'down': true }"}},
 	    {"id": "sorry", "kind": "transform", "expr": "{ 'error': nodes.a.error.code, 'upstream': nodes.a.status }"}],
 	  "edges": [{"from": "a", "to": "sorry", "unhandled": true}],
 	  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 503, "from": "sorry"}]}}`)
@@ -350,6 +375,10 @@ func TestServe_AStepsUnhandledTakesItsFailure(t *testing.T) {
 	}
 	if a, f := nodes[0], decode[Failure](t, nodes[0].Error); a.Status != "failed" || f.Code != CodeUpstream || !f.Caught {
 		t.Errorf("a = %s, error %s", a.Status, a.Error)
+	}
+	// What it got is kept, and what its Unhandled body gave beside it.
+	if got := decode[responseDoc](t, nodes[0].Response); got.Status != 500 || string(got.Gave) != `{"down": true}` { // as jsonb writes it
+		t.Errorf("a's response = %s", nodes[0].Response)
 	}
 	if sorry := nodes[1]; sorry.Status != "succeeded" || sorry.Error != nil {
 		t.Errorf("sorry = %s, error %s", sorry.Status, sorry.Error)

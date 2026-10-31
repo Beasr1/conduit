@@ -867,6 +867,15 @@ A step's Unhandled, decided with you on 2026-11-01:
   `unhandled: true`, beside `on`; a caught failure keeps its step
   `failed`, with `caught: true` in its error. A preview after an
   Unhandled line reads a made-up `error`.
+- **A body of its own** (2026-11-01, your call, after the block was
+  built): Write your own in the Unhandled tab, JSONata over what the step
+  read and its own failure. Its value is what the steps after read as
+  `nodes.<step>.body`, its status, headers and error staying, and the
+  body of an answer joined straight to the block; on a transform, a
+  fallback value, as a catch returns one. Step Functions' Catch shapes
+  what it passes on the same way, `$states.errorOutput` being readable in
+  its `Output` (sources.md). Only for an answer, and joining a transform
+  that returns it, which worked already, were the other options.
 - [x] The engine, validation, runs and previews.
 - [x] The strips, their panels and the run's marks.
 
@@ -1695,6 +1704,24 @@ committed (8cbc5b1). Decided while building:
   part that wasn't one of the step's responses back to Request.
 - **Tests pick a later option from the keyboard**, as a click on any but
   the first does nothing in jsdom.
+- **The body, built the same day**: it reads the step's own failure, its
+  part of the data document as the steps after would read it without a
+  body, and its value takes the body's place there, status, headers and
+  error staying. A run records it as `gave`, beside what the step got. One
+  that fails fails the run, "GET …: status 404; then unhandled: body: …",
+  as the workflow's fault. A preview of the step has `unhandled`, what
+  the body reads, its failure made up, and what it gives; a step after
+  the block reads the body's value. Write your own starts it at
+  `{ 'error': nodes.<step>.error.detail }`, and Give what the step got
+  instead takes it away. Joined straight to an answer, the note on what
+  the upstream sent shows only without a body; with one, the note on a
+  body that sends the run does. In a run, the tab says what the block
+  took: the failure, what the step got, and what the body gave. A
+  transform that failed says no "It gave" of its own.
+- **Fixed on the way**: with six tabs, an HTTP step's wrapped onto a
+  second row drawn over the URL label, each tab as tall as the list; they
+  now take their own height. The response tabs said a status with no
+  block fails the run; it goes to Unhandled.
 - **Checked**: `just check` (formatting, lint, race tests and coverage
   floors, 368 web tests, typecheck, the build, generated code). 27 Go
   mutations and 28 web ones, each caught but one Go: the reset of caught
@@ -1706,6 +1733,15 @@ committed (8cbc5b1). Decided while building:
   from 2xx dashed; a line dragged from a strip onto a new 500 answer; and
   `/serve` answering `503 {"error":"upstream_failed"}`. No CSP violations
   and no console problems. Not run: Chromium through `just dev`.
+- **Checked, the body**: `just check` again (379 web tests). 12 Go
+  mutations and 13 web ones, all caught: one Go and four web only after a
+  test was added. Chromium through nginx, light and dark: `pw-body`, its
+  six tabs in two rows within the list, the body and what it gives over a
+  failure made up, a run answering 503 with the body, the tab saying what
+  it took and gave, and `/serve` answering
+  `503 {"down":true,"why":"upstream_failed"}`; your Fixes check's crm
+  opened, its tabs in two rows, nothing saved. No CSP violations and no
+  console problems.
 
 ## Out of scope
 

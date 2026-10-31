@@ -653,6 +653,8 @@ components:
         gives:
           description: A transform step's value, or the workflow's output. Absent when it gave none.
           x-go-type: json.RawMessage
+        unhandled:
+          $ref: "#/components/schemas/UnhandledPreview"
         skipped:
           type: boolean
           description: A run would skip the step, or a connection's source, with these samples, as no connection into it is taken.
@@ -661,6 +663,18 @@ components:
           description: What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
           items:
             $ref: "#/components/schemas/ProblemError"
+
+    UnhandledPreview:
+      type: object
+      description: A step with an Unhandled body, failing into the block with an error made up, as a preview calls nothing.
+      required: [reads]
+      properties:
+        reads:
+          description: What the body reads, the step's own made-up failure among it.
+          x-go-type: json.RawMessage
+        gives:
+          description: What the body gives. Absent when it gave nothing, or failed, as the preview's problems then say.
+          x-go-type: json.RawMessage
 
     RenderedRequest:
       type: object
@@ -918,8 +932,12 @@ components:
         body:
           description: null when there was none, or it wasn't JSON.
           x-go-type: json.RawMessage
+        gave:
+          description: What the node's Unhandled body gave, once the block took its failure.
+          x-go-type: json.RawMessage
         truncated:
           type: boolean
+          description: The body, or what the Unhandled body gave, was cut to 256 KiB.
 
     NodeEvent:
       type: object

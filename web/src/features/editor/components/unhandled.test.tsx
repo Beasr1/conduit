@@ -9,6 +9,7 @@ import { shimReactFlow } from "@/test/react-flow";
 import { server } from "@/test/server";
 
 type Definition = components["schemas"]["Definition"];
+type Preview = components["schemas"]["Preview"];
 type Revision = components["schemas"]["Revision"];
 
 shimReactFlow();
@@ -193,4 +194,116 @@ test("a click on a transform's strip brings its Unhandled into view", async () =
   } finally {
     proto.scrollIntoView = before;
   }
+});
+
+test("Unhandled's own body: written, previewed over a failure made up, and taken away", async () => {
+  renderEditor(steps);
+  server.use(
+    http.post("/api/v1/preview", () =>
+      HttpResponse.json<Preview>({
+        reads: { input: null, nodes: {} },
+        skipped: false,
+        problems: [],
+        unhandled: {
+          reads: {
+            input: null,
+            nodes: {
+              user: {
+                error: { code: "upstream_failed", detail: "user failed" },
+              },
+            },
+          },
+          gives: { error: "user failed" },
+        },
+      }),
+    ),
+  );
+  fireEvent.click(
+    within(await screen.findByTestId("rf__node-user")).getByText("Unhandled"),
+  );
+  const panel = await screen.findByRole("complementary", { name: "HTTP step" });
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Write your own" }),
+  );
+  const body = await within(panel).findByRole("textbox", {
+    name: "Unhandled body",
+  });
+  expect(body).toHaveProperty("value", "{ 'error': nodes.user.error.detail }");
+  // It reads the step's failure, made up, and says what it gives.
+  expect(
+    await within(panel).findByRole("button", {
+      name: "Insert nodes.user.error.code",
+    }),
+  ).toBeTruthy();
+  expect(within(panel).getByText(/"error": "user failed"/)).toBeTruthy();
+  fireEvent.click(
+    within(panel).getByRole("button", {
+      name: "Give what the step got instead",
+    }),
+  );
+  expect(
+    await within(panel).findByRole("button", { name: "Write your own" }),
+  ).toBeTruthy();
+});
+
+test("with a body, Unhandled joined straight to an answer sends that, not what the upstream sent", async () => {
+  renderEditor({
+    ...steps,
+    nodes: steps.nodes.map((n) =>
+      n.id === "user" ? { ...n, unhandled: { body: "$$" } } : n,
+    ),
+    response: {
+      answers: [
+        { status: 200, from: "user" },
+        { status: 502, from: "user", unhandled: true },
+      ],
+    },
+  });
+  fireEvent.click(
+    within(await screen.findByTestId("rf__node-user")).getByText("Unhandled"),
+  );
+  const panel = await screen.findByRole("complementary", { name: "HTTP step" });
+  await within(panel).findByRole("textbox", { name: "Unhandled body" });
+  expect(within(panel).queryByText(/^Callers get whatever/)).toBeNull();
+  expect(
+    within(panel).getByText(/^This sends callers what the run read/),
+  ).toBeTruthy();
+});
+
+test("a problem in Unhandled's body marks its tab and shows under it", async () => {
+  renderEditor(
+    {
+      ...steps,
+      nodes: steps.nodes.map((n) =>
+        n.id === "user" ? { ...n, unhandled: { body: "" } } : n,
+      ),
+    },
+    [{ pointer: "/nodes/0/unhandled/body", code: "required", detail: "" }],
+  );
+  fireEvent.click(await screen.findByText("user"));
+  const panel = await screen.findByRole("complementary", { name: "HTTP step" });
+  const tab = within(panel).getByRole("tab", { name: /^Unhandled/ });
+  expect(tab.textContent).toBe("Unhandled (1 problem)");
+  fireEvent.click(tab);
+  expect(
+    await within(panel).findByText(
+      "Write its body, or give what the step got instead.",
+    ),
+  ).toBeTruthy();
+});
+
+test("a body that sends the run is warned about only once Unhandled answers", async () => {
+  renderEditor({
+    ...steps,
+    nodes: steps.nodes.map((n) =>
+      n.id === "user" ? { ...n, unhandled: { body: "$$" } } : n,
+    ),
+  });
+  fireEvent.click(
+    within(await screen.findByTestId("rf__node-user")).getByText("Unhandled"),
+  );
+  const panel = await screen.findByRole("complementary", { name: "HTTP step" });
+  await within(panel).findByRole("textbox", { name: "Unhandled body" });
+  // Until then, only the steps after it read what it gives.
+  expect(within(panel).queryByText(/^This sends callers/)).toBeNull();
 });

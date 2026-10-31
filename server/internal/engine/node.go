@@ -52,9 +52,9 @@ func document(input json.RawMessage, parts []docPart) ([]byte, error) {
 
 // exec runs node i on its own goroutine and reports back whatever happens,
 // a panic included. A failure of the node's own goes to its Unhandled block
-// when a line leaves that: the node ends failed, and the run goes on down
-// those lines. The run's end, by its deadline or a failure elsewhere, and a
-// panic, our bug, never do.
+// when a line leaves that: the node ends failed, giving what the block's
+// body gives, and the run goes on down those lines. The run's end, by its
+// deadline or a failure elsewhere, and a panic, our bug, never do.
 func (r *run) exec(i int, parts []docPart) {
 	var o outcome
 	defer func() {
@@ -81,8 +81,18 @@ func (r *run) exec(i int, parts []docPart) {
 			return
 		}
 		o.result.Err, o.result.Caught = o.err, true
-		if o.entry, o.err = caughtEntry(o.result); o.err != nil {
-			o.result.Caught = false
+		o.entry, o.err = caughtEntry(o.result)
+		if o.err == nil && n.unhandled != nil {
+			if o.result.Gave, err = r.unhandledGives(n, parts, o.entry); err != nil {
+				// Its body failing fails the run, and says what the block took
+				// too, as words: the body is the cause.
+				o.err = fmt.Errorf("%s; then unhandled: body: %w", o.result.Err.Error(), err)
+			} else {
+				o.entry, o.err = caughtEntry(o.result)
+			}
+		}
+		if o.err != nil {
+			o.result.Err, o.result.Caught = nil, false
 			return
 		}
 		on = workflow.OnUnhandled
@@ -274,26 +284,45 @@ func lowerHeaders(header http.Header) map[string]string {
 	return headers
 }
 
+// unhandledGives is what node n's Unhandled body gives over what the node
+// read, its own failure, entry, among it.
+func (r *run) unhandledGives(n *node, parts []docPart, entry json.RawMessage) (json.RawMessage, error) {
+	doc, err := document(r.input, append(parts[:len(parts):len(parts)], docPart{id: n.id, entry: entry}))
+	if err != nil {
+		return nil, err
+	}
+	return n.unhandled.Eval(r.ctx, doc)
+}
+
 // caughtEntry is the part of the data document of a node whose Unhandled
 // block took its failure: the failure as error, {code, detail}, after the
 // status, headers and body an http node got back, when it got an answer.
+// What the block's body gave, once it has, is the body.
 func caughtEntry(res NodeResult) (json.RawMessage, error) {
+	return failureEntry(res.HTTPStatus, res.Header, res.caughtBody(), Classify(res.Err), res.Err.Error())
+}
+
+// failureEntry is a failed node's part of the data document: its status,
+// headers and body when it got an answer, else its body when it has one,
+// and the failure as error.
+func failureEntry(status int, header http.Header, body json.RawMessage, code, detail string) (json.RawMessage, error) {
 	type failure struct {
 		Code   string `json:"code"`
 		Detail string `json:"detail"`
 	}
-	f := failure{Code: Classify(res.Err), Detail: res.Err.Error()}
-	if res.HTTPStatus == 0 {
+	f := failure{Code: code, Detail: detail}
+	if status == 0 {
 		return json.Marshal(struct {
-			Error failure `json:"error"`
-		}{f})
+			Body  json.RawMessage `json:"body,omitempty"`
+			Error failure         `json:"error"`
+		}{body, f})
 	}
 	return json.Marshal(struct {
 		Status  int               `json:"status"`
 		Headers map[string]string `json:"headers"`
 		Body    json.RawMessage   `json:"body"` // nil marshals as null
 		Error   failure           `json:"error"`
-	}{res.HTTPStatus, lowerHeaders(res.Header), res.Body, f})
+	}{status, lowerHeaders(header), body, f})
 }
 
 func (r *run) transform(n *node, doc []byte) outcome {
