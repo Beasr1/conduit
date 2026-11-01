@@ -187,15 +187,8 @@ func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequ
 			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "Preview a step or a connection, not both.",
 			errors: []gen.ProblemError{{Pointer: "/edge", Code: "not_allowed", Detail: "a preview is of a node or an edge, not both"}},
 		}
-	case b.Way != nil && b.Node == "":
-		return nil, &problem{
-			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "A way is a connection into a step: name the step too.",
-			errors: []gen.ProblemError{{Pointer: "/node", Code: "required", Detail: "a way comes into a node, so it needs node"}},
-		}
 	case b.Edge != nil:
 		pv, err = engine.SimulateEdge(ctx, &b.Definition, *b.Edge)
-	case b.Way != nil:
-		pv, err = engine.SimulateWay(ctx, &b.Definition, b.Node, *b.Way)
 	default:
 		pv, err = engine.Simulate(ctx, &b.Definition, b.Node)
 	}
@@ -204,11 +197,6 @@ func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequ
 		return nil, &problem{
 			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "There's no such step to preview.",
 			errors: []gen.ProblemError{{Pointer: "/node", Code: "unknown_node", Detail: fmt.Sprintf("no node has the id %q", b.Node)}},
-		}
-	case errors.Is(err, engine.ErrNoSuchWay):
-		return nil, &problem{
-			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "There's no such connection into the step to preview it by.",
-			errors: []gen.ProblemError{{Pointer: "/way", Code: "unknown_way", Detail: fmt.Sprintf("no edge into %q is at %d", b.Node, *b.Way)}},
 		}
 	case errors.Is(err, engine.ErrNoSuchEdge):
 		return nil, &problem{
@@ -221,6 +209,9 @@ func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequ
 	out := gen.PreviewDefinition200JSONResponse{Reads: pv.Reads, Gives: pv.Gives, Taken: pv.Taken, Skipped: pv.Skipped, Problems: problemErrors(pv.Problems)}
 	if u := pv.Unhandled; u != nil {
 		out.Unhandled = gen.UnhandledPreview{Reads: u.Reads, Gives: u.Gives}
+	}
+	for _, w := range pv.Ways {
+		out.Ways = append(out.Ways, gen.WayPreview{Edge: w.Edge, Gives: w.Gives, Skipped: w.Skipped})
 	}
 	if s := pv.Sends; s != nil {
 		headers := make(map[string]string, len(s.Header))

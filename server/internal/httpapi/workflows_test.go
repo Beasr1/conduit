@@ -353,21 +353,24 @@ func TestPreview(t *testing.T) {
 		t.Errorf("preview of a step and a connection = %d %+v", r.status, p)
 	}
 
-	// A step as a run comes by one connection into it: crm's, from user.
-	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, "node": "crm", "way": 0}`)
+	// A transform two lines may come into gives a result for a run by each.
+	merging := `{"nodes": [
+		{"id": "user", "kind": "http", "request": {"method": "GET", "url": "https://users.example.com/v1"},
+		 "sample": {"body": {"email": "ada@example.com"}}, "outputs": [{"status": 404, "sample": {"body": {"error": "gone"}}}]},
+		{"id": "found", "kind": "transform", "expr": "$exists(nodes.user.body.email) ? 'found' : 'gone'"}],
+		"edges": [{"from": "user", "to": "found"}, {"from": "user", "to": "found", "on": 404}]}`
+	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+merging+`, "node": "found"}`)
 	pv = gen.Preview{}
-	if err := json.Unmarshal(r.body, &pv); err != nil || r.status != http.StatusOK || string(pv.Sends.Body) != `{"email":"ada@example.com"}` {
-		t.Errorf("preview by a way = %d %s", r.status, r.body)
+	if err := json.Unmarshal(r.body, &pv); err != nil || r.status != http.StatusOK || len(pv.Ways) != 2 ||
+		pv.Ways[0].Edge != 0 || string(pv.Ways[0].Gives) != `"found"` || pv.Ways[1].Edge != 1 || string(pv.Ways[1].Gives) != `"gone"` {
+		t.Errorf("preview of a transform two lines may come into = %d %s", r.status, r.body)
 	}
-	for _, body := range []string{`"node": "user", "way": 0`, `"node": "crm", "way": -1`} {
-		r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, `+body+`}`)
-		if p := problemOf(t, r); r.status != http.StatusUnprocessableEntity || pointers(p) != "/way unknown_way" {
-			t.Errorf("preview by a way into no such step (%s) = %d %+v", body, r.status, p)
-		}
-	}
-	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, "way": 0}`)
-	if p := problemOf(t, r); r.status != http.StatusUnprocessableEntity || pointers(p) != "/node required" {
-		t.Errorf("preview by a way into no step = %d %+v", r.status, p)
+	// A run by a line whose condition doesn't hold skips it.
+	untaken := strings.Replace(merging, `"on": 404}`, `"on": 404, "when": "false"}`, 1)
+	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+untaken+`, "node": "found"}`)
+	pv = gen.Preview{}
+	if err := json.Unmarshal(r.body, &pv); err != nil || len(pv.Ways) != 2 || pv.Ways[0].Skipped || !pv.Ways[1].Skipped || pv.Ways[1].Gives != nil {
+		t.Errorf("preview by a line not taken = %d %s", r.status, r.body)
 	}
 }
 

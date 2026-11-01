@@ -11,7 +11,7 @@ paths: {}
 components:
   schemas:
     Definition:
-      description: A workflow. A node runs once its parents have finished, an http node if every edge into it was taken and a transform node if any was. Otherwise it's skipped.
+      description: A workflow. A node runs once its parents have finished, an http node if every edge into it was taken, and a transform node if every required one was and, with none required, any was. Otherwise it's skipped.
       type: object
       required: [nodes]
       additionalProperties: false
@@ -109,7 +109,7 @@ components:
     NodeKind:
       type: string
       enum: [http, transform]
-      description: An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once any was, reading whichever nodes came; one with no edge into it runs first.
+      description: An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once every required edge into it was and, with none required, any was, reading whichever nodes came; one with no edge into it runs first.
 
     Output:
       type: object
@@ -302,3 +302,6 @@ components:
         when:
           type: string
           description: A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source answered through the edge's output, or failed into its Unhandled block, and this is true. Absent means true.
+        required:
+          type: boolean
+          description: Into a transform node, the edge has to be taken for the node to run, as every edge into an http node has; without it, the transform is skipped. Absent, an edge into a transform may not be taken, its node then missing from what the transform reads.

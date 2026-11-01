@@ -7,7 +7,9 @@ with JSONata. A Go engine runs it, fanning out in parallel.
 **Status: plan 04, the graph editor, is under way: phases A, B and C are
 committed, with phase D's samples, previews, outputs by status and a step's
 blocks, D's answers, a step's Unhandled block, and strict joins
-(2026-11-01); a transform merging its lines, and its cases as exits, are built. Next: Phase E, the browser test.** The web app signs in
+(2026-11-01); a transform merging its lines, its cases as exits, and its
+lines as its parameters, required or not, are built. Next: Phase E, the
+browser test.** The web app signs in
 with a session cookie, lists workflows and
 creates them, and edits, checks, saves and publishes one in graph mode,
 previewing what each step reads and sends over sample data, branching on
@@ -20,8 +22,10 @@ answers as an HTTP step does, down its own lines, and none holding fails
 the step into its Unhandled. Unhandled answers a run that gives none. A step's own
 Unhandled block takes its failures, giving a body you write if you write
 one, and the run goes on down its line. An HTTP step runs only when every
-line into it is taken; a transform waits for them all too, and runs if any
-came, its expression making its value from what did.
+line into it is taken; a transform waits for them all too, and runs if
+every line marked required came and, with none marked, any did, its
+expression making its value from what did. Its preview is a run by each
+line that may come or not, over what those runs read, merged.
 What is left is in
 docs/plans/04-graph-editor.md; the bigger picture is docs/plans/README.md.
 

@@ -11,7 +11,9 @@ and strict joins (e898238). A step that runs if any of its lines came,
 once all have ended, was built as Either (4877f7a), reworked into Merge
 (4c8ef26), then folded into transform, which now merges its lines, and a
 transform's cases became its exits: "a step and a transform", parts 1 and
-2 (2026-11-01). Phase E, the browser test, comes after.
+2 (84fc8dd), then its lines its parameters, each required or not, and its
+preview a run by each way (2026-11-01). Phase E, the browser test, comes
+after.
 Building Phase A raised question 8, since answered.
 
 ## Goal
@@ -1122,6 +1124,93 @@ Both:
 - [x] Docs: the roadmap's D13 and rule, plan 02, CLAUDE.md, web.md,
       sources.md, and this plan as built.
 
+**Phase D: a transform's lines as its parameters** (2026-11-01, your
+call, before Phase E)
+
+You see a transform as a function: the steps before it are its parameters,
+any of which can be missing, and some it can't do without. Its preview
+picked one run at a time, but lines can come together, and a transform is
+a merger. Decided with you on 2026-11-01:
+- **Required or optional lines.** A line into a transform is optional, as
+  now: its step may be missing, and reads as nothing. Marked required, it
+  must come: without it the transform is skipped, as an HTTP step is, and
+  so are the steps after it. With none required, it runs if any line
+  came, as now. Leaving it to the expression, `$exists` and `$error`, was the
+  other option.
+- **Its preview shows them all.** No picker: its Input holds every step it
+  can read, each with its sample, and the expression's conditions decide
+  what to make of whatever comes. One run at a time, picked, was the
+  other option.
+
+Mine, while planning, for you to veto:
+- **Where it's marked**: `required: true` on the edge, set in its line's panel,
+  "Required: the transform runs only if this line comes". Only a
+  transform's lines take it, as an HTTP step needs every line anyway.
+  Required lines are solid; optional ones dashed, once a transform has
+  more than one line in.
+- **What a run checks**: once every line into the transform has ended, it
+  runs if every required line came, and, with none required, if any did.
+  The check flags required lines that can't come in one run (never_runs),
+  as it does an HTTP step's.
+- **What the preview gives**: a result for each line it can come by, as
+  the conditions pick differently in each: "By test_400 · 2xx: {...}",
+  "By crm · 500: nothing, crm has no sample for it". With one line, or
+  every line required, that's one run and one result. The Input merges
+  what those runs read; a step they read differently, as prefs answering
+  2xx in one and 400 in another, shows the first.
+- **The API**: a preview of such a transform gives `ways`, a result each,
+  beside `reads`, the merged Input; the preview request's `way` goes, as
+  nothing picks one now.
+- [x] Schema, validation and routes: `required` on an edge into a
+      transform.
+- [x] The engine: the join; a preview's merged reads and a result per way.
+- [x] The editor: Required in a line's panel, solid and dashed lines, the
+      merged Input, a result per way, the picker gone.
+- [x] Failing tests first; mutation checks; Chromium through nginx.
+- [x] Docs: the roadmap's rule, plan 02, CLAUDE.md, web.md, and this plan
+      as built (A transform's lines as its parameters, as built).
+
+**Phase D: headers sent when they're needed, and the caller's to read**
+(2026-11-01, your call, before Phase E; held, your call, the same day)
+
+You asked for JSONata on headers "to ensure headers are propagated when
+and if required". A step's headers are templates today: each is always
+sent, one whose placeholder gives nothing fails the step, and a served run
+reads only the request's body, so there's nothing to propagate. Decided
+with you on 2026-11-01:
+- **A condition per header.** A header keeps its row and its template, and
+  may have a condition, JSONata as a line's or a case's: it's sent only
+  when that holds; empty, always. One JSONata object for every header, as
+  the body is, and a template that gives nothing leaving its header out,
+  were the other options.
+- **A run reads the caller's headers**, as `request.headers`, names in lower
+  case, beside `input`, so a step can forward a trace id or a token for an
+  upstream. What reaches Conduit as Conduit's own is held back:
+  `authorization`, which on /serve is Conduit's token, `proxy-authorization`
+  and `cookie`, the session.
+
+Mine, while planning, for you to veto:
+- **The conditions sit beside the headers, by name**:
+  `` header_when: {"X-Trace": "$exists(request.headers.`x-trace`)"} `` on the
+  request, so a header saved before stays as it is; a condition for a
+  header the request doesn't have is a problem.
+- **Where the caller's headers come from**: a served run, the request it
+  answers; a run from the editor, none; a preview, the workflow's sample
+  headers, a field in Workflow settings beside the sample input, which
+  the Input tree shows as `request.headers`.
+- **A run's record keeps them**, redacted as a step's sent headers are, so
+  the run view can say what came.
+- **Query parameters** stay templates; a condition there can come when one
+  needs it.
+- [ ] Schema: `header_when`, the sample headers, `request.headers` in the data
+      document, what's held back.
+- [ ] The engine and runs: a header sent only when its condition holds;
+      served runs taking the caller's headers, recorded redacted.
+- [ ] The editor: a condition on each header row, the sample headers in
+      Workflow settings, `request.headers` in the Input tree.
+- [ ] Failing tests first; mutation checks; Chromium through nginx.
+- [ ] Docs: the roadmap, CLAUDE.md, web.md, and this plan as built.
+
 **Phase E: the browser test**
 - [ ] Playwright, against the test upstream (built in C), and the Done flow.
 - [ ] web.md corrected; CLAUDE.md, repo.md and the roadmap updated.
@@ -2002,6 +2091,64 @@ were committed (80d55d4, 4fb0aec). Decided while building:
   saying it can never run, and why. No CSP violations and no console
   problems.
 
+## A transform's lines as its parameters, as built
+
+Built on 2026-11-01 on top of "a step and a transform" (84fc8dd), with the
+panel's tabs first, staged before it. Decided while building:
+- **One rule for both**: the engine's join and a preview's are one
+  function, so a run and a preview agree on when a transform runs: every
+  line into it marked required taken and, with none marked, any. Validation
+  joins a transform's required lines as it joins an HTTP step's, so
+  never-runs and the answers' overlap see them; with none marked, its route
+  is the merge's, as before. `required` on a line into an HTTP step is a
+  problem (`not_allowed`); its panel shows Required only then, so the mark
+  can come off, and the problem list takes the cursor there.
+- **A preview comes by the required lines into every transform it runs**,
+  not only the one previewed, the steps before each answering as they must
+  for it to come: a step after the transform, and a line out of it, would
+  otherwise see it skipped. The output's preview still has every HTTP step
+  answer 2xx. A line marked required into an HTTP step, or whose end names
+  no step, leads nowhere.
+- **Ways, as built**: a run by each line that may not come, once there are
+  two or more; with fewer, one run, by the required lines. A run by a way
+  that skips the transform says so: "By fallback · 2xx, a run would skip
+  this step: a connection it needs isn't taken." A problem two runs share
+  is listed once. The Unhandled body reads what the runs read, merged, and
+  isn't previewed when every run skips the step.
+- **Cases by way**: each tab says, under "With these samples", what holds
+  in the run by each line: "It answers 200:" and its body, "light holds,
+  not this.", or "Nothing: the problems above say why." when no case held
+  or one failed, as the merged problems can't tell which run's it was.
+- **A way from a case is named by it**, "check · found" rather than
+  "check", in the preview and in It came by.
+- **The words**: a line's panel says how it joins: needed, as every line
+  into an HTTP step and a transform's lone line; required; one of several
+  ways beside required lines ("runs once its required lines are taken,
+  with this way or without it"); or one of several, none required ("runs
+  if any of its ways is taken"). A transform's never-runs problem ends "It
+  runs only when every line into it marked required is taken; to run it
+  after whichever comes, mark none of them required."
+- **Divergence**: your Fixes check's merge_200 (revision 41) now lists four
+  notes in its Input: crm's 2xx and 500 and orders' 2xx have no samples,
+  and Case 1's body gives no value in the runs by crm, which the picker,
+  starting at test_400, never showed. A line into a transform its required
+  line skipped shows "not taken" in a run even when its own step answered,
+  as for an HTTP step: taken means the step it leads to ran.
+- **Checked**: Go tests under `-race`, golangci-lint, web typecheck, lint
+  and tests (see the wrap-up for `just check`). 50 mutations, 27 in the
+  server (validation, routes, the join, ways, steering, the API) and 23 in
+  the editor, each caught, two only after a test was added: a required
+  line into an HTTP step leading the preview, and the steps before two
+  required lines led only towards the last. Chromium through nginx, light
+  and dark: a transform's preview by prefs · 2xx and fallback · 2xx, the
+  Input merged, no picker; a transform with cases saying what holds by
+  each; Required marked from a line's panel, that line solid, the other
+  dashed, the words as above, and the transform then previewed by the
+  required line (prefs answering 400); no Required on a line into an HTTP
+  step; a run in which the required line wasn't taken skipping t, and one
+  in which it was answering 200; your Fixes check opened, nothing saved, no
+  problems, merge_200 as above. No CSP violations and no console problems.
+
 ## Cases as exits, as built
 
 Part 2 of "a step and a transform", built on 2026-11-01 on top of part 1,
@@ -2035,6 +2182,11 @@ staged. Decided while building:
   tab.
 - **Its card** keeps the status whole and lets the name give way, as the
   status names the exit.
+- **Tabs first** (your note, after 84fc8dd): the tabs come right after the
+  step's id, as an HTTP step's do, and each case's tab holds what it
+  reads, with the way picker, as its JSONata is written from that; a
+  field picked goes into that tab's field the cursor was last in, else its
+  condition.
 - **Mutations**: one survived, the engine writing a body left out as null:
   json.RawMessage prints nil as null in this Go (1.27), so that line was a
   second check and went, a comment saying why.

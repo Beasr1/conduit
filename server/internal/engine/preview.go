@@ -28,10 +28,6 @@ var ErrNoSuchNode = errors.New("no step has that id")
 // ErrNoSuchEdge is a preview of a connection the definition doesn't have.
 var ErrNoSuchEdge = errors.New("no connection is at that place")
 
-// ErrNoSuchWay is a preview by a connection that doesn't come into the
-// step previewed.
-var ErrNoSuchWay = errors.New("no connection into that step is at that place")
-
 // Preview is what a step would read and do in a run, or whether a run would
 // take a connection, simulated over the definition's samples.
 type Preview struct {
@@ -42,6 +38,11 @@ type Preview struct {
 	Sends *SentRequest
 	// Gives is a transform step's value, or the workflow's output.
 	Gives json.RawMessage
+	// Ways is a transform step two or more of whose connections a run may
+	// not come by, not being required: what it gives in a run by each, in
+	// the definition's order. Reads is then what those runs read, merged,
+	// and Gives is nil.
+	Ways []WayPreview
 	// Taken says whether a run would take the connection previewed. It's
 	// nil for a step, and when the preview can't tell, as its problems say.
 	Taken *bool
@@ -56,33 +57,30 @@ type Preview struct {
 	Problems workflow.Problems
 }
 
+// WayPreview is what a transform gives in a run that comes by one
+// connection into it.
+type WayPreview struct {
+	// Edge is the connection, by its place in the definition's edges.
+	Edge int
+	// Gives is the transform's value in that run.
+	Gives json.RawMessage
+	// Skipped says that run would skip the transform: the connection, or a
+	// required one, isn't taken.
+	Skipped bool
+}
+
 // Simulate previews step id, or the workflow's output when id is "", over
 // d's samples, and calls nothing. Each http step before it answers with the
 // sample of an output that leads to it, 2xx when that does, and each
 // transform before it is evaluated, and so is each connection's condition,
 // as a run would. A step only whose Unhandled block leads to it fails, with
-// an error made up. Previewing the output, every http step answers 2xx. It
-// works on a definition with problems, compiling what it can and reporting
-// what's in the way.
-func Simulate(ctx context.Context, d *workflow.Definition, id string) (*Preview, error) {
-	return simulate(ctx, d, id, -1)
-}
-
-// SimulateWay previews step id as Simulate does, in a run that comes by the
-// connection at place k in d's edges, one into the step: the steps before
-// the connection's source answer through the outputs that lead to it, and
-// the source through the connection's. A transform any of whose
-// connections may come is previewed by each this way.
-func SimulateWay(ctx context.Context, d *workflow.Definition, id string, k int) (*Preview, error) {
-	if k < 0 {
-		return nil, ErrNoSuchWay
-	}
-	return simulate(ctx, d, id, k)
-}
-
-// simulate previews step id, or the output when id is "", by way, an edge
-// into the step, or by none when way is -1.
-func simulate(ctx context.Context, d *workflow.Definition, id string, way int) (pv *Preview, err error) {
+// an error made up. Previewing the output, every http step answers 2xx. The
+// required connections into each transform it runs come, the steps before
+// them answering through the outputs that lead to them, and a transform
+// with two or more connections that aren't is previewed in a run by each.
+// It works on a definition with problems, compiling what it can and
+// reporting what's in the way.
+func Simulate(ctx context.Context, d *workflow.Definition, id string) (pv *Preview, err error) {
 	defer catch(&pv, &err)
 	target := -1
 	if id != "" {
@@ -90,31 +88,82 @@ func simulate(ctx context.Context, d *workflow.Definition, id string, way int) (
 			return nil, ErrNoSuchNode
 		}
 	}
-	s, problems := newSim(ctx, d)
-	if way >= 0 {
-		if way >= len(d.Edges) || target < 0 || d.Edges[way].To != id || s.p.edges[way].from == s.p.edges[way].to {
-			return nil, ErrNoSuchWay
-		}
+	p, problems := build(d)
+	if ways := p.ways(target); len(ways) > 1 {
+		return simulateWays(ctx, p, d, target, problems, ways), nil
 	}
-	s.aim(target, problems)
-	if way >= 0 {
-		s.steer(way)
-	}
-	pv = &Preview{}
-	if !s.runs(target) {
-		// On or after a loop of connections: nothing runs it. Validation
-		// reports the loop.
-		pv.Reads, _ = document(s.input, nil)
-		pv.Problems = s.problems
-		return pv, nil
-	}
-	if target < 0 {
-		s.output(pv)
-	} else {
-		s.step(pv, target)
+	s := simOf(ctx, p, d)
+	pv, runs := s.simulate(target, problems)
+	if runs && target >= 0 && p.nodes[target].unhandled != nil {
+		s.unhandled(pv, target)
 	}
 	pv.Problems = s.problems
 	return pv, nil
+}
+
+// simulateWays previews transform t by each of ways, connections into it
+// a run may not come by: a run that comes by it, and by the required ones,
+// gives a value. What t reads is what those runs read, merged, a step read
+// differently by two as the first read it, and its Unhandled body reads
+// that. A problem two runs have is listed once.
+func simulateWays(ctx context.Context, p *Program, d *workflow.Definition, t int, problems workflow.Problems, ways []int) *Preview {
+	pv := &Preview{Skipped: true}
+	merged := simOf(ctx, p, d)
+	ran := false
+	for _, k := range ways {
+		s := simOf(ctx, p, d)
+		way, runs := s.simulate(t, problems, k)
+		pv.Ways = append(pv.Ways, WayPreview{Edge: k, Gives: way.Gives, Skipped: way.Skipped})
+		pv.Skipped = pv.Skipped && way.Skipped
+		ran = ran || runs
+		for i, e := range s.entry {
+			if merged.entry[i] == nil {
+				merged.entry[i] = e
+			}
+		}
+		for _, pr := range s.problems {
+			if !slices.Contains(merged.problems, pr) {
+				merged.problems = append(merged.problems, pr)
+			}
+		}
+	}
+	var err error
+	if pv.Reads, err = document(merged.input, merged.parts(t)); err != nil {
+		merged.problem("/nodes/"+strconv.Itoa(t), "evaluation_failed", "%v", err)
+	} else if ran && p.nodes[t].unhandled != nil {
+		merged.unhandled(pv, t)
+	}
+	pv.Problems = merged.problems
+	return pv
+}
+
+// ways is the connections into node t a run may not come by, not being
+// required, in the definition's order; nil but for a transform.
+func (p *Program) ways(t int) []int {
+	if t < 0 || p.nodes[t].kind != workflow.NodeKindTransform {
+		return nil
+	}
+	return slices.DeleteFunc(slices.Clone(p.nodes[t].in), func(k int) bool { return p.edges[k].required })
+}
+
+// simulate previews node target, or the output when it's -1, in a run that
+// comes by the edges by into it: what it reads, and what it sends or gives.
+// runs says whether the run starts target.
+func (s *sim) simulate(target int, problems workflow.Problems, by ...int) (pv *Preview, runs bool) {
+	s.aim(target, problems, by...)
+	pv = &Preview{}
+	switch {
+	case !s.runs(target):
+		// On or after a loop of connections: nothing runs it. Validation
+		// reports the loop.
+		pv.Reads, _ = document(s.input, nil)
+		return pv, false
+	case target < 0:
+		s.output(pv)
+		return pv, true
+	default:
+		return pv, s.step(pv, target)
+	}
 }
 
 // SimulateEdge previews the connection at place k in d's edges: what its
@@ -206,6 +255,11 @@ type sim struct {
 // with it.
 func newSim(ctx context.Context, d *workflow.Definition) (*sim, workflow.Problems) {
 	p, problems := build(d)
+	return simOf(ctx, p, d), problems
+}
+
+// simOf is a preview's state at its start, over p, compiled from d.
+func simOf(ctx context.Context, p *Program, d *workflow.Definition) *sim {
 	input := d.SampleInput
 	if len(input) == 0 {
 		input = json.RawMessage("null")
@@ -222,7 +276,7 @@ func newSim(ctx context.Context, d *workflow.Definition) (*sim, workflow.Problem
 		via:     make([]int, len(p.nodes)),
 		skipped: make([]bool, len(p.nodes)),
 		taken:   make([]bool, len(p.edges)),
-	}, problems
+	}
 }
 
 func (s *sim) problem(pointer, code, format string, args ...any) {
@@ -231,12 +285,29 @@ func (s *sim) problem(pointer, code, format string, args ...any) {
 
 // aim points the preview at target, a node, or the output when it's -1:
 // the nodes it runs, the output each of them answers through, and the
-// problems in its way.
-func (s *sim) aim(target int, problems workflow.Problems) {
+// problems in its way. A node's preview comes by the edges by into it, and
+// by each required edge into a transform it runs, so the transform does.
+func (s *sim) aim(target int, problems workflow.Problems, by ...int) {
 	s.target = target
 	s.needed = s.need(target)
 	s.choose(target)
+	if target >= 0 {
+		s.steer(append(s.required(), by...))
+	}
 	s.keep(problems)
+}
+
+// required is the required edges into the transforms the preview runs, in
+// the definition's order.
+func (s *sim) required() []int {
+	var out []int
+	for k, e := range s.p.edges {
+		// An edge build didn't wire has both ends at 0.
+		if e.required && e.from != e.to && s.needed[e.to] && s.p.nodes[e.to].kind == workflow.NodeKindTransform {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // need marks the nodes a preview of target runs: its ancestors and itself,
@@ -269,18 +340,24 @@ func (s *sim) choose(target int) {
 	}
 }
 
-// steer has the preview come by edge k into its target: the edge's source
-// answers through the edge's output, and each node before the source
-// through one leading on towards it.
-func (s *sim) steer(k int) {
-	e := s.p.edges[k]
-	toward := s.need(e.from)
+// steer has the preview come by the edges ks into its target: each edge's
+// source answers through the edge's output, and each node before them
+// through one leading on towards them.
+func (s *sim) steer(ks []int) {
+	toward := make([]bool, len(s.p.nodes))
+	for _, k := range ks {
+		for i, need := range s.need(s.p.edges[k].from) {
+			toward[i] = toward[i] || need
+		}
+	}
 	for i := range s.p.nodes {
-		if toward[i] && i != e.from {
+		if toward[i] {
 			s.via[i] = s.lead(i, toward)
 		}
 	}
-	s.via[e.from] = e.on
+	for _, k := range ks {
+		s.via[s.p.edges[k].from] = s.p.edges[k].on
+	}
 }
 
 // lead is the output node i answers through to lead on towards the nodes
@@ -397,20 +474,15 @@ func (s *sim) runs(target int) bool {
 	return true
 }
 
-// reached says whether a run would start node i, as every connection into
-// it is taken, or any into a transform is. One from a step the preview
+// reached says whether a run would start node i, by the connections into
+// it that are taken, as a run joins them. One from a step the preview
 // couldn't run, for want of a sample or a working expression, might be, so
 // it counts; one from a step it skipped isn't.
 func (s *sim) reached(i int) bool {
-	in := s.p.nodes[i].in
-	might := func(k int) bool {
+	return s.p.joins(i, func(k int) bool {
 		from := s.p.edges[k].from
 		return s.taken[k] || !s.skipped[from] && s.entry[from] == nil
-	}
-	if s.p.nodes[i].kind == workflow.NodeKindTransform && len(in) > 0 {
-		return slices.ContainsFunc(in, might)
-	}
-	return !slices.ContainsFunc(in, func(k int) bool { return !might(k) })
+	})
 }
 
 // parts is what node i's expressions see: its ancestors that ran, as a
@@ -533,18 +605,19 @@ func (s *sim) conditions(i int) {
 }
 
 // step previews node t itself: what it reads, and what it sends or gives.
-func (s *sim) step(pv *Preview, t int) {
+// It says whether the run starts t.
+func (s *sim) step(pv *Preview, t int) bool {
 	n := &s.p.nodes[t]
 	ptr := "/nodes/" + strconv.Itoa(t)
 	pv.Skipped = !s.reached(t)
 	doc, err := document(s.input, s.parts(t))
 	if err != nil {
 		s.problem(ptr, "evaluation_failed", "%v", err)
-		return
+		return false
 	}
 	pv.Reads = doc
 	if pv.Skipped {
-		return
+		return false
 	}
 	switch {
 	case n.kind == workflow.NodeKindHTTP && s.d.Nodes[t].Request != nil:
@@ -570,9 +643,7 @@ func (s *sim) step(pv *Preview, t int) {
 			}
 		}
 	}
-	if n.unhandled != nil {
-		s.unhandled(pv, t)
-	}
+	return true
 }
 
 // output previews the workflow's output, over every node that ran, as a

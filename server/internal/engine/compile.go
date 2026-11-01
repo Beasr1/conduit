@@ -95,6 +95,7 @@ type edge struct {
 	from, to int
 	on       int                  // the output of from it leaves from: a status, 0 for 2xx, or workflow.OnUnhandled
 	when     *transform.Condition // nil: always taken
+	required bool                 // into a transform, it has to be taken for the transform to run
 }
 
 // Compile checks d and compiles every expression in it. The error, when
@@ -147,7 +148,7 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 		}
 	}
 	for k, e := range d.Edges {
-		p.edges[k].on = e.Output()
+		p.edges[k].on, p.edges[k].required = e.Output(), e.Required
 		if e.When != "" {
 			when, err := transform.CompileCondition(e.When)
 			c.check(fmt.Sprintf("/edges/%d/when", k), err)

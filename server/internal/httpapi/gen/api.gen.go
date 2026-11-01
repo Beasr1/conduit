@@ -189,7 +189,7 @@ func (e RunSummaryTrigger) Valid() bool {
 
 // CreateWorkflow defines model for CreateWorkflow.
 type CreateWorkflow struct {
-	// Definition A workflow. A node runs once its parents have finished, an http node if every edge into it was taken and a transform node if any was. Otherwise it's skipped.
+	// Definition A workflow. A node runs once its parents have finished, an http node if every edge into it was taken, and a transform node if every required one was and, with none required, any was. Otherwise it's skipped.
 	Definition externalRef0.Definition `json:"definition"`
 	Name       string                  `json:"name"`
 	Slug       string                  `json:"slug"`
@@ -281,13 +281,13 @@ type NodeRunStatus string
 
 // Preview defines model for Preview.
 type Preview struct {
-	// Gives A transform step's value, or the workflow's output. Absent when it gave none.
+	// Gives A transform step's value, or the workflow's output. Absent when it gave none, and for a transform with ways, as each way gives its own.
 	Gives json.RawMessage `json:"gives,omitempty,omitzero"`
 
 	// Problems What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
 	Problems []ProblemError `json:"problems"`
 
-	// Reads The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples.
+	// Reads The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples. For a transform with ways, what the run by each reads, merged, a node read differently by two as the first read it.
 	Reads json.RawMessage `json:"reads"`
 
 	// Sends An http step's request, as a run would send it. A part that didn't render is left out, and its problem says why.
@@ -301,11 +301,14 @@ type Preview struct {
 
 	// Unhandled A step with an Unhandled body, failing into the block with an error made up, as a preview calls nothing.
 	Unhandled UnhandledPreview `json:"unhandled,omitempty,omitzero"`
+
+	// Ways A transform two or more of whose edges aren't required, a result for a run that comes by each of those, in the definition's order. Each other step answers through the outputs that lead to that edge's source.
+	Ways []WayPreview `json:"ways,omitempty,omitzero"`
 }
 
 // PreviewRequest defines model for PreviewRequest.
 type PreviewRequest struct {
-	// Definition A workflow. A node runs once its parents have finished, an http node if every edge into it was taken and a transform node if any was. Otherwise it's skipped.
+	// Definition A workflow. A node runs once its parents have finished, an http node if every edge into it was taken, and a transform node if every required one was and, with none required, any was. Otherwise it's skipped.
 	Definition externalRef0.Definition `json:"definition"`
 
 	// Edge The connection to preview, by its place in the definition's edges. Not with node.
@@ -313,9 +316,6 @@ type PreviewRequest struct {
 
 	// Node The step to preview, by id. Absent, with no edge, means the workflow's output.
 	Node string `json:"node,omitempty,omitzero"`
-
-	// Way With node, a connection into that step, by its place in the definition's edges, that the run previewed comes by, as a transform any of whose connections may come. The steps before that connection's source answer through the outputs that lead to it, and the source through the connection's. Absent, each step answers 2xx where that leads on.
-	Way *int `json:"way,omitempty"`
 }
 
 // Problem defines model for Problem.
@@ -373,7 +373,7 @@ type RenderedRequest struct {
 type Revision struct {
 	CreatedAt time.Time `json:"created_at"`
 
-	// Definition A workflow. A node runs once its parents have finished, an http node if every edge into it was taken and a transform node if any was. Otherwise it's skipped.
+	// Definition A workflow. A node runs once its parents have finished, an http node if every edge into it was taken, and a transform node if every required one was and, with none required, any was. Otherwise it's skipped.
 	Definition externalRef0.Definition `json:"definition"`
 
 	// Problems Everything wrong with the definition. Empty when it can be published.
@@ -529,6 +529,18 @@ type Way struct {
 
 	// Unhandled It left from's Unhandled block, and on is absent.
 	Unhandled bool `json:"unhandled,omitempty,omitzero"`
+}
+
+// WayPreview What a transform gives in a run that comes by one edge into it, over the samples.
+type WayPreview struct {
+	// Edge The edge, by its place in the definition's edges.
+	Edge int `json:"edge"`
+
+	// Gives The transform's value in that run. Absent when it gave none.
+	Gives json.RawMessage `json:"gives,omitempty,omitzero"`
+
+	// Skipped That run would skip the transform, its required edges or that one not taken.
+	Skipped bool `json:"skipped"`
 }
 
 // Workflow defines model for Workflow.

@@ -219,7 +219,7 @@ test("a status that isn't 200 to 599 says so, and the one held stays", async () 
   await waitFor(() => expect(blocks()[0]).toBe("case:0 found · 201"));
 });
 
-test("a field picked from what the step reads goes where the cursor was last, and each tab says whether its case holds", async () => {
+test("each tab reads for itself: a field picked goes where its cursor was last, and it says whether its case holds", async () => {
   renderEditor({
     nodes: [
       {
@@ -245,11 +245,17 @@ test("a field picked from what the step reads goes where the cursor was last, an
     ),
   );
   const panel = await open();
-  const insert = await within(panel).findByRole("button", {
-    name: "Insert input.key",
-  });
-  // Before any field has had the cursor, the first case's condition.
-  fireEvent.click(insert);
+  const insert = () =>
+    within(panel).getByRole("button", { name: "Insert input.key" });
+  // The tabs come first, and what the step reads is in each.
+  expect(
+    within(within(panel).getByRole("tabpanel")).getByRole("heading", {
+      name: "Input",
+    }),
+  ).toBeTruthy();
+  await within(panel).findByRole("button", { name: "Insert input.key" });
+  // Before any field in the tab has had the cursor, its condition.
+  fireEvent.click(insert());
   await waitFor(() =>
     expect(field("Case 1 when")).toHaveProperty("value", "input.key"),
   );
@@ -258,13 +264,17 @@ test("a field picked from what the step reads goes where the cursor was last, an
     within(panel).getByRole("heading", { name: "It answers 400" }),
   ).toBeTruthy();
   expect(within(panel).getByText(/"error": "bad key"/)).toBeTruthy();
-  // Then where the cursor is.
+  // In Case 2's tab, where its cursor is; Case 1's condition keeps what it
+  // had.
   tab("Case 2");
   const body = field("Case 2 body") as HTMLTextAreaElement; // a textbox, by its role
   fireEvent.focus(body);
   body.setSelectionRange(0, 0);
-  fireEvent.click(insert);
+  fireEvent.click(insert());
   await waitFor(() => expect(body.value).toBe("input.key{ 'ok': true }"));
+  tab("Case 1");
+  expect(field("Case 1 when")).toHaveProperty("value", "input.key");
+  tab("Case 2");
   expect(
     within(panel).getByText("With these samples, Case 1 holds, not this."),
   ).toBeTruthy();

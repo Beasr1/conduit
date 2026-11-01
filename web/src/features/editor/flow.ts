@@ -132,7 +132,7 @@ export interface Way {
 }
 
 // waysInto is the edges into the step with id, in the definition's order:
-// a transform's ways, any of which may come, when there's more than one.
+// a transform's ways, when there's more than one.
 export function waysInto(definition: Definition, id: string): Way[] {
   return (definition.edges ?? []).flatMap((e, index) =>
     e.to === id ? [{ index, from: e.from, on: outputOf(e) }] : [],
@@ -140,16 +140,18 @@ export function waysInto(definition: Definition, id: string): Way[] {
 }
 
 // wayLabel is a way as the screen names it: the step it comes from, and the
-// response it leaves, "prefs · 404", or its Unhandled; a transform's one
-// value needs no name.
+// response it leaves, "prefs · 404", the case, "check · missing", or its
+// Unhandled; a transform's one value needs no name.
 export function wayLabel(
   definition: Definition,
   from: string,
   on: number | undefined,
 ): string {
   if (on === UNHANDLED) return `${from} · Unhandled`;
-  const http = definition.nodes.find((n) => n.id === from)?.kind === "http";
-  return http ? `${from} · ${on ?? "2xx"}` : from;
+  const node = definition.nodes.find((n) => n.id === from);
+  if (node?.kind === "http") return `${from} · ${on ?? "2xx"}`;
+  const exit = exitsOf(node).find((e) => e.status === on);
+  return exit ? `${from} · ${exit.label}` : from;
 }
 
 // The response card's key. "#" can't appear in a node id, so the card is
@@ -180,7 +182,8 @@ export interface Flow {
 // for each edge it can draw, each where the definition places it or, failing
 // that, where the layout does, and the lines into the response's answers,
 // last. Each line into a transform with more than one is one of its ways,
-// as it may not come. The same definition always gives the same picture.
+// as it may not come, unless it's required. The same definition always
+// gives the same picture.
 export function toFlow(definition: Definition): Flow {
   // A draft may be saved with problems, such as two nodes sharing an id, but
   // the canvas needs a key per node. "#" can't appear in a valid id, so a key
@@ -217,7 +220,7 @@ export function toFlow(definition: Definition): Flow {
     const id = `${source}->${target}`;
     const seen = repeats.get(id) ?? 0;
     repeats.set(id, seen + 1);
-    const way = (lines.get(e.to) ?? 0) > 1;
+    const way = !e.required && (lines.get(e.to) ?? 0) > 1;
     edges.push({
       id: seen === 0 ? id : `${id}#${seen}`,
       source,

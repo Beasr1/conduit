@@ -389,7 +389,8 @@ func (a Answer) Output() int {
 
 type edgeRef struct {
 	index, from, to int
-	on              int // the output of from it leaves from: a status, 0 for 2xx, or OnUnhandled
+	on              int  // the output of from it leaves from: a status, 0 for 2xx, or OnUnhandled
+	required        bool // into a transform, it has to be taken for the transform to run
 }
 
 // checkEdges checks each edge, and gives back those whose ends are nodes,
@@ -413,13 +414,16 @@ func (v *validator) checkEdges(edges []Edge, nodes []Node, index map[string]int)
 			continue
 		}
 		v.checkOn(p+"/on", nodes[from], e.Output(), "an edge")
+		if e.Required && nodes[to].Kind == NodeKindHTTP {
+			v.add(p+"/required", "not_allowed", "an http node needs every edge into it; required is for a transform's")
+		}
 		key := [3]int{from, to, e.Output()}
 		if j, dup := seen[key]; dup {
 			v.add(p, "duplicate_edge", "/edges/%d already connects %s to %s from the same output", j, e.From, e.To)
 			continue
 		}
 		seen[key] = k
-		good = append(good, edgeRef{index: k, from: from, to: to, on: e.Output()})
+		good = append(good, edgeRef{index: k, from: from, to: to, on: e.Output(), required: e.Required})
 	}
 
 	// An edge is on a cycle when both ends are in the same strongly connected

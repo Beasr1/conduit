@@ -198,10 +198,12 @@ the API is `/api` on the page's own origin.
   tab open; the store keeps those parts open across edits as it keeps an
   HTTP step's responses.
 - Each line into a transform with more than one is one of its ways
-  (`data.way`): it's dashed until a run says whether it came, as dashed
-  means it may not be taken, or wasn't. Its preview comes by the way picked
-  in its Input, kept by the ends of the line, as one step joins another
-  once per output, and found in the draft previewed by them.
+  (`data.way`), unless it's marked required: it's dashed until a run says
+  whether it came, as dashed means it may not be taken, or wasn't. Its
+  preview is a run by each, the server's `ways`, each named by the line at
+  its place in the draft previewed, so a result reads that draft (a
+  `MappingField`'s `result` gets it); its Input is what those runs read,
+  merged.
 - An HTTP step is drawn as blocks, each saying which part of the step it
   is (`data-part`). The canvas reads the block a click lands in
   (`onNodeClick`), and the store's `part` holds what's open, so the canvas

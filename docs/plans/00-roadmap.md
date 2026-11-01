@@ -183,8 +183,9 @@ Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
    the first that holds answering with it (plan 04, 2026-11-01).
    - An http node runs once all its parents have ended and every edge
      into it is active (plan 04, strict joins, 2026-11-01). A transform
-     needs only one active, its expression making its value from whatever
-     came (plan 04, 2026-11-01).
+     needs each edge into it marked `required` active and, with none
+     marked, only one, its expression making its value from whatever came
+     (plan 04, 2026-11-01).
    - Otherwise the node is skipped, and skips cascade.
 5. **Failure:** the first failure fails the run. In-flight nodes are
    cancelled and the rest are marked cancelled. A node's Unhandled block
@@ -234,7 +235,7 @@ Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
 | D10 | Editor state | Zustand | what React Flow uses internally (12 still bundles zustand 4; 13 moves to 5) | Jotai | accepted (2026-10-28, plan 04) |
 | D11 | Web router | React Router 8, data mode | familiar | TanStack Router | accepted (2026-10-28, plan 04) |
 | D12 | v1 auth | one bearer token from env; listen on localhost by default | an open server that calls arbitrary URLs is an open proxy | user accounts | accepted |
-| D13 | Node kinds | `http` and `transform`; branch with outputs, a transform's cases, its exits (2026-11-01), and edge `when`s, combine with a transform's mapping. A transform runs if any edge into it was taken, once all have ended, and an http node needs each one (2026-11-01) | fewer node types, same reach | dedicated merge, branch and filter nodes; a merge node was built and folded into transform (2026-11-01) | accepted (2026-10-28, plan 04; joins 2026-11-01, plan 04) |
+| D13 | Node kinds | `http` and `transform`; branch with outputs, a transform's cases, its exits (2026-11-01), and edge `when`s, combine with a transform's mapping. A transform runs once all edges into it have ended, if each marked required was taken and, with none marked, any was; an http node needs each one (2026-11-01) | fewer node types, same reach | dedicated merge, branch and filter nodes; a merge node was built and folded into transform (2026-11-01) | accepted (2026-10-28, plan 04; joins 2026-11-01, plan 04) |
 | D14 | Upstream reuse | the library is a template; a node keeps its own copy; credentials are by reference | workflow versions stay immutable and self-contained | nodes reference live upstream records | proposed |
 | D15 | Host and CI | GitHub, Actions running `just check` | personal account | GitLab CI | accepted |
 | D16 | Commit trailer | none | one-line commits | Co-Authored-By | accepted |

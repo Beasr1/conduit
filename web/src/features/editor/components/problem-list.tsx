@@ -77,7 +77,9 @@ function fieldOf(
       return fieldIds[field ?? "id"] ?? "step-id";
     }
     case "connection":
-      return "connection-when";
+      return place.field === "required"
+        ? "connection-required"
+        : "connection-when";
     case "response":
       switch (place.field) {
         case "from":
@@ -280,6 +282,7 @@ export function Where({ place, draft }: { place: Place; draft: Definition }) {
           )}{" "}
           → <span className="font-mono">{e?.to}</span>
           {place.field === "when" && " · Condition"}
+          {place.field === "required" && " · Required"}
         </>
       );
     }

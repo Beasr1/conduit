@@ -12,11 +12,13 @@ import {
   responseCard,
   toFlow,
   UNHANDLED,
+  wayLabel,
   waysInto,
 } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 import { specExample as spec } from "@/test/fixtures";
 
+type Definition = components["schemas"]["Definition"];
 type NodeKind = components["schemas"]["NodeKind"];
 
 function at(flow: Flow, id: string) {
@@ -285,6 +287,21 @@ test("lines into a transform with more than one come to its one point, dashed, a
     "fallback->prefs_ok#1 unhandled in way",
     "prefs_ok->greet out in",
   ]);
+  // A line marked required has to come, so it isn't dashed; those beside it
+  // still may not.
+  expect(
+    toFlow({
+      nodes: [
+        { id: "a", kind: "transform", expr: "1" },
+        { id: "b", kind: "transform", expr: "2" },
+        { id: "t", kind: "transform", expr: "3" },
+      ],
+      edges: [
+        { from: "a", to: "t", required: true },
+        { from: "b", to: "t" },
+      ],
+    }).edges.map((e) => e.data?.way ?? false),
+  ).toEqual([false, true]);
   // A step of a kind the editor doesn't know needs every line, as far as
   // the canvas can tell.
   expect(
@@ -353,6 +370,37 @@ test("a transform with cases has an exit per case, its lines leaving each by its
   // Its exits, then + Case, 24 px apiece, above its Unhandled strip.
   expect(flow.nodes[0]).toMatchObject({ height: NODE_HEIGHT + 24 });
   expect(exitsOf(undefined)).toEqual([]);
+});
+
+test("a way is named by its step and the response, case or Unhandled it leaves", () => {
+  const of: Definition = {
+    nodes: [
+      {
+        id: "user",
+        kind: "http",
+        request: { method: "GET", url: "https://users.example.com/v1" },
+      },
+      {
+        id: "check",
+        kind: "transform",
+        switch: {
+          cases: [
+            { name: "found", when: "true", status: 200 },
+            { when: "false", status: 404 },
+          ],
+        },
+      },
+      { id: "count", kind: "transform", expr: "1" },
+    ],
+  };
+  expect(wayLabel(of, "user", undefined)).toBe("user · 2xx");
+  expect(wayLabel(of, "user", 404)).toBe("user · 404");
+  expect(wayLabel(of, "user", UNHANDLED)).toBe("user · Unhandled");
+  expect(wayLabel(of, "check", 200)).toBe("check · found");
+  expect(wayLabel(of, "check", 404)).toBe("check · Case 2");
+  // A transform's one value, and a case no longer there, need no name.
+  expect(wayLabel(of, "count", undefined)).toBe("count");
+  expect(wayLabel(of, "check", 500)).toBe("check");
 });
 
 test("the editor counts Unhandled beside a step's other outputs", () => {

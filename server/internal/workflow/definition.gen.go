@@ -86,7 +86,7 @@ type Case struct {
 	When string `json:"when,omitempty"`
 }
 
-// Definition A workflow. A node runs once its parents have finished, an http node if every edge into it was taken and a transform node if any was. Otherwise it's skipped.
+// Definition A workflow. A node runs once its parents have finished, an http node if every edge into it was taken, and a transform node if every required one was and, with none required, any was. Otherwise it's skipped.
 type Definition struct {
 	Edges []Edge `json:"edges,omitempty"`
 
@@ -115,8 +115,11 @@ type Edge struct {
 	From string `json:"from"`
 
 	// On The output of its source the edge leaves from, by status, one an http node lists or one a transform's case gives. Absent means an http node's 2xx, the only output of a transform with an expr, or the Unhandled block when unhandled is set.
-	On int    `json:"on,omitempty"`
-	To string `json:"to"`
+	On int `json:"on,omitempty"`
+
+	// Required Into a transform node, the edge has to be taken for the node to run, as every edge into an http node has; without it, the transform is skipped. Absent, an edge into a transform may not be taken, its node then missing from what the transform reads.
+	Required bool   `json:"required,omitempty"`
+	To       string `json:"to"`
 
 	// Unhandled The edge leaves from its source's Unhandled block, and on is absent. Every node has one. It takes what the node's other outputs don't, a failure of its own, a status it doesn't list among them, so a run goes on down the edges from it, its node failed; with no line from it, the failure fails the run. Steps after it read the failure as nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer.
 	Unhandled bool `json:"unhandled,omitempty"`
@@ -158,7 +161,7 @@ type Node struct {
 	// ID Unique in the workflow. Expressions read the node's result as nodes.<id>.
 	ID string `json:"id"`
 
-	// Kind An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once any was, reading whichever nodes came; one with no edge into it runs first.
+	// Kind An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once every required edge into it was and, with none required, any was, reading whichever nodes came; one with no edge into it runs first.
 	Kind NodeKind `json:"kind"`
 
 	// Outputs An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node, and its Unhandled block takes that as it takes every failure of the node's.
@@ -177,7 +180,7 @@ type Node struct {
 	Unhandled *NodeUnhandled `json:"unhandled,omitempty"`
 }
 
-// NodeKind An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once any was, reading whichever nodes came; one with no edge into it runs first.
+// NodeKind An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once every required edge into it was and, with none required, any was, reading whichever nodes came; one with no edge into it runs first.
 type NodeKind string
 
 // NodeUnhandled What a node gives through its Unhandled block, once the block takes its failure. Without it, the node gives what an http node got back, if anything.

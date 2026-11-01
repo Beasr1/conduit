@@ -255,6 +255,57 @@ func TestValidate_ATransformMerges(t *testing.T) {
 	}
 }
 
+// A line into a transform marked required has to come, as a line into an
+// http node does, so the old checks hold for it: two required lines that
+// need one node to answer two ways never both come, and a transform whose
+// required line needs a node's 2xx is kept apart from that node's 404.
+// Only a transform's lines are marked: an http node needs every one.
+func TestValidate_RequiredLines(t *testing.T) {
+	t.Parallel()
+	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
+	nodes := `{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"},
+		{"id": "t", "kind": "transform", "expr": "2"}`
+	tests := []struct {
+		name, def, want string
+	}{
+		{
+			"one required, one not", `{"nodes": [` + nodes + `],
+			  "edges": [{"from": "a", "to": "t", "required": true}, {"from": "b", "to": "t"}],
+			  "response": {"answers": [{"status": 200, "from": "t"}, {"status": 404, "from": "a", "on": 404}]}}`,
+			"",
+		},
+		{
+			// Neither required, t can come by b alone, with a's 404.
+			"none required", `{"nodes": [` + nodes + `],
+			  "edges": [{"from": "a", "to": "t"}, {"from": "b", "to": "t"}],
+			  "response": {"answers": [{"status": 200, "from": "t"}, {"status": 404, "from": "a", "on": 404}]}}`,
+			"/response/answers/1/from overlap: 200 (t) and 404 (a) can both be reached in one run: join both to one transform, which picks the answer",
+		},
+		{
+			"two required that never both come", `{"nodes": [` + nodes + `, {"id": "c", "kind": "transform", "expr": "3"}],
+			  "edges": [{"from": "a", "to": "c", "on": 404}, {"from": "a", "to": "t", "required": true}, {"from": "c", "to": "t", "required": true}]}`,
+			"/nodes/2 never_runs: t can never run: it needs a to answer 2xx and 404",
+		},
+		{
+			"required into an http node", `{"nodes": [` + nodes + `, {"id": "h", "kind": "http", ` + get + `}],
+			  "edges": [{"from": "b", "to": "h", "required": true}]}`,
+			"/edges/0/required not_allowed: an http node needs every edge into it; required is for a transform's",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			for _, p := range Validate(decode(t, tt.def)) {
+				got = append(got, p.Pointer+" "+p.Code+": "+p.Detail)
+			}
+			if strings.Join(got, "\n") != tt.want {
+				t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), tt.want)
+			}
+		})
+	}
+}
+
 // A transform needs of a node only what each way needs of it, or rules
 // out: b can come as a's way doesn't, so e answering is no sign of a's
 // 2xx, and both answers can be reached. A way whose node never runs is left

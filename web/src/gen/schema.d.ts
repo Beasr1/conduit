@@ -381,22 +381,31 @@ export interface components {
             node?: string;
             /** @description The connection to preview, by its place in the definition's edges. Not with node. */
             edge?: number;
-            /** @description With node, a connection into that step, by its place in the definition's edges, that the run previewed comes by, as a transform any of whose connections may come. The steps before that connection's source answer through the outputs that lead to it, and the source through the connection's. Absent, each step answers 2xx where that leads on. */
-            way?: number;
         };
         Preview: {
-            /** @description The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples. */
+            /** @description The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples. For a transform with ways, what the run by each reads, merged, a node read differently by two as the first read it. */
             reads: unknown;
+            /** @description A transform two or more of whose edges aren't required, a result for a run that comes by each of those, in the definition's order. Each other step answers through the outputs that lead to that edge's source. */
+            ways?: components["schemas"]["WayPreview"][];
             /** @description A connection's preview only, whether a run would take it with these samples. */
             taken?: boolean;
             sends?: components["schemas"]["RenderedRequest"];
-            /** @description A transform step's value, or the workflow's output. Absent when it gave none. */
+            /** @description A transform step's value, or the workflow's output. Absent when it gave none, and for a transform with ways, as each way gives its own. */
             gives?: unknown;
             unhandled?: components["schemas"]["UnhandledPreview"];
             /** @description A run would skip the step, or a connection's source, with these samples, as a connection into an http step isn't taken, or none into a transform is. */
             skipped: boolean;
             /** @description What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there. */
             problems: components["schemas"]["ProblemError"][];
+        };
+        /** @description What a transform gives in a run that comes by one edge into it, over the samples. */
+        WayPreview: {
+            /** @description The edge, by its place in the definition's edges. */
+            edge: number;
+            /** @description The transform's value in that run. Absent when it gave none. */
+            gives?: unknown;
+            /** @description That run would skip the transform, its required edges or that one not taken. */
+            skipped: boolean;
         };
         /** @description A step with an Unhandled body, failing into the block with an error made up, as a preview calls nothing. */
         UnhandledPreview: {
@@ -582,7 +591,7 @@ export interface components {
             unhandled?: boolean;
         };
         /**
-         * @description An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once any was, reading whichever nodes came; one with no edge into it runs first.
+         * @description An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once every required edge into it was and, with none required, any was, reading whichever nodes came; one with no edge into it runs first.
          * @enum {string}
          */
         NodeKind: "http" | "transform";
@@ -671,6 +680,8 @@ export interface components {
             unhandled?: boolean;
             /** @description A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source answered through the edge's output, or failed into its Unhandled block, and this is true. Absent means true. */
             when?: string;
+            /** @description Into a transform node, the edge has to be taken for the node to run, as every edge into an http node has; without it, the transform is skipped. Absent, an edge into a transform may not be taken, its node then missing from what the transform reads. */
+            required?: boolean;
         };
         Answer: {
             /** @description The HTTP status the answer has. Listed once in a response. */
@@ -710,7 +721,7 @@ export interface components {
                 [key: string]: components["schemas"]["Position"];
             };
         };
-        /** @description A workflow. A node runs once its parents have finished, an http node if every edge into it was taken and a transform node if any was. Otherwise it's skipped. */
+        /** @description A workflow. A node runs once its parents have finished, an http node if every edge into it was taken, and a transform node if every required one was and, with none required, any was. Otherwise it's skipped. */
         Definition: {
             nodes: components["schemas"]["Node"][];
             edges?: components["schemas"]["Edge"][];

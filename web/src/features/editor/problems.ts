@@ -77,7 +77,7 @@ export type Place =
       output?: number;
       case?: number;
     }
-  | { on: "connection"; index: number; field?: "when" | "on" }
+  | { on: "connection"; index: number; field?: "when" | "on" | "required" }
   | { on: "response"; field: ResponseField; answer?: number }
   | { on: "settings"; field: "input_schema" | "sample_input" }
   | { on: "workflow" };
@@ -96,13 +96,11 @@ export function placeOf(pointer: string): Place {
   if (top === "nodes" && isIndex(i)) return stepPlace(Number(i), rest);
   // The block a line leaves from is its on, or its Unhandled.
   if (top === "edges" && isIndex(i))
-    return rest[0] === "when" || rest[0] === "on" || rest[0] === "unhandled"
-      ? {
-          on: "connection",
-          index: Number(i),
-          field: rest[0] === "when" ? "when" : "on",
-        }
-      : { on: "connection", index: Number(i) };
+    return rest[0] === "when" || rest[0] === "required"
+      ? { on: "connection", index: Number(i), field: rest[0] }
+      : rest[0] === "on" || rest[0] === "unhandled"
+        ? { on: "connection", index: Number(i), field: "on" }
+        : { on: "connection", index: Number(i) };
   if (top === "output" || top === "output_schema")
     return { on: "response", field: top };
   if (top === "response" && i === "unhandled")
@@ -364,7 +362,9 @@ export function say(problem: ProblemError, of: Definition): string {
         return responseNotAllowed(place.field, a?.unhandled === true);
       }
       if (place.on === "connection")
-        return "A transform step has no responses for a connection to leave from.";
+        return place.field === "required"
+          ? "An HTTP step needs every connection into it, so none is marked required: that's for a transform step's."
+          : "A transform step has no responses for a connection to leave from.";
       if (place.on === "step" && place.field === "switch")
         return of.nodes[place.index]?.kind === "http"
           ? "An HTTP step sends a request, and has no cases."
@@ -404,7 +404,9 @@ export function say(problem: ProblemError, of: Definition): string {
       return sentence(problem.detail);
     case "never_runs":
       // It starts with the step's id, which stays as it's written.
-      return `${problem.detail}. It runs only when every line into it is taken; to run it after whichever comes, join them to a transform first.`;
+      return place.on === "step" && of.nodes[place.index]?.kind === "transform"
+        ? `${problem.detail}. It runs only when every line into it marked required is taken; to run it after whichever comes, mark none of them required.`
+        : `${problem.detail}. It runs only when every line into it is taken; to run it after whichever comes, join them to a transform first.`;
     case "unknown_output": {
       const line =
         place.on === "response"

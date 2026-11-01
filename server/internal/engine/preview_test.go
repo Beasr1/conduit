@@ -298,8 +298,8 @@ const branched = `{
 }`
 
 // Each step on the way answers with the sample of the output that leads to
-// the step previewed, 2xx when several do. The output reads every step's
-// 2xx.
+// the step previewed, 2xx when several do, and a transform two of whose
+// lines may come is previewed by each. The output reads every step's 2xx.
 func TestSimulate_AnswersThroughTheOutputThatLeadsThere(t *testing.T) {
 	t.Parallel()
 	pv := previewOf(t, branched, "create", nil)
@@ -310,8 +310,8 @@ func TestSimulate_AnswersThroughTheOutputThatLeadsThere(t *testing.T) {
 	if pv.Skipped || pv.Sends == nil || !sameJSON(t, pv.Sends.Body, `{"email": "ada@example.com"}`) {
 		t.Errorf("crm: skipped %v, sends %+v", pv.Skipped, pv.Sends)
 	}
-	if pv := previewOf(t, branched, "log", nil); !sameJSON(t, pv.Gives, `200`) {
-		t.Errorf("log gives %s", pv.Gives)
+	if pv := previewOf(t, branched, "log", nil); len(pv.Ways) != 2 || !sameJSON(t, pv.Ways[0].Gives, `404`) || !sameJSON(t, pv.Ways[1].Gives, `200`) {
+		t.Errorf("log's ways %+v", pv.Ways)
 	}
 	if pv := previewOf(t, branched, "", nil); !sameJSON(t, pv.Gives, `{"crm": "c-1", "created": false}`) {
 		t.Errorf("output gives %s, problems %s", pv.Gives, problemCodes(pv))

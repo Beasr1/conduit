@@ -26,7 +26,8 @@ type conflict struct {
 // checkJoins works out what each node runs only after, and reports each
 // node that can never run, where that starts: an http node runs only if
 // every line into it was taken (plan 04, strict joins), and a transform if
-// any was. edges have no cycle.
+// every required one was and, with none required, any was. edges have no
+// cycle.
 func (v *validator) checkJoins(d *Definition, edges []edgeRef) []route {
 	in, order := graphOf(len(d.Nodes), edges)
 	need, conflicts := needs(d.Nodes, in, order)
@@ -67,16 +68,21 @@ func graphOf(n int, edges []edgeRef) (in [][]edgeRef, order []int) {
 // line leaves from, and what that node needs. Two needs of one node sharing
 // no output leave it none: the node never runs, and conflicts says why, for
 // each node where that starts. The nodes after it never run either. A
-// transform with a line into it needs what one of its ways does.
+// transform needs what its required lines do, as an http node needs what
+// all of its do, and with none required, what one of its ways does.
 func needs(nodes []Node, in [][]edgeRef, order []int) ([]route, []conflict) {
 	need := make([]route, len(nodes))
 	var conflicts []conflict
 	for _, u := range order {
-		if nodes[u].Kind == NodeKindTransform && len(in[u]) > 0 {
-			need[u] = mergeOf(in[u], need)
-			continue
+		lines := in[u]
+		if nodes[u].Kind == NodeKindTransform && len(lines) > 0 {
+			lines = slices.DeleteFunc(slices.Clone(lines), func(e edgeRef) bool { return !e.required })
+			if len(lines) == 0 {
+				need[u] = mergeOf(in[u], need)
+				continue
+			}
 		}
-		r, c := joinOf(u, in[u], need)
+		r, c := joinOf(u, lines, need)
 		if c != nil {
 			conflicts = append(conflicts, *c)
 		}

@@ -362,15 +362,25 @@ func (r *run) lineEnded(k int, taken bool) {
 	}
 }
 
-// joined says whether node i runs, now that every edge into it has ended:
-// a transform when any was taken, an http node when every one was (plan 04,
-// strict joins).
+// joined says whether node i runs, now that every edge into it has ended.
 func (r *run) joined(i int) bool {
-	in := r.p.nodes[i].in
-	if r.p.nodes[i].kind == workflow.NodeKindTransform {
-		return slices.ContainsFunc(in, func(k int) bool { return r.taken[k] })
+	return r.p.joins(i, func(k int) bool { return r.taken[k] })
+}
+
+// joins says whether node i runs, by which of the edges into it are taken:
+// an http node when every one is (plan 04, strict joins), and a transform
+// when every required one is and, with none required, any is, or when it
+// has none (plan 04, a transform's lines as its parameters).
+func (p *Program) joins(i int, taken func(k int) bool) bool {
+	in := p.nodes[i].in
+	if p.nodes[i].kind != workflow.NodeKindTransform {
+		return !slices.ContainsFunc(in, func(k int) bool { return !taken(k) })
 	}
-	return !slices.ContainsFunc(in, func(k int) bool { return !r.taken[k] })
+	required := func(k int) bool { return p.edges[k].required }
+	if slices.ContainsFunc(in, required) {
+		return !slices.ContainsFunc(in, func(k int) bool { return required(k) && !taken(k) })
+	}
+	return len(in) == 0 || slices.ContainsFunc(in, taken)
 }
 
 func (r *run) end(i int, s Status, o *outcome) {

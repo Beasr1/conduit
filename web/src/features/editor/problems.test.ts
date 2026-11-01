@@ -118,6 +118,10 @@ test.each<[string, Place]>([
     { on: "step", index: 0, field: "sample", output: 1 },
   ],
   ["/edges/0/on", { on: "connection", index: 0, field: "on" }],
+  ["/edges/0/unhandled", { on: "connection", index: 0, field: "on" }],
+  ["/edges/0/when", { on: "connection", index: 0, field: "when" }],
+  ["/edges/0/required", { on: "connection", index: 0, field: "required" }],
+  ["/edges/0/to", { on: "connection", index: 0 }],
   ["/ui/positions/user/x", { on: "workflow" }],
 ])("%j points at %j", (pointer, place) => {
   expect(placeOf(pointer)).toEqual(place);
@@ -488,6 +492,11 @@ test.each([
     "A transform step has no responses for a connection to leave from.",
   ],
   [
+    "/edges/2/required",
+    "not_allowed",
+    "An HTTP step needs every connection into it, so none is marked required: that's for a transform step's.",
+  ],
+  [
     "/edges/2/on",
     "unknown_output",
     "a has no 409 response. Add one with + Add on the step, or draw the connection from another.",
@@ -549,7 +558,7 @@ test("the server's detail stands where it says what went wrong", () => {
   expect(
     say(
       {
-        pointer: "/nodes/0",
+        pointer: "/nodes/1",
         code: "never_runs",
         detail: "a can never run: it needs b to answer 2xx and 404",
       },
@@ -557,6 +566,19 @@ test("the server's detail stands where it says what went wrong", () => {
     ),
   ).toBe(
     "a can never run: it needs b to answer 2xx and 404. It runs only when every line into it is taken; to run it after whichever comes, join them to a transform first.",
+  );
+  // A transform never runs only as its required lines can't all come.
+  expect(
+    say(
+      {
+        pointer: "/nodes/0",
+        code: "never_runs",
+        detail: "a can never run: it needs b to answer 2xx and 404",
+      },
+      broken,
+    ),
+  ).toBe(
+    "a can never run: it needs b to answer 2xx and 404. It runs only when every line into it marked required is taken; to run it after whichever comes, mark none of them required.",
   );
 });
 

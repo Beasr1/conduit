@@ -636,19 +636,19 @@ components:
           minimum: 0
           description: The connection to preview, by its place in the definition's edges. Not with node.
           x-go-type-skip-optional-pointer: false
-        way:
-          type: integer
-          minimum: 0
-          description: With node, a connection into that step, by its place in the definition's edges, that the run previewed comes by, as a transform any of whose connections may come. The steps before that connection's source answer through the outputs that lead to it, and the source through the connection's. Absent, each step answers 2xx where that leads on.
-          x-go-type-skip-optional-pointer: false
 
     Preview:
       type: object
       required: [reads, skipped, problems]
       properties:
         reads:
-          description: The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples.
+          description: The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples. For a transform with ways, what the run by each reads, merged, a node read differently by two as the first read it.
           x-go-type: json.RawMessage
+        ways:
+          type: array
+          description: A transform two or more of whose edges aren't required, a result for a run that comes by each of those, in the definition's order. Each other step answers through the outputs that lead to that edge's source.
+          items:
+            $ref: "#/components/schemas/WayPreview"
         taken:
           type: boolean
           description: A connection's preview only, whether a run would take it with these samples.
@@ -656,7 +656,7 @@ components:
         sends:
           $ref: "#/components/schemas/RenderedRequest"
         gives:
-          description: A transform step's value, or the workflow's output. Absent when it gave none.
+          description: A transform step's value, or the workflow's output. Absent when it gave none, and for a transform with ways, as each way gives its own.
           x-go-type: json.RawMessage
         unhandled:
           $ref: "#/components/schemas/UnhandledPreview"
@@ -668,6 +668,21 @@ components:
           description: What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
           items:
             $ref: "#/components/schemas/ProblemError"
+
+    WayPreview:
+      type: object
+      description: What a transform gives in a run that comes by one edge into it, over the samples.
+      required: [edge, skipped]
+      properties:
+        edge:
+          type: integer
+          description: The edge, by its place in the definition's edges.
+        gives:
+          description: The transform's value in that run. Absent when it gave none.
+          x-go-type: json.RawMessage
+        skipped:
+          type: boolean
+          description: That run would skip the transform, its required edges or that one not taken.
 
     UnhandledPreview:
       type: object

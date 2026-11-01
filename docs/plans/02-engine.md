@@ -132,8 +132,8 @@ types into `server/internal/workflow/definition.gen.go`.
      (plan 04, 2026-10-30), or a transform that evaluated.
    - *failed*: anything else, after retries.
    - *skipped*: every parent ended, and an edge into an http node wasn't
-     taken, or none into a transform was (plan 04, 2026-11-01). Skips
-     cascade.
+     taken, or, into a transform, one marked required wasn't or, with none
+     marked, none was (plan 04, 2026-11-01). Skips cascade.
    - *cancelled*: stopped by another node's failure or by the caller, or
      never started.
 4. **Fail-fast.**

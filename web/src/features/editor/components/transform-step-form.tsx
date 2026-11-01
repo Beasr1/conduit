@@ -10,13 +10,6 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -42,19 +35,20 @@ import {
   updateNode,
 } from "@/features/editor/edits";
 import { whole } from "@/features/editor/fields";
-import { exitsOf, wayLabel, waysInto } from "@/features/editor/flow";
+import { exitsOf, outputOf, wayLabel } from "@/features/editor/flow";
 import {
   asErrors,
   atStep,
   useProblems,
 } from "@/features/editor/hooks/use-problems";
-import { usePreview, type WayFrom } from "@/features/editor/hooks/use-preview";
+import { usePreview } from "@/features/editor/hooks/use-preview";
 import type { Found, Place, StepField } from "@/features/editor/problems";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 import type { components } from "@/gen/schema";
 
 type Definition = components["schemas"]["Definition"];
 type Preview = components["schemas"]["Preview"];
+type WayPreview = components["schemas"]["WayPreview"];
 
 // The statuses a case can answer with, as schema/workflow.yaml allows.
 const MIN_STATUS = 200;
@@ -62,37 +56,20 @@ const MAX_STATUS = 599;
 
 // TransformStepForm edits a transform step: one expression between the data
 // it reads and what it gives, simulated over the samples, then what follows
-// it and its Unhandled; or its cases, a tab each. With more than one line
-// into it, any of which may come, the run previewed comes by the one picked,
-// its first until another is.
+// it and its Unhandled; or its cases, a tab each, each with what it reads.
+// With two or more lines into it that may not come, not being required, the
+// preview is of a run by each: the step reads what those runs read, merged,
+// and what it gives in each is shown by the line.
 export function TransformStepForm({ index }: { index: number }) {
   const cases = useEditor((s) => s.draft.nodes[index]?.switch !== undefined);
-  const id = useEditor((s) => s.draft.nodes[index]?.id ?? "");
-  const keys = useEditor(useShallow((s) => waysInto(s.draft, id).map(wayKey)));
-  const labels = useEditor(
-    useShallow((s) =>
-      waysInto(s.draft, id).map((w) => wayLabel(s.draft, w.from, w.on)),
-    ),
-  );
-  const [picked, pick] = useState<string>();
-  const key =
-    keys.length > 1 ? (keys.find((k) => k === picked) ?? keys[0]) : undefined;
-  const way = key === undefined ? undefined : wayOfKey(key);
-  const by = key !== undefined && (
-    <WayPicker
-      value={key}
-      ways={Object.fromEntries(keys.map((k, j) => [k, labels[j] ?? k]))}
-      onPick={pick}
-    />
-  );
   return (
     <>
       <RunGave index={index} />
       {cases ? (
-        <SwitchForm index={index} way={way} by={by} />
+        <SwitchForm index={index} />
       ) : (
         <>
-          <ExpressionForm index={index} way={way} by={by} />
+          <ExpressionForm index={index} />
           <StepConnections index={index} />
           <StepUnhandled index={index} />
         </>
@@ -101,53 +78,42 @@ export function TransformStepForm({ index }: { index: number }) {
   );
 }
 
-// wayKey names a way into a step by the step it comes from and the output
-// it leaves, as one step joins another once per output; ids have no colon.
-function wayKey(w: WayFrom): string {
-  return `${w.from}:${w.on ?? ""}`;
-}
-
-function wayOfKey(key: string): WayFrom {
-  const [from = "", on = ""] = key.split(":");
-  return { from, on: on === "" ? undefined : Number(on) };
-}
-
-// WayPicker picks the line a transform's preview comes by: the run
-// previewed is one in which that line came, the steps before it answering
-// as they must for it to.
-function WayPicker({
-  value,
+// ByWays is what a transform does in a run by each line into it that may
+// not come, over the samples: each line by its name, then what each shows
+// of what the step gives in that run, or that the run skips the step.
+function ByWays({
   ways,
-  onPick,
+  of,
+  each,
 }: {
-  value: string;
-  ways: Record<string, string>;
-  onPick: (key: string) => void;
+  ways: WayPreview[];
+  of: Definition;
+  each: (gives: unknown) => ReactNode;
 }) {
-  return (
-    <Field>
-      <FieldLabel htmlFor="step-preview-way">
-        Preview a run that comes by
-      </FieldLabel>
-      <Select<string>
-        items={ways}
-        value={value}
-        onValueChange={(key) => {
-          if (key !== null) onPick(key);
-        }}
-      >
-        <SelectTrigger id="step-preview-way" className="w-full font-mono">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {Object.entries(ways).map(([key, label]) => (
-            <SelectItem key={key} value={key} className="font-mono">
-              {label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </Field>
+  return ways.map((w) => {
+    const e = of.edges?.[w.edge];
+    return (
+      <div key={w.edge} className="flex flex-col gap-1.5">
+        <p>
+          By{" "}
+          <span className="font-mono">
+            {e ? wayLabel(of, e.from, outputOf(e)) : `connection ${w.edge + 1}`}
+          </span>
+          {w.skipped &&
+            ", a run would skip this step: a connection it needs isn't taken."}
+        </p>
+        {!w.skipped && each(w.gives)}
+      </div>
+    );
+  });
+}
+
+// Value is a transform's value over the samples, or that it gave none.
+function Value({ gives }: { gives: unknown }) {
+  return gives === undefined ? (
+    <p className="text-muted-foreground">Nothing.</p>
+  ) : (
+    <JsonBlock value={gives} />
   );
 }
 
@@ -162,22 +128,13 @@ function firstAnswer(d: Definition, index: number): number {
 // ExpressionForm edits a transform step's one expression, and turns it into
 // cases, the expression the first one's body. Its value goes to callers
 // only once the step answers, so only then is sending the run warned about.
-// The preview comes by way, which by picks.
-function ExpressionForm({
-  index,
-  way,
-  by,
-}: {
-  index: number;
-  way?: WayFrom;
-  by?: ReactNode;
-}) {
+function ExpressionForm({ index }: { index: number }) {
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
   const id = useEditor((s) => s.draft.nodes[index]?.id ?? "");
   const expr = useEditor((s) => s.draft.nodes[index]?.expr);
   const answers = useEditor((s) => joinedTo(s.draft, id).length > 0);
-  const preview = usePreview({ step: index, way });
+  const preview = usePreview({ step: index });
   const problems = useProblems(atStep(index, "expr"));
   return (
     <>
@@ -197,17 +154,20 @@ function ExpressionForm({
         problems={problems}
         preview={preview}
         open={(of) => parents(of, of.nodes[index]?.id)}
-        by={by}
-        result={(p) =>
+        result={(p, of) =>
           p.skipped ? (
             <Skipped />
           ) : (
             <>
               <h3 className="font-medium">It gives</h3>
-              {p.gives === undefined ? (
-                <p className="text-muted-foreground">Nothing.</p>
+              {p.ways === undefined ? (
+                <Value gives={p.gives} />
               ) : (
-                <JsonBlock value={p.gives} />
+                <ByWays
+                  ways={p.ways}
+                  of={of}
+                  each={(gives) => <Value gives={gives} />}
+                />
               )}
             </>
           )
@@ -235,25 +195,13 @@ function ExpressionForm({
   );
 }
 
-// SwitchForm edits a transform step's cases: what it reads, once, then a tab
-// for each case, with its fields, what it gives over the samples when it's
-// the one that holds, and what follows its exit; then + Case, and its
-// Unhandled, which takes no case holding. A field picked from what it reads
-// goes where the cursor was last, or, before any field has had it, into the
-// first case's condition. The tabs' fields are keyed by the
-// times cases were added, moved or removed, so each starts afresh from the
-// draft after one is, rather than keeping another case's text. The tab open
-// is the editor's part, as an HTTP step's is, so a click on an exit on the
-// canvas opens its tab. The preview comes by way, which by picks.
-function SwitchForm({
-  index,
-  way,
-  by,
-}: {
-  index: number;
-  way?: WayFrom;
-  by?: ReactNode;
-}) {
+// SwitchForm edits a transform step's cases, a tab each, the tabs first, as
+// an HTTP step's are; then + Case, and its Unhandled, which takes no case
+// holding. The tabs' fields are keyed by the times cases were added, moved
+// or removed, so each starts afresh from the draft after one is, rather than
+// keeping another case's text. The tab open is the editor's part, as an
+// HTTP step's is, so a click on an exit on the canvas opens its tab.
+function SwitchForm({ index }: { index: number }) {
   const edit = useEditor((s) => s.edit);
   const part = useEditor((s) => s.part);
   const setPart = useEditor((s) => s.setPart);
@@ -261,35 +209,18 @@ function SwitchForm({
     useShallow((s) => exitsOf(s.draft.nodes[index]).map((e) => e.label)),
   );
   const count = labels.length;
-  const preview = usePreview({ step: index, way });
+  const preview = usePreview({ step: index });
   const [layout, setLayout] = useState(0);
-  const target = useRef<((path: string) => void) | undefined>(undefined);
   const relaid: Relaid = (change, open) => {
-    target.current = undefined;
     edit(change);
     setLayout((n) => n + 1);
     if (open) setPart(open);
-  };
-  const aim: Aim = {
-    focused: (insert) => {
-      target.current = insert;
-    },
-    first: (insert) => {
-      target.current ??= insert;
-    },
   };
   const mine = (p: Place): p is Extract<Place, { on: "step" }> =>
     p.on === "step" && p.index === index;
   const tabs = [...labels.map((_, k) => `case:${k}`), "add", "unhandled"];
   return (
     <>
-      <Reads
-        into="the field the cursor was last in"
-        preview={preview}
-        open={(of) => parents(of, of.nodes[index]?.id)}
-        onPick={(path) => target.current?.(path)}
-        by={by}
-      />
       <Tabs
         value={tabs.includes(part) ? part : tabs[0]}
         onValueChange={(value: string) => setPart(value)}
@@ -316,17 +247,13 @@ function SwitchForm({
             switch. */}
         {labels.map((_, k) => (
           <TabsContent key={`${layout}-${k}`} value={`case:${k}`} keepMounted>
-            <div className="flex flex-col gap-5">
-              <CaseFields
-                index={index}
-                k={k}
-                count={count}
-                aim={aim}
-                relaid={relaid}
-              />
-              <Holds index={index} part={`case:${k}`} preview={preview} />
-              <ExitConnections index={index} part={`case:${k}`} />
-            </div>
+            <CaseTab
+              index={index}
+              k={k}
+              count={count}
+              preview={preview}
+              relaid={relaid}
+            />
           </TabsContent>
         ))}
         <TabsContent value="add" keepMounted>
@@ -337,6 +264,48 @@ function SwitchForm({
         </TabsContent>
       </Tabs>
     </>
+  );
+}
+
+// CaseTab is case k's tab: what it reads, simulated over the samples, then
+// its fields, what it gives when it's the one that holds, and what follows
+// its exit. A field picked from what it reads goes where the cursor was
+// last in the tab, or, before any field there has had it, into its
+// condition.
+function CaseTab({
+  index,
+  k,
+  count,
+  preview,
+  relaid,
+}: {
+  index: number;
+  k: number;
+  count: number;
+  preview: ReturnType<typeof usePreview>;
+  relaid: Relaid;
+}) {
+  const target = useRef<((path: string) => void) | undefined>(undefined);
+  const aim: Aim = {
+    focused: (insert) => {
+      target.current = insert;
+    },
+    first: (insert) => {
+      target.current ??= insert;
+    },
+  };
+  return (
+    <div className="flex flex-col gap-5">
+      <Reads
+        into="the field the cursor was last in"
+        preview={preview}
+        open={(of) => parents(of, of.nodes[index]?.id)}
+        onPick={(path) => target.current?.(path)}
+      />
+      <CaseFields index={index} k={k} count={count} aim={aim} relaid={relaid} />
+      <Holds index={index} part={`case:${k}`} preview={preview} />
+      <ExitConnections index={index} part={`case:${k}`} />
+    </div>
   );
 }
 
@@ -385,7 +354,7 @@ function nextStatus(d: Definition, index: number): number {
 
 // Holds says, over the samples, what the case at part gives when it's the
 // one that holds; else which one is, or that none is, when the preview says
-// so.
+// so. With ways, it says what holds in a run by each.
 function Holds({
   index,
   part,
@@ -405,9 +374,47 @@ function Holds({
     useShallow((s) => exitsOf(s.draft.nodes[index]).map((e) => e.label)),
   );
   if (preview.data === undefined) return null;
-  const p = preview.data.preview;
-  const gives = p.gives as { status?: number } | undefined;
-  const k = statuses.findIndex((status) => status === gives?.status);
+  const { preview: p, of } = preview.data;
+  const which = (gives: unknown) =>
+    statuses.findIndex(
+      (status) => status === (gives as { status?: number } | undefined)?.status,
+    );
+  if (p.ways !== undefined && !p.skipped)
+    return (
+      <section className="flex flex-col gap-1.5 text-sm">
+        <h3 className="font-medium">With these samples</h3>
+        <ByWays
+          ways={p.ways}
+          of={of}
+          each={(gives) => {
+            const g = gives as { status?: number; body?: unknown } | undefined;
+            const k = which(gives);
+            if (g === undefined)
+              return (
+                <p className="text-muted-foreground">
+                  Nothing: the problems above say why.
+                </p>
+              );
+            if (k >= 0 && parts[k] !== part)
+              return (
+                <p className="text-muted-foreground">
+                  {labels[k]} holds, not this.
+                </p>
+              );
+            return (
+              <>
+                <p>
+                  It answers {g.status}
+                  {g.body === undefined ? ", with no body." : ":"}
+                </p>
+                {g.body !== undefined && <JsonBlock value={g.body} />}
+              </>
+            );
+          }}
+        />
+      </section>
+    );
+  const k = which(p.gives);
   const none = p.problems.some((pr) => pr.pointer === `/nodes/${index}/switch`);
   return (
     <section className="flex flex-col gap-1.5 text-sm">
@@ -551,7 +558,7 @@ function CaseFields({
         }
         problems={whenProblems}
         aim={aim}
-        first={k === 0}
+        first
       />
       <StatusField
         id={`step-case-${k}-status`}
