@@ -3,7 +3,6 @@ import { useShallow } from "zustand/react/shallow";
 import { FieldError } from "@/components/ui/field";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HttpStepForm } from "@/features/editor/components/http-step-form";
-import { MergeStepForm } from "@/features/editor/components/merge-step-form";
 import { Marked } from "@/features/editor/components/problem-mark";
 import { StepIdField } from "@/features/editor/components/step-id-field";
 import { RunSent } from "@/features/editor/components/step-run";
@@ -33,7 +32,6 @@ const fieldsOf: Record<string, ReadonlySet<StepField | undefined>> = {
     "unhandled_body",
   ]),
   transform: new Set(["id", "expr", "unhandled_body"]),
-  merge: new Set(["id", "expr", "unhandled_body"]),
 };
 const unknownKind = new Set<StepField | undefined>(["id", "kind"]);
 
@@ -128,10 +126,7 @@ export function StepSettings({ index }: { index: number }) {
       {kind === "transform" && (
         <TransformStepForm key={`transform-${index}`} index={index} />
       )}
-      {kind === "merge" && (
-        <MergeStepForm key={`merge-${index}`} index={index} />
-      )}
-      {kind !== "http" && kind !== "transform" && kind !== "merge" && (
+      {kind !== "http" && kind !== "transform" && (
         <p className="text-sm text-muted-foreground">
           The editor doesn&apos;t know steps of the kind “{kind}”. Delete this
           one, or change its kind through the API.

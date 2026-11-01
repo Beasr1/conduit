@@ -210,15 +210,17 @@ func TestRun_SkipsCascade(t *testing.T) {
 	}
 }
 
-// A step runs only when every line into it was taken (plan 04, strict
-// joins); otherwise it's skipped, and so are the steps after it.
+// An http step runs only when every line into it was taken (plan 04,
+// strict joins); otherwise it's skipped, and so are the steps after it.
 func TestRun_JoinsNeedEachStep(t *testing.T) {
 	t.Parallel()
-	p := program(t, "", `{
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `"c"`) }))
+	t.Cleanup(srv.Close)
+	p := program(t, srv.URL, `{
 	  "nodes": [
 	    {"id": "a", "kind": "transform", "expr": "input.a"},
 	    {"id": "b", "kind": "transform", "expr": "input.b"},
-	    {"id": "c", "kind": "transform", "expr": "'c'"},
+	    {"id": "c", "kind": "http", "request": {"method": "GET", "url": "BASE/c"}},
 	    {"id": "d", "kind": "transform", "expr": "'d'"}
 	  ],
 	  "edges": [
@@ -626,13 +628,13 @@ func TestRun_AnswersThroughTheLineTaken(t *testing.T) {
 	// Each of user's outputs answers on its own, with what user got.
 	direct := program(t, srv.URL, `{"nodes": [`+user+`],
 	  "response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "on": 404}]}}`)
-	// A merger reads either answer user gives, through a merge, and picks the
-	// status.
-	picked := program(t, srv.URL, `{"nodes": [`+user+`, {"id": "answered", "kind": "merge", "expr": "nodes.user.status"},
+	// answered, a transform, takes either answer user gives, and respond
+	// picks the status.
+	picked := program(t, srv.URL, `{"nodes": [`+user+`, {"id": "answered", "kind": "transform", "expr": "nodes.user.status"},
 	    {"id": "respond", "kind": "transform", "expr": "nodes.user.status = 404 ? { 'status': 404, 'body': { 'error': nodes.user.body.error } } : { 'status': 200, 'body': nodes.user.body }"}],
 	  "edges": [{"from": "user", "to": "answered"}, {"from": "user", "to": "answered", "on": 404}, {"from": "answered", "to": "respond"}],
 	  "response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}]}}`)
-	// One merger per status, kept apart by user's outputs.
+	// One transform per status, kept apart by user's outputs.
 	apart := program(t, srv.URL, `{"nodes": [`+user+`,
 	    {"id": "found", "kind": "transform", "expr": "{ 'id': nodes.user.body.id }"},
 	    {"id": "gone", "kind": "transform", "expr": "{ 'error': 'no such user' }"}],
@@ -664,48 +666,62 @@ func TestRun_AnswersThroughTheLineTaken(t *testing.T) {
 	}
 }
 
-// A switch gives {status, body} from its first case whose condition holds,
-// else from otherwise; a body left out is none. Joined to one answer or
-// several, its status picks it.
-func TestRun_SwitchPicksTheAnswer(t *testing.T) {
+// A transform's cases are its exits: the first case whose condition holds
+// gives its status and body, which the steps after read as an http node's,
+// and the run goes on down the lines from that case's exit, to a step or
+// the answer of its status; a body left out is none. With none holding, it
+// fails, and its Unhandled block takes that.
+func TestRun_CasesAreExits(t *testing.T) {
 	t.Parallel()
-	p := program(t, "", `{"nodes": [{"id": "respond", "kind": "transform", "switch": {
+	p := program(t, "", `{"nodes": [{"id": "check", "kind": "transform", "switch": {
 	    "cases": [
-	      {"when": "input.key = 1", "status": 400, "body": "{ 'error': 'bad key' }"},
-	      {"when": "input.key >= 1 and input.key <= 2", "status": 400, "body": "{ 'error': 'worse key' }"},
-	      {"when": "input.key = 3", "status": 204}],
-	    "otherwise": {"status": 200, "body": "{ 'key': input.key }"}}}],
-	  "response": {"answers": [{"status": 200, "from": "respond"}, {"status": 204, "from": "respond"}, {"status": 400, "from": "respond"}]}}`)
+	      {"name": "bad_key", "when": "input.key >= 1 and input.key <= 2", "status": 400,
+	       "body": "input.key = 1 ? { 'error': 'bad key' } : { 'error': 'worse key' }"},
+	      {"when": "input.key = 3", "status": 204},
+	      {"when": "input.key > 2", "status": 200, "body": "{ 'key': input.key }"}]}},
+	    {"id": "after", "kind": "transform", "expr": "{ 'got': nodes.check.status, 'with': nodes.check.body }"},
+	    {"id": "empty", "kind": "transform", "expr": "{ 'got': nodes.check.status, 'with': nodes.check.body }"}],
+	  "edges": [{"from": "check", "to": "after", "on": 200}, {"from": "check", "to": "empty", "on": 204}],
+	  "response": {"answers": [{"status": 200, "from": "after"}, {"status": 204, "from": "check", "on": 204}, {"status": 400, "from": "check", "on": 400}]}}`)
 	for input, want := range map[string]string{
-		`{"key": 1}`: `400 {"error":"bad key"}`,
-		`{"key": 2}`: `400 {"error":"worse key"}`,
-		`{"key": 3}`: `204 `,
-		`{"key": 9}`: `200 {"key":9}`,
+		`{"key": 1}`: `400 {"error":"bad key"} (check succeeded, after skipped, empty skipped)`,
+		`{"key": 2}`: `400 {"error":"worse key"} (check succeeded, after skipped, empty skipped)`,
+		`{"key": 3}`: `204  (check succeeded, after skipped, empty succeeded)`,
+		`{"key": 9}`: `200 {"got":200,"with":{"key":9}} (check succeeded, after succeeded, empty skipped)`,
 	} {
 		res, _ := execute(t, testEngine(Options{}), p, input)
+		if got := fmt.Sprintf("%d %s (%s)", res.Answer, string(res.Output), statuses(res)); res.Status != StatusSucceeded || got != want {
+			t.Errorf("%s: run %s answered %s, err %v; want %s", input, res.Status, got, res.Err, want)
+		}
+	}
+	// One case alone is an exit too, and its Unhandled takes none holding.
+	one := program(t, "", `{"nodes": [{"id": "respond", "kind": "transform",
+	    "switch": {"cases": [{"when": "input.id = 7", "status": 201, "body": "{ 'id': 7 }"}]}}],
+	  "response": {"answers": [{"status": 201, "from": "respond", "on": 201}, {"status": 422, "from": "respond", "unhandled": true}]}}`)
+	for input, want := range map[string]string{`{"id": 7}`: `201 {"id":7}`, `{"id": 8}`: `422 `} {
+		res, _ := execute(t, testEngine(Options{}), one, input)
 		if got := fmt.Sprintf("%d %s", res.Answer, string(res.Output)); res.Status != StatusSucceeded || got != want {
 			t.Errorf("%s: run %s answered %s, err %v; want %s", input, res.Status, got, res.Err, want)
 		}
 	}
-	// Joined to one answer, it still answers with its own status.
-	one := program(t, "", `{"nodes": [{"id": "respond", "kind": "transform",
-	    "switch": {"otherwise": {"status": 201, "body": "{ 'id': 7 }"}}}],
-	  "response": {"answers": [{"status": 201, "from": "respond"}]}}`)
-	if res, _ := execute(t, testEngine(Options{}), one, `{}`); res.Answer != 201 || string(res.Output) != `{"id":7}` {
-		t.Errorf("run %s answered %d %s, err %v; want 201 {\"id\":7}", res.Status, res.Answer, res.Output, res.Err)
-	}
 }
 
-// A switch whose condition or body fails fails its node, saying which.
+// A switch whose condition or body fails fails its node, saying which, and
+// so does one none of whose cases holds.
 func TestRun_SwitchFailures(t *testing.T) {
 	t.Parallel()
 	for when, want := range map[string]string{
 		`"when": "$number('one')", "status": 400`:                 "node respond: case 1: when: ",
 		`"when": "true", "status": 400, "body": "$number('one')"`: "node respond: case 1: body: ",
-		`"when": "false", "status": 400`:                          "node respond: otherwise: body: ",
+		`"when": "false", "status": 400`:                          "node respond: case 2: body: ",
+		`"when": "false", "status": 401`:                          "node respond: no case holds",
 	} {
+		last := `{"when": "true", "status": 200, "body": "$number('two')"}`
+		if strings.Contains(when, "401") {
+			last = `{"when": "false", "status": 200}`
+		}
 		p := program(t, "", `{"nodes": [{"id": "respond", "kind": "transform", "switch": {
-		    "cases": [{`+when+`}], "otherwise": {"status": 200, "body": "$number('two')"}}}]}`)
+		    "cases": [{`+when+`}, `+last+`]}}]}`)
 		res, _ := execute(t, testEngine(Options{}), p, `{}`)
 		if res.Status != StatusFailed || res.Err == nil || !strings.HasPrefix(res.Err.Error(), want) {
 			t.Errorf("%s: run %s, err %v; want failed with %q…", when, res.Status, res.Err, want)
@@ -743,7 +759,7 @@ func TestRun_AnswersWithoutAResponse(t *testing.T) {
 }
 
 // A run that takes no line into the response, or lines from two outputs,
-// or whose merger picks no answer it's joined to, fails: the workflow's
+// or whose transform picks no answer it's joined to, fails: the workflow's
 // fault, not the caller's.
 func TestRun_FailsWithoutAnAnswer(t *testing.T) {
 	t.Parallel()

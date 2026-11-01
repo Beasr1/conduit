@@ -28,6 +28,10 @@ var ErrNoSuchNode = errors.New("no step has that id")
 // ErrNoSuchEdge is a preview of a connection the definition doesn't have.
 var ErrNoSuchEdge = errors.New("no connection is at that place")
 
+// ErrNoSuchWay is a preview by a connection that doesn't come into the
+// step previewed.
+var ErrNoSuchWay = errors.New("no connection into that step is at that place")
+
 // Preview is what a step would read and do in a run, or whether a run would
 // take a connection, simulated over the definition's samples.
 type Preview struct {
@@ -60,7 +64,25 @@ type Preview struct {
 // an error made up. Previewing the output, every http step answers 2xx. It
 // works on a definition with problems, compiling what it can and reporting
 // what's in the way.
-func Simulate(ctx context.Context, d *workflow.Definition, id string) (pv *Preview, err error) {
+func Simulate(ctx context.Context, d *workflow.Definition, id string) (*Preview, error) {
+	return simulate(ctx, d, id, -1)
+}
+
+// SimulateWay previews step id as Simulate does, in a run that comes by the
+// connection at place k in d's edges, one into the step: the steps before
+// the connection's source answer through the outputs that lead to it, and
+// the source through the connection's. A transform any of whose
+// connections may come is previewed by each this way.
+func SimulateWay(ctx context.Context, d *workflow.Definition, id string, k int) (*Preview, error) {
+	if k < 0 {
+		return nil, ErrNoSuchWay
+	}
+	return simulate(ctx, d, id, k)
+}
+
+// simulate previews step id, or the output when id is "", by way, an edge
+// into the step, or by none when way is -1.
+func simulate(ctx context.Context, d *workflow.Definition, id string, way int) (pv *Preview, err error) {
 	defer catch(&pv, &err)
 	target := -1
 	if id != "" {
@@ -69,7 +91,15 @@ func Simulate(ctx context.Context, d *workflow.Definition, id string) (pv *Previ
 		}
 	}
 	s, problems := newSim(ctx, d)
+	if way >= 0 {
+		if way >= len(d.Edges) || target < 0 || d.Edges[way].To != id || s.p.edges[way].from == s.p.edges[way].to {
+			return nil, ErrNoSuchWay
+		}
+	}
 	s.aim(target, problems)
+	if way >= 0 {
+		s.steer(way)
+	}
 	pv = &Preview{}
 	if !s.runs(target) {
 		// On or after a loop of connections: nothing runs it. Validation
@@ -226,32 +256,54 @@ func (s *sim) need(target int) []bool {
 	return need
 }
 
-// choose picks the output each needed node before target answers through:
-// one with a connection on towards target, 2xx when that has one, else a
-// status, else Unhandled. Previewing the output, every node answers 2xx.
+// choose picks the output each needed node before target answers through,
+// leading on towards target. Previewing the output, every node answers 2xx.
 func (s *sim) choose(target int) {
 	if target < 0 {
 		return
 	}
-	for i, n := range s.p.nodes {
-		if !s.needed[i] || i == target {
-			continue
-		}
-		leads := make(map[int]bool)
-		for _, k := range n.out {
-			if e := s.p.edges[k]; s.needed[e.to] {
-				leads[e.on] = true
-			}
-		}
-		if leads[0] {
-			continue
-		}
-		if j := slices.IndexFunc(n.outputs, func(status int) bool { return leads[status] }); j >= 0 {
-			s.via[i] = n.outputs[j]
-		} else if leads[workflow.OnUnhandled] {
-			s.via[i] = workflow.OnUnhandled
+	for i := range s.p.nodes {
+		if s.needed[i] && i != target {
+			s.via[i] = s.lead(i, s.needed)
 		}
 	}
+}
+
+// steer has the preview come by edge k into its target: the edge's source
+// answers through the edge's output, and each node before the source
+// through one leading on towards it.
+func (s *sim) steer(k int) {
+	e := s.p.edges[k]
+	toward := s.need(e.from)
+	for i := range s.p.nodes {
+		if toward[i] && i != e.from {
+			s.via[i] = s.lead(i, toward)
+		}
+	}
+	s.via[e.from] = e.on
+}
+
+// lead is the output node i answers through to lead on towards the nodes
+// toward marks: one with a connection to them, 2xx when that has one, else
+// a status, else Unhandled, else 2xx.
+func (s *sim) lead(i int, toward []bool) int {
+	n := &s.p.nodes[i]
+	leads := make(map[int]bool)
+	for _, k := range n.out {
+		if e := s.p.edges[k]; toward[e.to] {
+			leads[e.on] = true
+		}
+	}
+	if leads[0] {
+		return 0
+	}
+	if j := slices.IndexFunc(n.outputs, func(status int) bool { return leads[status] }); j >= 0 {
+		return n.outputs[j]
+	}
+	if leads[workflow.OnUnhandled] {
+		return workflow.OnUnhandled
+	}
+	return 0
 }
 
 // keep adds the problems with the definition that are in the preview's way.
@@ -346,7 +398,7 @@ func (s *sim) runs(target int) bool {
 }
 
 // reached says whether a run would start node i, as every connection into
-// it is taken, or any into a merge is. One from a step the preview
+// it is taken, or any into a transform is. One from a step the preview
 // couldn't run, for want of a sample or a working expression, might be, so
 // it counts; one from a step it skipped isn't.
 func (s *sim) reached(i int) bool {
@@ -355,7 +407,7 @@ func (s *sim) reached(i int) bool {
 		from := s.p.edges[k].from
 		return s.taken[k] || !s.skipped[from] && s.entry[from] == nil
 	}
-	if s.p.nodes[i].kind == workflow.NodeKindMerge {
+	if s.p.nodes[i].kind == workflow.NodeKindTransform && len(in) > 0 {
 		return slices.ContainsFunc(in, might)
 	}
 	return !slices.ContainsFunc(in, func(k int) bool { return !might(k) })
@@ -409,18 +461,20 @@ func (s *sim) run(i int) {
 			return
 		}
 		s.entry[i] = entry
-	case (n.kind == workflow.NodeKindTransform || n.kind == workflow.NodeKindMerge) && n.whole:
+	case n.kind == workflow.NodeKindTransform && n.whole:
 		doc, err := document(s.input, s.parts(i))
+		var status int
 		var v json.RawMessage
 		part := "/expr"
 		if err == nil {
-			v, part, err = n.give(s.ctx, doc)
+			status, v, part, err = n.give(s.ctx, doc)
 		}
 		if err != nil {
 			s.problem("/nodes/"+strconv.Itoa(i)+part, "evaluation_failed", "%s: %v", n.id, err)
 			return
 		}
-		s.entry[i] = bodyEntry(v)
+		// A switch exits by the case that holds, wherever its lines lead.
+		s.entry[i], s.via[i] = transformEntry(status, v), status
 	default:
 		return // a kind the engine doesn't know, or an expr that doesn't compile: its problem says so
 	}
@@ -499,10 +553,21 @@ func (s *sim) step(pv *Preview, t int) {
 		for _, e := range errs {
 			s.problem(ptr+e.pointer, "evaluation_failed", "%v", e.err)
 		}
-	case (n.kind == workflow.NodeKindTransform || n.kind == workflow.NodeKindMerge) && n.whole:
-		var part string
-		if pv.Gives, part, err = n.give(s.ctx, doc); err != nil {
+	case n.kind == workflow.NodeKindTransform && n.whole:
+		status, body, part, err := n.give(s.ctx, doc)
+		switch {
+		case err != nil:
 			s.problem(ptr+part, "evaluation_failed", "%v", err)
+		case n.cases == nil:
+			pv.Gives = body
+		default:
+			// The case that holds: its status, and its body, if it gives one.
+			if pv.Gives, err = json.Marshal(struct {
+				Status int             `json:"status"`
+				Body   json.RawMessage `json:"body,omitempty"`
+			}{status, body}); err != nil {
+				s.problem(ptr, "evaluation_failed", "%v", err)
+			}
 		}
 	}
 	if n.unhandled != nil {

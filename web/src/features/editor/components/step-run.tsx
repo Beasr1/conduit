@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { JsonBlock } from "@/features/editor/components/mapping-field";
 import { withSample } from "@/features/editor/components/step-sample";
 import { updateNode } from "@/features/editor/edits";
-import { outputOf, wayLabel } from "@/features/editor/flow";
+import { outputOf, wayLabel, waysInto } from "@/features/editor/flow";
 import { useRun, useStepRun } from "@/features/editor/hooks/use-runs";
 import { runSaid, said, type StepRun } from "@/features/editor/runs";
 import { useEditor } from "@/features/editor/store";
@@ -166,16 +166,20 @@ export function RunGot({
   );
 }
 
-// RunGave is what a transform or Merge step gave in the run shown, and
-// the ways a Merge came by. One whose Unhandled block took its failure
-// gave nothing of its own: its Unhandled says what the block did.
+// RunGave is what a transform step gave in the run shown, the status of
+// the case that held among it when it has cases, and the ways it came by,
+// when more than one line comes into it. One whose Unhandled block
+// took its failure gave nothing of its own: its Unhandled says what the
+// block did.
 export function RunGave({ index }: { index: number }) {
   const step = useEditor((s) => s.draft.nodes[index]?.id ?? "");
   const run = useStepRun(step);
   const came = useEditor((s) =>
-    (run?.came ?? [])
-      .map((w) => wayLabel(s.draft, w.from, outputOf(w)))
-      .join(", "),
+    waysInto(s.draft, step).length > 1
+      ? (run?.came ?? [])
+          .map((w) => wayLabel(s.draft, w.from, outputOf(w)))
+          .join(", ")
+      : "",
   );
   const gave = useRecorded(step)?.response;
   if (!run) return null;
@@ -189,7 +193,7 @@ export function RunGave({ index }: { index: number }) {
       )}
       {gave && run.state === "succeeded" && (
         <>
-          <p>It gave</p>
+          <p>It gave{gave.status === undefined ? "" : ` ${gave.status}`}</p>
           <JsonBlock value={gave.body} />
         </>
       )}

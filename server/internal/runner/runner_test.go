@@ -350,13 +350,35 @@ func TestServe_ATransformsUnhandledBodyIsRecorded(t *testing.T) {
 	}
 }
 
-// A merge is recorded with the ways that came, as the definition writes
-// those edges; other steps have none.
-func TestServe_AMergesWaysAreRecorded(t *testing.T) {
+// A transform's case is recorded as an http node's answer is: its status
+// and its body.
+func TestServe_ACasesStatusIsRecorded(t *testing.T) {
+	t.Parallel()
+	r := newRunner(t, Options{})
+	w := saveWorkflow(t, "", `{"nodes": [{"id": "check", "kind": "transform",
+	    "switch": {"cases": [{"when": "input.id = 0", "status": 404, "body": "{ 'error': 'gone' }"}, {"when": "true", "status": 200}]}}],
+	  "response": {"answers": [{"status": 200, "from": "check", "on": 200}, {"status": 404, "from": "check", "on": 404}]}}`)
+	out, err := r.Serve(t.Context(), w.Slug, json.RawMessage(`{"id": 0}`))
+	if err != nil || out.Answer != 404 || string(out.Output) != `{"error":"gone"}` {
+		t.Fatalf("Serve() = %d %s, %v", out.Answer, out.Output, err)
+	}
+	nodes, err := db.NodeRuns(t.Context(), out.Run.ID)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("NodeRuns() = %+v, %v", nodes, err)
+	}
+	got := decode[responseDoc](t, nodes[0].Response)
+	if body := decode[map[string]string](t, got.Body); got.Status != 404 || body["error"] != "gone" || got.Headers != nil {
+		t.Errorf("check's response = %s", nodes[0].Response)
+	}
+}
+
+// A transform is recorded with the lines it came by, as the definition
+// writes those edges; one with no line into it has none.
+func TestServe_ATransformsWaysAreRecorded(t *testing.T) {
 	t.Parallel()
 	r := newRunner(t, Options{})
 	w := saveWorkflow(t, "", `{"nodes": [{"id": "count", "kind": "transform", "expr": "$number(input.n)"},
-	    {"id": "e", "kind": "merge", "expr": "$exists(nodes.count.error) ? 0 : nodes.count.body"}],
+	    {"id": "e", "kind": "transform", "expr": "$exists(nodes.count.error) ? 0 : nodes.count.body"}],
 	  "edges": [{"from": "count", "to": "e"}, {"from": "count", "to": "e", "unhandled": true}],
 	  "response": {"answers": [{"status": 200, "from": "e"}]}}`)
 	for input, want := range map[string]struct {

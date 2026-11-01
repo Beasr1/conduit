@@ -4,7 +4,6 @@ import { expect, test } from "vitest";
 
 import type { components } from "@/gen/schema";
 import { renderEditor } from "@/test/editor";
-import { workflowRevision } from "@/test/fixtures";
 import { shimReactFlow } from "@/test/react-flow";
 import { server } from "@/test/server";
 
@@ -12,23 +11,20 @@ type Definition = components["schemas"]["Definition"];
 type NodeEvent = components["schemas"]["NodeEvent"];
 type Preview = components["schemas"]["Preview"];
 type PreviewRequest = components["schemas"]["PreviewRequest"];
-type Revision = components["schemas"]["Revision"];
 type Run = components["schemas"]["Run"];
 
 shimReactFlow();
 
-const prefs = {
-  id: "prefs",
-  kind: "http",
-  request: { method: "GET", url: "https://prefs.example.com/v1/7" },
-  outputs: [{ status: 400 }],
-} satisfies Definition["nodes"][number];
-
 // prefs answers 2xx or 400; on 400, fallback gets them another way.
-// prefs_ok, a Merge, takes whichever came, and greet follows it.
+// prefs_ok, a transform, takes whichever came, and greet follows it.
 const merged: Definition = {
   nodes: [
-    prefs,
+    {
+      id: "prefs",
+      kind: "http",
+      request: { method: "GET", url: "https://prefs.example.com/v1/7" },
+      outputs: [{ status: 400 }],
+    },
     {
       id: "fallback",
       kind: "http",
@@ -36,7 +32,7 @@ const merged: Definition = {
     },
     {
       id: "prefs_ok",
-      kind: "merge",
+      kind: "transform",
       expr: "$exists(nodes.fallback) ? nodes.fallback.body.data : nodes.prefs.body",
     },
     { id: "greet", kind: "transform", expr: "nodes.prefs_ok.body.theme" },
@@ -48,13 +44,6 @@ const merged: Definition = {
     { from: "prefs_ok", to: "greet" },
   ],
 };
-
-// ways is what a Merge card's blocks on its left say, its ways then + Add:
-// each holds a point.
-const ways = (card: HTMLElement) =>
-  [...card.querySelectorAll(".block-point")].map(
-    (point) => point.parentElement?.textContent,
-  );
 
 // options opens a select from the keyboard, as a screen reader would, and
 // gives what it offers.
@@ -78,39 +67,101 @@ async function choose(label: string, option: string) {
   fireEvent.keyDown(document.activeElement ?? document.body, { key: "Enter" });
 }
 
-test("a Merge step is added with + Add for its ways and an expression to write", async () => {
-  renderEditor({ nodes: [prefs] });
+// open picks a step on the canvas, and gives its panel.
+async function open(id: string) {
   fireEvent.click(
-    await screen.findByRole("button", { name: "Add Merge step" }),
+    within(await screen.findByTestId(`rf__node-${id}`)).getByText(id),
   );
-  fireEvent.change(screen.getByLabelText("Id"), {
-    target: { value: "prefs_ok" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
-  const card = await screen.findByTestId("rf__node-prefs_ok");
-  expect(ways(card)).toEqual(["+ Add"]);
-  expect(within(card).getByText("Merge")).toBeTruthy();
-  expect(card.querySelector('[data-part="unhandled"]')?.textContent).toBe(
-    "Unhandled · fails the run",
-  );
+  return screen.findByRole("complementary", { name: "Transform step" });
+}
 
-  fireEvent.click(within(card).getByText("Merge"));
-  const panel = await screen.findByRole("complementary", {
-    name: "Merge step",
-  });
-  expect(within(panel).getByText(/^None yet: add one below/)).toBeTruthy();
+test("there's no Merge step to add: a transform takes whichever of its lines came", async () => {
+  renderEditor(merged);
   expect(
-    within(panel).getByRole("textbox", { name: "Expression" }),
-  ).toHaveProperty("value", "");
-  await choose("Add a way from", "prefs · 2xx");
-  await waitFor(() => expect(ways(card)).toEqual(["prefs · 2xx", "+ Add"]));
-  expect(await screen.findByTestId("rf__edge-prefs->prefs_ok")).toBeTruthy();
-  expect(
-    within(panel).getByRole("button", { name: "Way from prefs · 2xx always" }),
+    await screen.findByRole("button", { name: "Add transform step" }),
   ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /merge/i })).toBeNull();
 });
 
-test("its expression makes its value from whatever came, previewed over the samples", async () => {
+test("lines into a transform with several are dashed, as each may not come; a lone line isn't", async () => {
+  renderEditor(merged);
+  const way = await screen.findByTestId("rf__edge-prefs->prefs_ok");
+  expect(way.classList.contains("way")).toBe(true);
+  expect(way.getAttribute("aria-label")).toBe(
+    "Connection from prefs to prefs_ok, one of its ways",
+  );
+  expect(
+    screen.getByTestId("rf__edge-fallback->prefs_ok").classList.contains("way"),
+  ).toBe(true);
+  const needed = screen.getByTestId("rf__edge-prefs_ok->greet");
+  expect(needed.classList.contains("way")).toBe(false);
+});
+
+test("a way's panel says the transform runs if any comes; a lone line's, that it needs it", async () => {
+  renderEditor(merged);
+  fireEvent.click(await screen.findByTestId("rf__edge-prefs->prefs_ok"));
+  const way = await screen.findByRole("complementary", { name: "Connection" });
+  expect(
+    within(way).getByText(
+      /prefs_ok, a transform, runs if any of its ways is taken, once all have ended/,
+    ),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByTestId("rf__edge-prefs_ok->greet"));
+  await waitFor(() =>
+    expect(
+      within(
+        screen.getByRole("complementary", { name: "Connection" }),
+      ).getByText(
+        /greet runs only when this is true and its other connections are taken/,
+      ),
+    ).toBeTruthy(),
+  );
+});
+
+test("its preview comes by the way picked, its first at first", async () => {
+  renderEditor(merged);
+  const asked: PreviewRequest[] = [];
+  server.use(
+    http.post<PathParams, PreviewRequest, Preview>(
+      "/api/v1/preview",
+      async ({ request }) => {
+        const body = await request.json();
+        asked.push(body);
+        const byFallback = body.way === 2;
+        return HttpResponse.json<Preview>({
+          reads: {
+            input: null,
+            nodes: byFallback
+              ? {
+                  prefs: { status: 400, body: { error: "no prefs yet" } },
+                  fallback: { status: 200, body: { data: { theme: "light" } } },
+                }
+              : { prefs: { status: 200, body: { theme: "dark" } } },
+          },
+          gives: { theme: byFallback ? "light" : "dark" },
+          skipped: false,
+          problems: [],
+        });
+      },
+    ),
+  );
+  const panel = await open("prefs_ok");
+  expect(await within(panel).findByText(/"theme": "dark"/)).toBeTruthy();
+  expect(asked.at(-1)).toMatchObject({ node: "prefs_ok", way: 0 });
+  expect(await options("Preview a run that comes by")).toEqual([
+    "prefs · 2xx",
+    "fallback · 2xx",
+  ]);
+  fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+
+  await choose("Preview a run that comes by", "fallback · 2xx");
+  expect(await within(panel).findByText(/"theme": "light"/)).toBeTruthy();
+  expect(asked.at(-1)).toMatchObject({ node: "prefs_ok", way: 2 });
+  // What it reads is that run's: prefs answering 400, and fallback.
+  expect(within(panel).getByText("fallback")).toBeTruthy();
+});
+
+test("a transform with one line into it previews without a way to pick", async () => {
   renderEditor(merged);
   const asked: PreviewRequest[] = [];
   server.use(
@@ -119,92 +170,22 @@ test("its expression makes its value from whatever came, previewed over the samp
       async ({ request }) => {
         asked.push(await request.json());
         return HttpResponse.json<Preview>({
-          reads: {
-            input: null,
-            nodes: { prefs: { status: 200, body: { theme: "dark" } } },
-          },
-          gives: { theme: "dark" },
+          reads: { input: null, nodes: {} },
+          gives: "dark",
           skipped: false,
           problems: [],
         });
       },
     ),
   );
-  const saved: Definition[] = [];
-  server.use(
-    http.put<PathParams, Definition, Revision>(
-      "/api/v1/workflows/wf-1/draft",
-      async ({ request }) => {
-        const draft = await request.json();
-        saved.push(draft);
-        const { revision } = workflowRevision("wf-1", "Merge", draft);
-        return HttpResponse.json<Revision>({ ...revision, revision: 2 });
-      },
-    ),
-  );
-  const card = await screen.findByTestId("rf__node-prefs_ok");
-  expect(ways(card)).toEqual(["prefs · 2xx", "fallback · 2xx", "+ Add"]);
-
-  fireEvent.click(within(card).getByText("Merge"));
-  const panel = await screen.findByRole("complementary", {
-    name: "Merge step",
-  });
-  const expr = within(panel).getByRole("textbox", { name: "Expression" });
-  expect(expr).toHaveProperty("value", merged.nodes[2]?.expr);
+  const panel = await open("greet");
   expect(await within(panel).findByText("It gives")).toBeTruthy();
-  expect(within(panel).getByText(/"theme": "dark"/)).toBeTruthy();
-  expect(asked.at(-1)?.node).toBe("prefs_ok");
-
-  fireEvent.change(expr, { target: { value: "nodes.prefs.body" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() => expect(saved).toHaveLength(1));
-  expect(saved[0]?.nodes[2]).toEqual({
-    id: "prefs_ok",
-    kind: "merge",
-    expr: "nodes.prefs.body",
-  });
-});
-
-test("its ways each open their line, and + Way offers what could join it", async () => {
-  renderEditor(merged);
-  fireEvent.click(
-    within(await screen.findByTestId("rf__node-prefs_ok")).getByText("Merge"),
-  );
-  const panel = await screen.findByRole("complementary", {
-    name: "Merge step",
-  });
-  // Not the ways it has, nor greet, which follows it.
-  expect(await options("Add a way from")).toEqual([
-    "prefs · 400",
-    "prefs · Unhandled",
-    "fallback · Unhandled",
-  ]);
-  fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
-
-  fireEvent.click(
-    within(panel).getByRole("button", {
-      name: "Way from fallback · 2xx always",
-    }),
-  );
-  const connection = await screen.findByRole("complementary", {
-    name: "Connection",
-  });
   expect(
-    within(connection).getByText(
-      /prefs_ok, a Merge step, runs if any of its ways is taken, once all have ended/,
-    ),
-  ).toBeTruthy();
-});
-
-test("a way is dashed, as it may not be taken; a line into any other step isn't", async () => {
-  renderEditor(merged);
-  const way = await screen.findByTestId("rf__edge-prefs->prefs_ok");
-  expect(way.classList.contains("way")).toBe(true);
-  expect(way.getAttribute("aria-label")).toBe(
-    "Connection from prefs to prefs_ok, one of its ways",
-  );
-  const needed = screen.getByTestId("rf__edge-prefs_ok->greet");
-  expect(needed.classList.contains("way")).toBe(false);
+    within(panel).queryByRole("combobox", {
+      name: "Preview a run that comes by",
+    }),
+  ).toBeNull();
+  expect(asked.at(-1)?.way).toBeUndefined();
 });
 
 const at = (ms: number) =>
@@ -249,13 +230,14 @@ const ran: Run = {
       attempts: 0,
       ended_at: at(180),
       response: { body: "light" },
+      ways: [{ from: "prefs_ok" }],
     },
   ],
 };
 
 // serveRun answers the run's start, its events, ending with the run, and the
 // run itself.
-function serveRun() {
+function serveRun(ran: Run) {
   const events: NodeEvent[] = (ran.nodes ?? []).map((n) => ({
     node: n.node,
     kind: n.status,
@@ -291,25 +273,18 @@ function serveRun() {
   );
 }
 
-test("a run marks each way that came, and draws the lines they came by", async () => {
+test("a run draws the lines a transform came by solid, the others dashed, and its panel names them", async () => {
   renderEditor(merged);
-  serveRun();
+  serveRun(ran);
   fireEvent.click(await screen.findByRole("button", { name: "Run" }));
   const dialog = await screen.findByRole("dialog", { name: "Run" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Run" }));
 
-  const card = await screen.findByTestId("rf__node-prefs_ok");
+  const came = await screen.findByTestId("rf__edge-fallback->prefs_ok");
   await waitFor(() =>
-    expect(ways(card)).toEqual([
-      "prefs · 2xx",
-      "fallback · 2xx, a way that came",
-      "+ Add",
-    ]),
-  );
-  // The way that came is drawn solid; the other is dashed as not taken.
-  const came = screen.getByTestId("rf__edge-fallback->prefs_ok");
-  expect(came.getAttribute("aria-label")).toBe(
-    "Connection from fallback to prefs_ok, taken in this run",
+    expect(came.getAttribute("aria-label")).toBe(
+      "Connection from fallback to prefs_ok, taken in this run",
+    ),
   );
   expect(
     [...came.classList].filter((c) => c === "way" || c === "untaken"),
@@ -320,13 +295,61 @@ test("a run marks each way that came, and draws the lines they came by", async (
   );
   expect(other.classList.contains("untaken")).toBe(true);
 
-  fireEvent.click(within(card).getByText("prefs_ok"));
-  const panel = await screen.findByRole("complementary", {
-    name: "Merge step",
-  });
+  const panel = await open("prefs_ok");
   expect(
     await within(panel).findByText(
       (_text, el) => el?.textContent === "It came by fallback · 2xx.",
     ),
   ).toBeTruthy();
+  // greet has one line in, so how it came goes without saying.
+  const after = await open("greet");
+  expect(await within(after).findByText("It gave")).toBeTruthy();
+  expect(within(after).queryByText(/^It came by/)).toBeNull();
+});
+
+// count fails into its Unhandled, so counted comes by that, not by count's
+// value: two ways from one step, told apart by the output each leaves.
+test("a run tells apart two ways from one step", async () => {
+  renderEditor({
+    nodes: [
+      { id: "count", kind: "transform", expr: "$number(input.n)" },
+      { id: "counted", kind: "transform", expr: "0" },
+    ],
+    edges: [
+      { from: "count", to: "counted" },
+      { from: "count", to: "counted", unhandled: true },
+    ],
+  });
+  serveRun({
+    ...ran,
+    nodes: [
+      {
+        node: "count",
+        status: "failed",
+        attempts: 0,
+        ended_at: at(10),
+        error: { code: "workflow_error", detail: "no number", caught: true },
+      },
+      {
+        node: "counted",
+        status: "succeeded",
+        attempts: 0,
+        ended_at: at(20),
+        response: { body: 0 },
+        ways: [{ from: "count", unhandled: true }],
+      },
+    ],
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Run" }));
+  const dialog = await screen.findByRole("dialog", { name: "Run" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Run" }));
+  const caught = await screen.findByTestId("rf__edge-count->counted#1");
+  await waitFor(() =>
+    expect(caught.getAttribute("aria-label")).toBe(
+      "Connection from count to counted, taken in this run",
+    ),
+  );
+  expect(
+    screen.getByTestId("rf__edge-count->counted").getAttribute("aria-label"),
+  ).toBe("Connection from count to counted, not taken in this run");
 });

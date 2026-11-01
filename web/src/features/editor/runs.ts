@@ -10,7 +10,7 @@ type Way = components["schemas"]["Way"];
 
 // StepRun is how one step went in the run shown: its state, the status it
 // got back, if it's an HTTP step that got one, its attempts and time, why
-// it failed, and the ways a Merge step came by. A step is waiting while the
+// it failed, and the ways a transform came by. A step is waiting while the
 // run hasn't reached it, and "not run" when the run ended without it.
 export interface StepRun {
   state:
@@ -106,9 +106,10 @@ export function takenOf(
   on: number | undefined,
   from: StepRun,
   to: StepRun,
+  cases = false,
 ): boolean | undefined {
   if (["waiting", "running", "retrying"].includes(from.state)) return undefined;
-  const way = wayOf(from);
+  const way = wayOf(from, cases);
   if (way === undefined || way !== (on ?? 0)) return false;
   if (to.state === "waiting") return undefined;
   return !["skipped", "not run"].includes(to.state);
@@ -116,10 +117,12 @@ export function takenOf(
 
 // wayOf is the output a step that ended answered through: 0 for 2xx and a
 // transform's one, its status, or UNHANDLED when that block took its
-// failure. It's undefined when the step gave no answer.
-export function wayOf(run: StepRun): number | undefined {
+// failure; for a transform with cases, the status of the case that held,
+// which names its exit. It's undefined when the step gave no answer.
+export function wayOf(run: StepRun, cases = false): number | undefined {
   if (run.state === "failed" && run.error?.caught) return UNHANDLED;
   if (run.state !== "succeeded") return undefined;
+  if (cases) return run.status;
   return run.status === undefined || (run.status >= 200 && run.status <= 299)
     ? 0
     : run.status;

@@ -51,8 +51,8 @@ func document(input json.RawMessage, parts []docPart) ([]byte, error) {
 }
 
 // exec runs node i on its own goroutine and reports back whatever happens,
-// a panic included. parts is what it reads, and came, for a merge, the
-// edges taken into it. A failure of the node's own goes to its Unhandled
+// a panic included. parts is what it reads, and came, for a transform,
+// the edges taken into it. A failure of the node's own goes to its Unhandled
 // block when a line leaves that: the node ends failed, giving what the
 // block's body gives, and the run goes on down those lines. The run's end,
 // by its deadline or a failure elsewhere, and a panic, our bug, never do.
@@ -75,11 +75,9 @@ func (r *run) exec(i int, parts []docPart, came []int) {
 		o = r.call(i, doc)
 	case n.kind == workflow.NodeKindTransform:
 		o = r.transform(n, doc)
-	case n.kind == workflow.NodeKindMerge:
-		o = r.transform(n, doc)
 		o.result.Ways = r.ways(came)
 	}
-	on := outputOf(o.result.HTTPStatus)
+	on := exitOf(n.kind, o.result.HTTPStatus)
 	if o.err != nil {
 		if !n.catches || r.ctx.Err() != nil {
 			return
@@ -163,6 +161,16 @@ func outputOf(status int) int {
 		return 0
 	}
 	return status
+}
+
+// exitOf is the output a node of kind answered through, given the status it
+// answered with: an http node's, as outputOf has it; a transform's case's
+// own, or 0, its one output, for a transform with an expr.
+func exitOf(kind workflow.NodeKind, status int) int {
+	if kind == workflow.NodeKindTransform {
+		return status
+	}
+	return outputOf(status)
 }
 
 // partError is a part of a request that didn't render: which part, as a
@@ -329,53 +337,57 @@ func failureEntry(status int, header http.Header, body json.RawMessage, code, de
 	}{status, lowerHeaders(header), body, f})
 }
 
+// transform runs transform node n over doc: its expr's value, or the status
+// and body of the case that holds, as an http node's answer.
 func (r *run) transform(n *node, doc []byte) outcome {
-	v, _, err := n.give(r.ctx, doc)
+	status, body, _, err := n.give(r.ctx, doc)
 	if err != nil {
 		return outcome{err: err}
 	}
-	return outcome{result: NodeResult{Body: v}, entry: bodyEntry(v)}
+	return outcome{result: NodeResult{HTTPStatus: status, Body: body}, entry: transformEntry(status, body)}
 }
 
-// give is what transform node n gives over doc: its expr's value, or its
-// switch's {"status": …, "body": …}, from the first case whose condition
-// holds, else from otherwise; a body left out is none. A failure says, in
-// words and as a pointer below the node, where it is.
-func (n *node) give(ctx context.Context, doc []byte) (json.RawMessage, string, error) {
-	if n.otherwise == nil {
+// ErrNoCase is a switch whose cases none hold. It fails the node, as any
+// failure of its own does, and its Unhandled block takes that.
+var ErrNoCase = errors.New("no case holds")
+
+// give is what transform node n gives over doc: its expr's value, with no
+// status; or, from its switch, the status and body of the first case whose
+// condition holds, a body left out none, and with none holding, ErrNoCase.
+// A failure says, in words and as a pointer below the node, where it is.
+func (n *node) give(ctx context.Context, doc []byte) (status int, body json.RawMessage, part string, err error) {
+	if n.cases == nil {
 		v, err := n.expr.Eval(ctx, doc)
 		if err != nil {
-			return nil, "/expr", fmt.Errorf("expr: %w", err)
+			return 0, nil, "/expr", fmt.Errorf("expr: %w", err)
 		}
-		return v, "", nil
+		return 0, v, "", nil
 	}
-	c, name, ptr := n.otherwise, "otherwise", "/switch/otherwise"
 	for k := range n.cases {
-		holds, err := n.cases[k].when.Eval(ctx, doc)
+		c := &n.cases[k]
+		holds, err := c.when.Eval(ctx, doc)
 		if err != nil {
-			return nil, fmt.Sprintf("/switch/cases/%d/when", k), fmt.Errorf("case %d: when: %w", k+1, err)
+			return 0, nil, fmt.Sprintf("/switch/cases/%d/when", k), fmt.Errorf("case %d: when: %w", k+1, err)
 		}
-		if holds {
-			c, name, ptr = &n.cases[k], fmt.Sprintf("case %d", k+1), fmt.Sprintf("/switch/cases/%d", k)
-			break
+		if !holds {
+			continue
 		}
+		if c.body != nil {
+			if body, err = c.body.Eval(ctx, doc); err != nil {
+				return 0, nil, fmt.Sprintf("/switch/cases/%d/body", k), fmt.Errorf("case %d: body: %w", k+1, err)
+			}
+		}
+		return c.status, body, "", nil
 	}
-	var body json.RawMessage
-	if c.body != nil {
-		var err error
-		if body, err = c.body.Eval(ctx, doc); err != nil {
-			return nil, ptr + "/body", fmt.Errorf("%s: body: %w", name, err)
-		}
-	}
-	v, err := json.Marshal(struct {
-		Status int             `json:"status"`
-		Body   json.RawMessage `json:"body,omitempty"` // none: left out
-	}{c.status, body})
-	return v, "", err
+	return 0, nil, "/switch", ErrNoCase
 }
 
-// ways is the edges taken into a merge, came, as a run records them.
+// ways is the edges taken into a transform, came, as a run records them;
+// nil for one no edge comes into.
 func (r *run) ways(came []int) []Way {
+	if len(came) == 0 {
+		return nil
+	}
 	out := make([]Way, len(came))
 	for j, k := range came {
 		e := r.p.edges[k]
@@ -384,7 +396,18 @@ func (r *run) ways(came []int) []Way {
 	return out
 }
 
-// bodyEntry is a transform or merge node's part of the data document: its
+// transformEntry is a transform node's part of the data document: the
+// status and body of the case that held, as an http node's answer has them,
+// a body left out null; or its expr's value, as its body.
+func transformEntry(status int, body json.RawMessage) json.RawMessage {
+	if status == 0 {
+		return bodyEntry(body)
+	}
+	// A nil json.RawMessage prints as null.
+	return fmt.Appendf(nil, `{"status":%d,"body":%s}`, status, body)
+}
+
+// bodyEntry is a transform node's part of the data document: its
 // value, as its body.
 func bodyEntry(v json.RawMessage) json.RawMessage {
 	return append(append([]byte(`{"body":`), v...), '}')

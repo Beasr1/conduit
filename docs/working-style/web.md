@@ -191,13 +191,17 @@ the API is `/api` on the page's own origin.
 - A canvas node whose handles change after it mounts says so with
   `useUpdateNodeInternals`. React Flow finds a node's handles when it
   mounts, so a connection from a handle added later isn't drawn.
-- A Merge step is drawn as a block per way on its left, each with its
-  point, then + Add, where a new line is let go. A way's point is named for
-  the step and response it comes from (`way:<from>:<output>`), as a step
-  joins another once per output, so it stays as other ways come and go. A
-  point covers its block (`block-point`), as an answer's does on the
-  response card. A way's line is dashed until a run says whether it came:
-  dashed means it may not be taken, or wasn't.
+- A transform with cases is drawn as an HTTP step is: an exit block per
+  case, then + Case, each exit with its handle, named by its status, as a
+  line from it says `on: <status>`. Its panel has a tab per case, keyed by
+  its place (`case:<k>`), not its status, so typing a new status keeps the
+  tab open; the store keeps those parts open across edits as it keeps an
+  HTTP step's responses.
+- Each line into a transform with more than one is one of its ways
+  (`data.way`): it's dashed until a run says whether it came, as dashed
+  means it may not be taken, or wasn't. Its preview comes by the way picked
+  in its Input, kept by the ends of the line, as one step joins another
+  once per output, and found in the draft previewed by them.
 - An HTTP step is drawn as blocks, each saying which part of the step it
   is (`data-part`). The canvas reads the block a click lands in
   (`onNodeClick`), and the store's `part` holds what's open, so the canvas

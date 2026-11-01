@@ -9,6 +9,7 @@ import {
   settle,
 } from "@/features/editor/edits";
 import {
+  exitsOf,
   handlesOf,
   RESPONSE,
   toFlow,
@@ -167,8 +168,8 @@ export function createEditorStore(opened: Definition): EditorStore {
 
 // kept is the part of a selection the draft still has: a deleted node drops
 // out of it, and so does an edge whose end was renamed. The response card is
-// always there. A step whose open response was removed opens on its request;
-// its Unhandled is always there too.
+// always there. A step whose open response, or case, was removed opens on
+// its first part; its Unhandled is always there too.
 function kept(
   { selected, part }: Pick<EditorState, "selected" | "part">,
   draft: Definition,
@@ -187,7 +188,8 @@ function kept(
     part === "request" ||
     part === "add" ||
     part === UNHANDLED_HANDLE ||
-    handlesOf(node).includes(part)
+    handlesOf(node).includes(part) ||
+    exitsOf(node).some((e) => e.part === part)
       ? part
       : "request";
   if (

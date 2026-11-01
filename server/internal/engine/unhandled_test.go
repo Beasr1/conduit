@@ -137,11 +137,11 @@ func TestRun_AnswersThroughUnhandled(t *testing.T) {
 	if res.Status != StatusSucceeded || res.Answer != 502 || string(res.Output) != `{"error": "down"}` || !res.Nodes[0].Caught {
 		t.Errorf("call: run %s answered %d %s, err %v", res.Status, res.Answer, res.Output, res.Err)
 	}
-	// A switch picks between its answers, and its Unhandled block, joined to
-	// one more, takes its case failing.
+	// A switch's cases each answer, and its Unhandled block, joined to one
+	// more, takes its case failing.
 	pick := program(t, "", `{"nodes": [{"id": "t", "kind": "transform",
-	    "switch": {"cases": [{"when": "$number(input.n) > 1", "status": 400}], "otherwise": {"status": 200}}}],
-	  "response": {"answers": [{"status": 200, "from": "t"}, {"status": 400, "from": "t"}, {"status": 500, "from": "t", "unhandled": true}]}}`)
+	    "switch": {"cases": [{"when": "$number(input.n) > 1", "status": 400}, {"when": "true", "status": 200}]}}],
+	  "response": {"answers": [{"status": 200, "from": "t", "on": 200}, {"status": 400, "from": "t", "on": 400}, {"status": 500, "from": "t", "unhandled": true}]}}`)
 	for input, want := range map[string]int{`{"n": "2"}`: 400, `{"n": "0"}`: 200, `{"n": "two"}`: 500} {
 		res, _ := execute(t, testEngine(Options{}), pick, input)
 		if res.Status != StatusSucceeded || res.Answer != want || (want == 500 && res.Output != nil) {
@@ -195,7 +195,7 @@ func TestRun_FollowsANodeEitherWay(t *testing.T) {
 	p := program(t, srv.URL, `{
 	  "nodes": [
 	    {"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/{{ input.path }}"}},
-	    {"id": "either_way", "kind": "merge", "expr": "nodes.a"},
+	    {"id": "either_way", "kind": "transform", "expr": "nodes.a"},
 	    {"id": "next", "kind": "transform", "expr": "$exists(nodes.a.error) ? 'missed' : 'got ' & nodes.a.body.n"}
 	  ],
 	  "edges": [{"from": "a", "to": "either_way"}, {"from": "a", "to": "either_way", "unhandled": true}, {"from": "either_way", "to": "next"}],
@@ -289,9 +289,9 @@ func TestSimulate_FailsIntoUnhandled(t *testing.T) {
 		t.Errorf("after: skipped %v, gives %s, problems %s", pv.Skipped, pv.Gives, problemCodes(pv))
 	}
 	// An output leading there too comes first: user's 2xx and Unhandled into
-	// a merge that fallback follows.
+	// a transform that fallback follows.
 	pv = previewOf(t, failing, "fallback", func(d *workflow.Definition) {
-		d.Nodes = append(d.Nodes, workflow.Node{ID: "either_way", Kind: workflow.NodeKindMerge, Expr: "nodes.user"})
+		d.Nodes = append(d.Nodes, workflow.Node{ID: "either_way", Kind: workflow.NodeKindTransform, Expr: "nodes.user"})
 		d.Edges[0] = workflow.Edge{From: "user", To: "either_way", Unhandled: true}
 		d.Edges = append(d.Edges, workflow.Edge{From: "user", To: "either_way"}, workflow.Edge{From: "either_way", To: "fallback"})
 	})
@@ -312,7 +312,7 @@ func TestRun_UnhandledBodyGivesAFallback(t *testing.T) {
 	p := program(t, "", `{
 	  "nodes": [
 	    {"id": "count", "kind": "transform", "expr": "$number(input.n)", "unhandled": {"body": "0"}},
-	    {"id": "either_way", "kind": "merge", "expr": "nodes.count"},
+	    {"id": "either_way", "kind": "transform", "expr": "nodes.count"},
 	    {"id": "next", "kind": "transform", "expr": "nodes.count.body + 1"}
 	  ],
 	  "edges": [{"from": "count", "to": "either_way"}, {"from": "count", "to": "either_way", "unhandled": true}, {"from": "either_way", "to": "next"}],

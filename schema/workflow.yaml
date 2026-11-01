@@ -11,7 +11,7 @@ paths: {}
 components:
   schemas:
     Definition:
-      description: A workflow. A node runs once its parents have finished, if every edge into it was taken; a merge node runs if any was. Otherwise it's skipped.
+      description: A workflow. A node runs once its parents have finished, an http node if every edge into it was taken and a transform node if any was. Otherwise it's skipped.
       type: object
       required: [nodes]
       additionalProperties: false
@@ -88,7 +88,7 @@ components:
           x-go-type-skip-optional-pointer: false
         expr:
           type: string
-          description: A transform or merge node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch, and a merge node an expr.
+          description: A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch.
         switch:
           $ref: "#/components/schemas/Switch"
           description: A transform node's cases, in place of an expr.
@@ -108,8 +108,8 @@ components:
 
     NodeKind:
       type: string
-      enum: [http, transform, merge]
-      description: An http node calls an upstream, and a transform node gives what its JSONata does, if every edge into it was taken; a merge node gives what its JSONata does if any was, reading whatever came.
+      enum: [http, transform]
+      description: An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once any was, reading whichever nodes came; one with no edge into it runs first.
 
     Output:
       type: object
@@ -220,10 +220,10 @@ components:
           description: The HTTP status the answer has. Listed once in a response.
         from:
           type: string
-          description: The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs.
+          description: The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform with an expr, whose result is {status, body}, the status one of theirs. A transform's case is joined to the answer of its own status.
         on:
           type: integer
-          description: The output of from that the line leaves from, as an edge's. Absent means 2xx, and the only output of a transform or a merge, or the Unhandled block when unhandled is set.
+          description: The output of from that the line leaves from, as an edge's. Absent means an http node's 2xx, the only output of a transform with an expr, or the Unhandled block when unhandled is set.
         unhandled:
           type: boolean
           description: The line leaves from from's Unhandled block, as an edge can, and on is absent. The answer's body is then from's body, what an http node got back with a status it doesn't list, else none. A node's Unhandled block is joined to one answer at most.
@@ -254,40 +254,28 @@ components:
 
     Switch:
       type: object
-      required: [otherwise]
+      required: [cases]
       additionalProperties: false
-      description: A transform node's cases, in place of an expr. The first case whose condition holds gives its status and body, else otherwise does, so the node's value is {status, body}.
+      description: A transform node's cases, in place of an expr. The first case whose condition holds gives its status and body, as an http node's answer would, so the nodes after read them as nodes.<id>.status and nodes.<id>.body. Each case is an exit of the node, named by its status, so a switch gives a status once, and a run takes the lines from the exit it took. When none holds, the node fails, and its Unhandled block takes that as it takes any failure.
       properties:
         cases:
           type: array
+          minItems: 1
           maxItems: 50
           items:
             $ref: "#/components/schemas/Case"
-        otherwise:
-          $ref: "#/components/schemas/Otherwise"
 
     Case:
       type: object
       required: [status]
       additionalProperties: false
       properties:
+        name:
+          type: string
+          description: What the editor calls the case, on its exit and its tab. Absent, it's Case and its place.
         when:
           type: string
           description: JSONata, cast to a boolean as an edge's condition is.
-        status:
-          type: integer
-          minimum: 200
-          maximum: 599
-        body:
-          type: string
-          description: JSONata whose value is the body. Absent means none.
-
-    Otherwise:
-      type: object
-      required: [status]
-      additionalProperties: false
-      description: What a switch gives when no case holds.
-      properties:
         status:
           type: integer
           minimum: 200
@@ -307,7 +295,7 @@ components:
           type: string
         on:
           type: integer
-          description: The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and the only output of a transform or a merge, or the Unhandled block when unhandled is set.
+          description: The output of its source the edge leaves from, by status, one an http node lists or one a transform's case gives. Absent means an http node's 2xx, the only output of a transform with an expr, or the Unhandled block when unhandled is set.
         unhandled:
           type: boolean
           description: The edge leaves from its source's Unhandled block, and on is absent. Every node has one. It takes what the node's other outputs don't, a failure of its own, a status it doesn't list among them, so a run goes on down the edges from it, its node failed; with no line from it, the failure fails the run. Steps after it read the failure as nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer.

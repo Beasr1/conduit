@@ -10,6 +10,7 @@ import type { Edge, Node, XYPosition } from "@xyflow/react";
 import type { components } from "@/gen/schema";
 
 type Definition = components["schemas"]["Definition"];
+type Case = components["schemas"]["Case"];
 type DefinitionNode = components["schemas"]["Node"];
 
 // Every node is drawn at this size, or taller to fit its outputs, so placing
@@ -23,11 +24,31 @@ export const RANK_GAP = 80;
 const HANDLE_GAP = 24;
 
 // handlesOf is a node's outputs, as the ids of the handles its edges leave
-// from: an HTTP step's 2xx and each status it lists, or a transform's one.
+// from: an HTTP step's 2xx and each status it lists, a transform's cases'
+// statuses, its exits, or a transform's one.
 export function handlesOf(node: DefinitionNode): string[] {
-  return node.kind === "http"
-    ? ["2xx", ...(node.outputs ?? []).map((o) => String(o.status))]
-    : ["out"];
+  if (node.kind === "http")
+    return ["2xx", ...(node.outputs ?? []).map((o) => String(o.status))];
+  return node.switch ? exitsOf(node).map((e) => String(e.status)) : ["out"];
+}
+
+// Exit is a way a transform with cases leaves: one of its cases, by the
+// part of the step it is, what it's called, and the status that names it.
+export interface Exit {
+  part: string;
+  label: string;
+  status: number;
+}
+
+// exitsOf is a transform's exits, its cases' in their order; none for one
+// with an expression. A draft saved without cases has none either.
+export function exitsOf(node: DefinitionNode | undefined): Exit[] {
+  const cases: Case[] = node?.switch?.cases ?? [];
+  return cases.map((c, k) => ({
+    part: `case:${k}`,
+    label: c.name || `Case ${k + 1}`,
+    status: c.status,
+  }));
 }
 
 // UNHANDLED is a step's Unhandled block among its outputs, as the editor
@@ -74,8 +95,13 @@ function handleOf(
   if (line.unhandled)
     return node && hasStrip(node) ? UNHANDLED_HANDLE : undefined;
   const handles = handlesOf(node ?? { id: "", kind: "http" });
-  // No output, or 0 as the server reads it, is the first: 2xx.
-  const handle = line.on ? String(line.on) : (handles[0] ?? "");
+  // No output, or 0 as the server reads it, is the first: 2xx, or a
+  // transform's one. A line from a transform's cases names one.
+  const handle = line.on
+    ? String(line.on)
+    : node?.switch
+      ? ""
+      : (handles[0] ?? "");
   return handles.includes(handle) ? handle : undefined;
 }
 
@@ -83,67 +109,39 @@ function handleOf(
 // the kinds the editor knows is.
 export function hasStrip(node: DefinitionNode): boolean {
   const kind: string = node.kind;
-  return kind === "http" || kind === "transform" || kind === "merge";
+  return kind === "http" || kind === "transform";
 }
 
 // heightOf is how tall a node is drawn: an HTTP step's response blocks and
-// its + Add share its right side, and a Merge's ways and its + Add its
-// left, each at least HANDLE_GAP tall, so the handles on them are at least
-// that far apart; its Unhandled strip runs along its bottom, as tall.
-function heightOf(node: DefinitionNode, ways: number): number {
+// its + Add share its right side, each at least HANDLE_GAP tall, so the
+// handles on them are at least that far apart, and its Unhandled strip runs
+// along its bottom, as tall.
+function heightOf(node: DefinitionNode): number {
   const strip = hasStrip(node) ? HANDLE_GAP : 0;
-  const blocks = node.kind === "merge" ? ways : handlesOf(node).length;
-  return Math.max(NODE_HEIGHT, (blocks + 1) * HANDLE_GAP) + strip;
+  return (
+    Math.max(NODE_HEIGHT, (handlesOf(node).length + 1) * HANDLE_GAP) + strip
+  );
 }
 
-// Way is a way into a Merge step: an edge into it, by its place in the
-// definition's edges, the step it comes from, the output it leaves, and its
-// handle.
+// Way is a line into a step: an edge, by its place in the definition's
+// edges, the step it comes from, and the output it leaves.
 export interface Way {
   index: number;
   from: string;
   on: number | undefined;
-  handle: string;
 }
 
 // waysInto is the edges into the step with id, in the definition's order:
-// a Merge step's ways.
+// a transform's ways, any of which may come, when there's more than one.
 export function waysInto(definition: Definition, id: string): Way[] {
   return (definition.edges ?? []).flatMap((e, index) =>
-    e.to === id
-      ? [{ index, from: e.from, on: outputOf(e), handle: wayHandle(e) }]
-      : [],
+    e.to === id ? [{ index, from: e.from, on: outputOf(e) }] : [],
   );
 }
 
-// wayHandle is a way's point on its Merge's card: named for the step it
-// comes from and the output it leaves, as a step joins another once per
-// output, so it stays as other ways come and go.
-export function wayHandle(line: {
-  from: string;
-  on?: number;
-  unhandled?: boolean;
-}): string {
-  return `way:${line.from}:${outputOf(line) ?? 0}`;
-}
-
-// wayFromHandle is the way a handle names: the step it comes from, and the
-// output it leaves, as the editor counts it.
-export function wayFromHandle(handle: string): {
-  from: string;
-  on: number | undefined;
-} {
-  const at = handle.lastIndexOf(":");
-  const on = Number(handle.slice(at + 1));
-  return {
-    from: handle.slice("way:".length, at),
-    on: on === 0 ? undefined : on,
-  };
-}
-
 // wayLabel is a way as the screen names it: the step it comes from, and the
-// response it leaves, "prefs · 404", or its Unhandled; a transform's or a
-// Merge's one value needs no name.
+// response it leaves, "prefs · 404", or its Unhandled; a transform's one
+// value needs no name.
 export function wayLabel(
   definition: Definition,
   from: string,
@@ -165,7 +163,7 @@ export const RESPONSE = "#response";
 // place in the response's answers, as is its point's id on the card.
 export type FlowNode = Node<
   { index: number },
-  "http" | "transform" | "merge" | "unknown" | "response"
+  "http" | "transform" | "unknown" | "response"
 >;
 export type FlowEdge = Edge<{ index: number; answer?: number; way?: boolean }>;
 
@@ -181,8 +179,8 @@ export interface Flow {
 // toFlow is the canvas's view of a definition: a node for each node, an edge
 // for each edge it can draw, each where the definition places it or, failing
 // that, where the layout does, and the lines into the response's answers,
-// last. An edge into a Merge step comes into its way's own point. The same
-// definition always gives the same picture.
+// last. Each line into a transform with more than one is one of its ways,
+// as it may not come. The same definition always gives the same picture.
 export function toFlow(definition: Definition): Flow {
   // A draft may be saved with problems, such as two nodes sharing an id, but
   // the canvas needs a key per node. "#" can't appear in a valid id, so a key
@@ -199,10 +197,15 @@ export function toFlow(definition: Definition): Flow {
     }
   }
 
+  // The transforms more than one line comes into, by id.
+  const lines = new Map<string, number>();
+  for (const e of definition.edges ?? [])
+    if (nodeOf.get(e.to)?.kind === "transform")
+      lines.set(e.to, (lines.get(e.to) ?? 0) + 1);
+
   const edges: FlowEdge[] = [];
   const undrawn: number[] = [];
   const repeats = new Map<string, number>();
-  const ways = new Map<string, number>(); // a Merge's key → its ways drawn
   for (const [i, e] of (definition.edges ?? []).entries()) {
     const source = keyOf.get(e.from);
     const target = keyOf.get(e.to);
@@ -214,23 +217,20 @@ export function toFlow(definition: Definition): Flow {
     const id = `${source}->${target}`;
     const seen = repeats.get(id) ?? 0;
     repeats.set(id, seen + 1);
-    const merge = nodeOf.get(e.to)?.kind === "merge";
-    if (merge) ways.set(target, (ways.get(target) ?? 0) + 1);
+    const way = (lines.get(e.to) ?? 0) > 1;
     edges.push({
       id: seen === 0 ? id : `${id}#${seen}`,
       source,
       target,
       sourceHandle: handle,
-      targetHandle: merge ? wayHandle(e) : "in",
+      targetHandle: "in",
       // A condition shows as a small label; what it says is in the panel.
       ...(e.when ? { label: "if" } : {}),
-      data: { index: i, ...(merge ? { way: true } : {}) },
+      data: { index: i, ...(way ? { way } : {}) },
     });
   }
 
-  const heights = definition.nodes.map((n, i) =>
-    heightOf(n, ways.get(keys[i] ?? "") ?? 0),
-  );
+  const heights = definition.nodes.map(heightOf);
   const positions = place(definition, keys, edges, heights);
   const nodes = definition.nodes.map((n, i): FlowNode => {
     const key = keys[i] ?? "";
@@ -240,10 +240,7 @@ export function toFlow(definition: Definition): Flow {
     const height = heights[i] ?? NODE_HEIGHT;
     return {
       id: key,
-      type:
-        kind === "http" || kind === "transform" || kind === "merge"
-          ? kind
-          : "unknown",
+      type: kind === "http" || kind === "transform" ? kind : "unknown",
       position: positions.get(key) ?? { x: 0, y: 0 },
       // React Flow draws a node at a size it's given rather than measuring it.
       width: NODE_WIDTH,

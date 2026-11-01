@@ -187,8 +187,15 @@ func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequ
 			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "Preview a step or a connection, not both.",
 			errors: []gen.ProblemError{{Pointer: "/edge", Code: "not_allowed", Detail: "a preview is of a node or an edge, not both"}},
 		}
+	case b.Way != nil && b.Node == "":
+		return nil, &problem{
+			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "A way is a connection into a step: name the step too.",
+			errors: []gen.ProblemError{{Pointer: "/node", Code: "required", Detail: "a way comes into a node, so it needs node"}},
+		}
 	case b.Edge != nil:
 		pv, err = engine.SimulateEdge(ctx, &b.Definition, *b.Edge)
+	case b.Way != nil:
+		pv, err = engine.SimulateWay(ctx, &b.Definition, b.Node, *b.Way)
 	default:
 		pv, err = engine.Simulate(ctx, &b.Definition, b.Node)
 	}
@@ -197,6 +204,11 @@ func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequ
 		return nil, &problem{
 			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "There's no such step to preview.",
 			errors: []gen.ProblemError{{Pointer: "/node", Code: "unknown_node", Detail: fmt.Sprintf("no node has the id %q", b.Node)}},
+		}
+	case errors.Is(err, engine.ErrNoSuchWay):
+		return nil, &problem{
+			status: http.StatusUnprocessableEntity, code: "invalid_request", detail: "There's no such connection into the step to preview it by.",
+			errors: []gen.ProblemError{{Pointer: "/way", Code: "unknown_way", Detail: fmt.Sprintf("no edge into %q is at %d", b.Node, *b.Way)}},
 		}
 	case errors.Is(err, engine.ErrNoSuchEdge):
 		return nil, &problem{

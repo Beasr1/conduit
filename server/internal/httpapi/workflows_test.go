@@ -352,6 +352,23 @@ func TestPreview(t *testing.T) {
 	if p := problemOf(t, r); r.status != http.StatusUnprocessableEntity || pointers(p) != "/edge not_allowed" {
 		t.Errorf("preview of a step and a connection = %d %+v", r.status, p)
 	}
+
+	// A step as a run comes by one connection into it: crm's, from user.
+	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, "node": "crm", "way": 0}`)
+	pv = gen.Preview{}
+	if err := json.Unmarshal(r.body, &pv); err != nil || r.status != http.StatusOK || string(pv.Sends.Body) != `{"email":"ada@example.com"}` {
+		t.Errorf("preview by a way = %d %s", r.status, r.body)
+	}
+	for _, body := range []string{`"node": "user", "way": 0`, `"node": "crm", "way": -1`} {
+		r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, `+body+`}`)
+		if p := problemOf(t, r); r.status != http.StatusUnprocessableEntity || pointers(p) != "/way unknown_way" {
+			t.Errorf("preview by a way into no such step (%s) = %d %+v", body, r.status, p)
+		}
+	}
+	r = call(t, http.MethodPost, "/v1/preview", `{"definition": `+def+`, "way": 0}`)
+	if p := problemOf(t, r); r.status != http.StatusUnprocessableEntity || pointers(p) != "/node required" {
+		t.Errorf("preview by a way into no step = %d %+v", r.status, p)
+	}
 }
 
 func TestListWorkflows(t *testing.T) {

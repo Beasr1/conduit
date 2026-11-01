@@ -37,11 +37,11 @@ const greetDef = `{
 }`
 
 // answersDef answers 200 with the user, or 404 when the users API has none:
-// respond follows user either way, through a merge.
+// respond follows user either way, through answered, a transform.
 const answersDef = `{
   "nodes": [
     {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}, "outputs": [{"status": 404}]},
-    {"id": "answered", "kind": "merge", "expr": "nodes.user.status"},
+    {"id": "answered", "kind": "transform", "expr": "nodes.user.status"},
     {"id": "respond", "kind": "transform",
      "expr": "nodes.user.status = 404 ? { 'status': 404, 'body': { 'error': 'no such user' } } : { 'status': 200, 'body': nodes.user.body }"}
   ],
@@ -176,12 +176,12 @@ func TestRuns_ACaughtFailure(t *testing.T) {
 	}
 }
 
-// A merge says which ways came, live and on the run's record.
-func TestRuns_AMergesWays(t *testing.T) {
+// A transform says which lines it came by, live and on the run's record.
+func TestRuns_ATransformsWays(t *testing.T) {
 	t.Parallel()
 	wr := create(t, strings.ReplaceAll(`{"nodes": [
 	    {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}, "outputs": [{"status": 404}]},
-	    {"id": "found", "kind": "merge", "expr": "nodes.user.body"}],
+	    {"id": "found", "kind": "transform", "expr": "nodes.user.body"}],
 	  "edges": [{"from": "user", "to": "found"}, {"from": "user", "to": "found", "on": 404}]}`, "BASE", usersUpstream(t).URL))
 	run := startRun(t, wr.Workflow.ID, `{"input": {"user_id": "7"}}`)
 	events := readEvents(t, bytes.NewReader(call(t, http.MethodGet, "/v1/runs/"+run.ID+"/events", "").body))

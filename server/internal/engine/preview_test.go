@@ -143,8 +143,7 @@ func TestSimulate_Switch(t *testing.T) {
 		{"id": "user", "kind": "http", "request": {"method": "GET", "url": "https://users.example.com/v1"},
 		 "sample": {"body": {"key": 1}}},
 		{"id": "respond", "kind": "transform", "switch": {
-		 "cases": [{"when": "nodes.user.body.key = 1", "status": 400, "body": "{ 'error': 'bad key' }"}],
-		 "otherwise": {"status": 200, "body": "nodes.user.body"}}}],
+		 "cases": [{"when": "nodes.user.body.key = 1", "status": 400, "body": "{ 'error': 'bad key' }"}, {"when": "true", "status": 200, "body": "nodes.user.body"}]}}],
 		"edges": [{"from": "user", "to": "respond"}]}`
 	if pv := previewOf(t, def, "respond", nil); !sameJSON(t, pv.Gives, `{"status": 400, "body": {"error": "bad key"}}`) || problemCodes(pv) != "" {
 		t.Errorf("respond gives %s, problems %s", pv.Gives, problemCodes(pv))
@@ -152,6 +151,20 @@ func TestSimulate_Switch(t *testing.T) {
 	broken := strings.Replace(def, "nodes.user.body.key = 1", "$number('x') = 1", 1)
 	if pv := previewOf(t, broken, "respond", nil); problemCodes(pv) != "/nodes/1/switch/cases/0/when evaluation_failed" || pv.Gives != nil {
 		t.Errorf("broken: problems %s, gives %s", problemCodes(pv), pv.Gives)
+	}
+	// A step after a case's exit runs when that case holds, reading the
+	// status and body it gave; after another's, it's skipped.
+	after := func(on int) func(*workflow.Definition) {
+		return func(d *workflow.Definition) {
+			d.Nodes = append(d.Nodes, workflow.Node{ID: "next", Kind: workflow.NodeKindTransform, Expr: "nodes.respond.status & ' ' & nodes.respond.body.error"})
+			d.Edges = append(d.Edges, workflow.Edge{From: "respond", To: "next", On: on})
+		}
+	}
+	if pv := previewOf(t, def, "next", after(400)); pv.Skipped || !sameJSON(t, pv.Gives, `"400 bad key"`) || problemCodes(pv) != "" {
+		t.Errorf("after 400: skipped %v, gives %s, problems %s", pv.Skipped, pv.Gives, problemCodes(pv))
+	}
+	if pv := previewOf(t, def, "next", after(200)); !pv.Skipped {
+		t.Errorf("after 200: skipped %v, gives %s", pv.Skipped, pv.Gives)
 	}
 }
 
@@ -272,7 +285,7 @@ const branched = `{
      "body": "{ 'id': input.user_id, 'why': nodes.user.body.error }"}},
     {"id": "crm", "kind": "http", "request": {"method": "POST", "url": "https://crm.example.com/v1/contacts",
      "body": "{ 'email': nodes.user.body.email }"}, "sample": {"body": {"id": "c-1"}}},
-    {"id": "log", "kind": "merge", "expr": "nodes.user.status"}
+    {"id": "log", "kind": "transform", "expr": "nodes.user.status"}
   ],
   "edges": [
     {"from": "user", "to": "create", "on": 404},

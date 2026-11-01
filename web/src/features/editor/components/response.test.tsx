@@ -209,21 +209,27 @@ test("a transform joined to a second answer picks between them with cases", asyn
   await screen.findByRole("complementary", { name: "Transform step" });
   expect(await options("Connect to")).toEqual(["Response 404"]);
   fireEvent.click(screen.getByRole("option", { name: "Response 404" }));
-  // Its expression is Otherwise's body now, and a case gives 404.
+  // Its expression is the first case's body now, exiting with 200, and a
+  // second exits with 404; each answer's line leaves the exit of its status.
   expect(
-    await screen.findByRole("textbox", { name: "Otherwise body" }),
+    await screen.findByRole("textbox", { name: "Case 1 body" }),
   ).toHaveProperty("value", "{ 'id': 7 }");
-  expect(
-    screen.getByRole("textbox", { name: "Otherwise status" }),
-  ).toHaveProperty("value", "200");
   expect(screen.getByRole("textbox", { name: "Case 1 status" })).toHaveProperty(
+    "value",
+    "200",
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "Case 2" }));
+  expect(screen.getByRole("textbox", { name: "Case 2 status" })).toHaveProperty(
     "value",
     "404",
   );
   expect(screen.getByTestId("rf__edge-respond->#response:1")).toBeTruthy();
-  expect(
-    within(screen.getByTestId("rf__node-respond")).getByText("404 · else 200"),
-  ).toBeTruthy();
+  const exits = [
+    ...screen
+      .getByTestId("rf__node-respond")
+      .querySelectorAll("[data-part^=case]"),
+  ].map((b) => b.textContent);
+  expect(exits).toEqual(["Case 1 · 200", "Case 2 · 404"]);
 });
 
 test("an expression that sends the run is warned about once its step answers", async () => {
@@ -248,7 +254,7 @@ test("a problem in an answer marks the card and shows under the answer", async (
       pointer: "/response/answers/1/from",
       code: "overlap",
       detail:
-        "200 (found) and 404 (gone) can both be reached in one run: merge them into one node",
+        "200 (found) and 404 (gone) can both be reached in one run: join both to one transform, which picks the answer",
     },
   ]);
   expect(
@@ -259,7 +265,7 @@ test("a problem in an answer marks the card and shows under the answer", async (
   await openResponse();
   expect(
     screen.getByText(
-      "200 (found) and 404 (gone) can both be reached in one run: merge them into one step.",
+      "200 (found) and 404 (gone) can both be reached in one run: join both to one transform, which picks the answer.",
     ),
   ).toBeTruthy();
 });
@@ -376,7 +382,7 @@ test("a line let go on an answer that has one says where it's from, until the ne
   );
   await waitFor(() =>
     expect(status.textContent).toBe(
-      "404 takes one line, from gone. To answer 404 from bad_400 too, merge them into one step.",
+      "404 takes one line, from gone. To answer 404 from bad_400 too, join both to a transform, and the transform to the answer.",
     ),
   );
   expect(screen.queryByTestId("rf__edge-bad_400->#response:1")).toBeNull();
@@ -413,7 +419,7 @@ test("a line let go on a card with no answers says to add one", async () => {
   await waitFor(() => expect(status.textContent).toBe(""));
 });
 
-test("a step that leads nowhere, when every answer has its line, says to merge", async () => {
+test("a step that leads nowhere, when every answer has its line, says to join both to a transform", async () => {
   renderEditor({
     ...answering,
     nodes: [
@@ -426,7 +432,7 @@ test("a step that leads nowhere, when every answer has its line, says to merge",
   await screen.findByRole("complementary", { name: "Transform step" });
   // Its value's, before its Unhandled's.
   expect(screen.getAllByText(/^None yet/)[0]?.textContent).toBe(
-    "None yet: connect a step below, or drag from its point on the canvas to the step. Each answer on the response takes one line, and has it: to answer from here, merge this step with the one that gives the answer.",
+    "None yet: connect a step below, or drag from its point on the canvas to the step. Each answer on the response takes one line, and has it: to answer from here too, join this step and the one that gives the answer to a transform.",
   );
 });
 

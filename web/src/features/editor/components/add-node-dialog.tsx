@@ -46,10 +46,6 @@ const kinds = {
     label: "transform step",
     fresh: (id: string): Node => ({ id, kind: "transform", expr: "" }),
   },
-  merge: {
-    label: "Merge step",
-    fresh: (id: string): Node => ({ id, kind: "merge", expr: "" }),
-  },
 };
 
 // AddNodeDialog asks for the new node's id, which expressions use to read

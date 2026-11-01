@@ -33,8 +33,17 @@ import { useEditor, useEditorStore } from "@/features/editor/store";
 // is edited, and the response's answers it gives; then Connect to, which
 // joins another step on it, or an answer with no line yet, without drawing,
 // as a keyboard can (WCAG 2.5.7). on is the response's status, and none is
-// 2xx, or a transform's one value; UNHANDLED is its Unhandled block.
-export function StepConnections({ index, on }: { index: number; on?: number }) {
+// 2xx, or a transform's one value; UNHANDLED is its Unhandled block. exit
+// is what a transform's case, whose status on is, is called.
+export function StepConnections({
+  index,
+  on,
+  exit,
+}: {
+  index: number;
+  on?: number;
+  exit?: string;
+}) {
   const edit = useEditor((s) => s.edit);
   const from = useEditor((s) => s.draft.nodes[index]?.id ?? "");
   const http = useEditor((s) => s.draft.nodes[index]?.kind === "http");
@@ -90,7 +99,9 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
     ? "its Unhandled point"
     : http
       ? `the ${handle} point`
-      : "its point";
+      : exit
+        ? `the ${exit} point`
+        : "its point";
 
   const none = reachable.length === 0 && joinable.length === 0;
 
@@ -102,7 +113,9 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
             ? "Then, on Unhandled"
             : http
               ? `Then, on ${handle}`
-              : "Then"}
+              : exit
+                ? `Then, on ${exit}`
+                : "Then"}
         </h3>
         {leaving.length === 0 && gives.length === 0 ? (
           <p className="text-muted-foreground">
@@ -112,8 +125,8 @@ export function StepConnections({ index, on }: { index: number; on?: number }) {
               <>
                 {" "}
                 Each answer on the response takes one line, and has it: to
-                answer from here, merge this step with the one that gives the
-                answer.
+                answer from here too, join this step and the one that gives the
+                answer to a transform.
               </>
             )}
           </p>

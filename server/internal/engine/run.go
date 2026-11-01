@@ -47,7 +47,7 @@ type Status string
 const (
 	StatusSucceeded Status = "succeeded"
 	StatusFailed    Status = "failed"
-	StatusSkipped   Status = "skipped"   // nodes only: an edge into it went untaken, or, into a merge, every one did
+	StatusSkipped   Status = "skipped"   // nodes only: an edge into it went untaken, or, into a transform, every one did
 	StatusCancelled Status = "cancelled" // stopped by a failure elsewhere, or by the caller
 )
 
@@ -68,10 +68,11 @@ type NodeResult struct {
 	ID       string
 	Status   Status
 	Attempts int // http nodes: requests sent
-	// What an http node got back, even when it failed on the status.
+	// What an http node got back, even when it failed on the status, or the
+	// status a transform's case gave, which names the exit it took.
 	HTTPStatus int
 	Header     http.Header
-	// The response body, or a transform or merge node's value.
+	// The response body, or a transform node's value.
 	Body json.RawMessage
 	Err  error
 	// Caught says a failed node's Unhandled block took Err, so the run went
@@ -82,14 +83,14 @@ type NodeResult struct {
 	// Request is what an http node sent, as built, once its URL, headers and
 	// body rendered. Nothing is redacted here; whoever stores it does that.
 	Request *SentRequest
-	// Ways is a merge node's: the edges into it that were taken, in the
-	// definition's order.
+	// Ways is a transform node's: the edges into it that were taken, in
+	// the definition's order.
 	Ways []Way
 }
 
-// Way is an edge into a merge that was taken: the node it comes from, and
-// the output of that node it leaves, a status, 0 for 2xx and the one output
-// of a transform or a merge, or workflow.OnUnhandled.
+// Way is an edge into a transform that was taken: the node it comes from,
+// and the output of that node it leaves, a status, 0 for 2xx and the one
+// output of a transform, or workflow.OnUnhandled.
 type Way struct {
 	From string
 	On   int
@@ -286,10 +287,10 @@ func (r *run) startReady() {
 	}
 }
 
-// came is the edges taken into node i, a merge, in the definition's order;
-// nil for any other node.
+// came is the edges taken into node i, a transform, in the definition's
+// order; nil for an http node.
 func (r *run) came(i int) []int {
-	if r.p.nodes[i].kind != workflow.NodeKindMerge {
+	if r.p.nodes[i].kind != workflow.NodeKindTransform {
 		return nil
 	}
 	var out []int
@@ -362,11 +363,11 @@ func (r *run) lineEnded(k int, taken bool) {
 }
 
 // joined says whether node i runs, now that every edge into it has ended:
-// a merge when any was taken, any other node when every one was (plan 04,
+// a transform when any was taken, an http node when every one was (plan 04,
 // strict joins).
 func (r *run) joined(i int) bool {
 	in := r.p.nodes[i].in
-	if r.p.nodes[i].kind == workflow.NodeKindMerge {
+	if r.p.nodes[i].kind == workflow.NodeKindTransform {
 		return slices.ContainsFunc(in, func(k int) bool { return r.taken[k] })
 	}
 	return !slices.ContainsFunc(in, func(k int) bool { return !r.taken[k] })
@@ -419,7 +420,7 @@ func (r *run) answer() (int, json.RawMessage, error) {
 	}
 	var taken []joined
 	for _, a := range resp.answers {
-		if on, ok := took(r.nodes[a.from].result); !ok || on != a.on {
+		if on, ok := took(r.p.nodes[a.from].kind, r.nodes[a.from].result); !ok || on != a.on {
 			continue
 		}
 		i := slices.IndexFunc(taken, func(j joined) bool { return j.from == a.from && j.on == a.on })
@@ -443,7 +444,7 @@ func (r *run) answer() (int, json.RawMessage, error) {
 	if j.on == workflow.OnUnhandled {
 		return j.statuses[0], n.caughtBody(), nil
 	}
-	if len(j.statuses) == 1 && r.p.nodes[j.from].otherwise == nil {
+	if len(j.statuses) == 1 {
 		return j.statuses[0], n.Body, nil
 	}
 	return pick(n.ID, n.Body, j.statuses)
@@ -458,14 +459,14 @@ func (n NodeResult) caughtBody() json.RawMessage {
 	return n.Body
 }
 
-// took is the output node result n answered through, and whether it
-// answered at all: its Unhandled block, when that took its failure.
-func took(n NodeResult) (int, bool) {
+// took is the output node result n, of kind, answered through, and whether
+// it answered at all: its Unhandled block, when that took its failure.
+func took(kind workflow.NodeKind, n NodeResult) (int, bool) {
 	switch {
 	case n.Caught:
 		return workflow.OnUnhandled, true
 	case n.Status == StatusSucceeded:
-		return outputOf(n.HTTPStatus), true
+		return exitOf(kind, n.HTTPStatus), true
 	}
 	return 0, false
 }
@@ -533,7 +534,7 @@ func (p *Program) Unhandled(ctx context.Context, input json.RawMessage, nodes []
 		case p.nodes[i].kind == workflow.NodeKindHTTP:
 			entry, err = responseEntry(n.HTTPStatus, n.Header, n.Body)
 		default:
-			entry = bodyEntry(n.Body)
+			entry = transformEntry(n.HTTPStatus, n.Body)
 		}
 		if err != nil {
 			return nil, true, fmt.Errorf("unhandled: %w", err)

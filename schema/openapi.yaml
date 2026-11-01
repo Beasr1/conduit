@@ -636,6 +636,11 @@ components:
           minimum: 0
           description: The connection to preview, by its place in the definition's edges. Not with node.
           x-go-type-skip-optional-pointer: false
+        way:
+          type: integer
+          minimum: 0
+          description: With node, a connection into that step, by its place in the definition's edges, that the run previewed comes by, as a transform any of whose connections may come. The steps before that connection's source answer through the outputs that lead to it, and the source through the connection's. Absent, each step answers 2xx where that leads on.
+          x-go-type-skip-optional-pointer: false
 
     Preview:
       type: object
@@ -651,13 +656,13 @@ components:
         sends:
           $ref: "#/components/schemas/RenderedRequest"
         gives:
-          description: A transform or merge step's value, or the workflow's output. Absent when it gave none.
+          description: A transform step's value, or the workflow's output. Absent when it gave none.
           x-go-type: json.RawMessage
         unhandled:
           $ref: "#/components/schemas/UnhandledPreview"
         skipped:
           type: boolean
-          description: A run would skip the step, or a connection's source, with these samples, as a step joined to it takes no connection into it, or none into a merge is taken.
+          description: A run would skip the step, or a connection's source, with these samples, as a connection into an http step isn't taken, or none into a transform is.
         problems:
           type: array
           description: What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
@@ -890,7 +895,7 @@ components:
           $ref: "#/components/schemas/RunError"
         ways:
           type: array
-          description: A merge node's, the edges into it that were taken, in the definition's order.
+          description: A transform node's, the edges into it that were taken, in the definition's order.
           items:
             $ref: "#/components/schemas/Way"
         started_at:
@@ -923,12 +928,12 @@ components:
 
     NodeResponse:
       type: object
-      description: What an http node got back, or a transform or merge node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
+      description: What an http node got back, or a transform node's value, with the status of the case that gave it when it has cases. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
       required: [body]
       properties:
         status:
           type: integer
-          description: http nodes only.
+          description: An http node's, or the status of a transform's case, which names the exit it took.
         headers:
           type: object
           description: http nodes only.
@@ -962,25 +967,25 @@ components:
           format: date-time
         http_status:
           type: integer
-          description: On the event that ends an http node that got an answer.
+          description: On the event that ends an http node that got an answer, or a transform whose case gave it.
         error:
           $ref: "#/components/schemas/RunError"
         ways:
           type: array
-          description: On the event that ends a merge node that ran, the edges into it that were taken.
+          description: On the event that ends a transform node that ran, the edges into it that were taken.
           items:
             $ref: "#/components/schemas/Way"
 
     Way:
       type: object
-      description: An edge into a merge node that was taken, as the definition writes it.
+      description: An edge into a transform node that was taken, as the definition writes it.
       required: [from]
       properties:
         from:
           type: string
         on:
           type: integer
-          description: The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform or a merge.
+          description: The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform.
         unhandled:
           type: boolean
           description: It left from's Unhandled block, and on is absent.

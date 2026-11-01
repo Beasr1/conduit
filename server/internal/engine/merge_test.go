@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,10 +13,10 @@ import (
 	"github.com/Beasr1/conduit/server/internal/workflow"
 )
 
-// A merge runs once every edge into it has ended, if any was taken, and
+// A transform runs once every edge into it has ended, if any was taken, and
 // gives what its expr makes of whatever came. prefs answers 2xx or 400; on
 // 400, fallback gets them another way.
-func TestRun_MergeGivesWhatItsExprMakes(t *testing.T) {
+func TestRun_ATransformMergesItsLines(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /prefs/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +36,7 @@ func TestRun_MergeGivesWhatItsExprMakes(t *testing.T) {
 	  "nodes": [
 	    {"id": "prefs", "kind": "http", "request": {"method": "GET", "url": "BASE/prefs/{{ input.id }}"}, "outputs": [{"status": 400}]},
 	    {"id": "fallback", "kind": "http", "request": {"method": "GET", "url": "BASE/defaults"}},
-	    {"id": "prefs_ok", "kind": "merge", "expr": "$exists(nodes.fallback) ? nodes.fallback.body.data : nodes.prefs.body"},
+	    {"id": "prefs_ok", "kind": "transform", "expr": "$exists(nodes.fallback) ? nodes.fallback.body.data : nodes.prefs.body"},
 	    {"id": "greet", "kind": "transform", "expr": "'theme: ' & nodes.prefs_ok.body.theme"}
 	  ],
 	  "edges": [
@@ -75,15 +77,16 @@ func TestRun_MergeGivesWhatItsExprMakes(t *testing.T) {
 
 // Every way that came counts, two at once among them; the expr reads the
 // steps before it by name, and a step that didn't run is missing. With none,
-// the merge is skipped, and so are the steps after it.
-func TestRun_MergeTakesWhateverCame(t *testing.T) {
+// the transform is skipped, and so are the steps after it. One no line comes
+// into runs first, and comes by none.
+func TestRun_ATransformTakesWhateverCame(t *testing.T) {
 	t.Parallel()
 	p := program(t, "", `{
 	  "nodes": [
 	    {"id": "in", "kind": "transform", "expr": "input"},
 	    {"id": "a", "kind": "transform", "expr": "'a'"},
 	    {"id": "b", "kind": "transform", "expr": "'b'"},
-	    {"id": "e", "kind": "merge", "expr": "{ 'a': nodes.a.body, 'b': nodes.b.body }"},
+	    {"id": "e", "kind": "transform", "expr": "{ 'a': nodes.a.body, 'b': nodes.b.body }"},
 	    {"id": "after", "kind": "transform", "expr": "nodes.e.body"}
 	  ],
 	  "edges": [
@@ -108,17 +111,21 @@ func TestRun_MergeTakesWhateverCame(t *testing.T) {
 			t.Errorf("%s: run %s (%s), output %s, ways %v, err %v; want %s, %s, %v",
 				tt.input, res.Status, statuses(res), res.Output, res.Nodes[3].Ways, res.Err, tt.nodes, tt.output, tt.ways)
 		}
+		if w := res.Nodes[0].Ways; w != nil {
+			t.Errorf("%s: in, with no line into it, came by %v", tt.input, w)
+		}
 	}
 }
 
-// A merge's expr failing fails it, and its Unhandled block takes that, as it
-// takes any node's failure; the ways that came are recorded all the same.
-func TestRun_MergeExprThatFails(t *testing.T) {
+// A transform's expr failing fails it, and its Unhandled block takes that,
+// as it takes any node's failure; the ways that came are recorded all the
+// same.
+func TestRun_ATransformsExprThatFails(t *testing.T) {
 	t.Parallel()
 	p := program(t, "", `{
 	  "nodes": [
 	    {"id": "a", "kind": "transform", "expr": "'x'"},
-	    {"id": "e", "kind": "merge", "expr": "$number(nodes.a.body)"},
+	    {"id": "e", "kind": "transform", "expr": "$number(nodes.a.body)"},
 	    {"id": "caught", "kind": "transform", "expr": "nodes.e.error"}
 	  ],
 	  "edges": [{"from": "a", "to": "e"}, {"from": "e", "to": "caught", "unhandled": true}],
@@ -133,13 +140,14 @@ func TestRun_MergeExprThatFails(t *testing.T) {
 	}
 }
 
-// A merge joined to a step's Unhandled records the way it came by as that.
-func TestRun_MergeRecordsAnUnhandledWay(t *testing.T) {
+// A transform joined to a step's Unhandled records the way it came by as
+// that.
+func TestRun_ATransformRecordsAnUnhandledWay(t *testing.T) {
 	t.Parallel()
 	p := program(t, "", `{
 	  "nodes": [
 	    {"id": "count", "kind": "transform", "expr": "$number(input.n)"},
-	    {"id": "e", "kind": "merge", "expr": "$exists(nodes.count.error) ? 0 : nodes.count.body"}
+	    {"id": "e", "kind": "transform", "expr": "$exists(nodes.count.error) ? 0 : nodes.count.body"}
 	  ],
 	  "edges": [{"from": "count", "to": "e"}, {"from": "count", "to": "e", "unhandled": true}],
 	  "output": "nodes.e.body"
@@ -166,7 +174,7 @@ const merged = `{
      "sample": {"body": {"theme": "dark"}}, "outputs": [{"status": 400, "sample": {"body": {"error": "no prefs yet"}}}]},
     {"id": "fallback", "kind": "http", "request": {"method": "GET", "url": "https://prefs.example.com/v1/defaults"},
      "sample": {"body": {"data": {"theme": "light"}}}},
-    {"id": "prefs_ok", "kind": "merge", "expr": "$exists(nodes.fallback) ? nodes.fallback.body.data : nodes.prefs.body"},
+    {"id": "prefs_ok", "kind": "transform", "expr": "$exists(nodes.fallback) ? nodes.fallback.body.data : nodes.prefs.body"},
     {"id": "greet", "kind": "transform", "expr": "'theme: ' & nodes.prefs_ok.body.theme"}
   ],
   "edges": [
@@ -177,9 +185,9 @@ const merged = `{
   ]
 }`
 
-// A merge previews as a transform does, over the way previews take, 2xx
-// first; with no way taken, it's skipped, and so are the steps after it.
-func TestSimulate_AMerge(t *testing.T) {
+// A transform previews over the way previews take, 2xx first; with no way
+// taken, it's skipped, and so are the steps after it.
+func TestSimulate_ATransformThatMerges(t *testing.T) {
 	t.Parallel()
 	pv := previewOf(t, merged, "prefs_ok", nil)
 	if pv.Skipped || problemCodes(pv) != "" || !sameJSON(t, pv.Gives, `{"theme": "dark"}`) ||
@@ -192,5 +200,80 @@ func TestSimulate_AMerge(t *testing.T) {
 	pv = previewOf(t, merged, "greet", func(d *workflow.Definition) { d.Edges[0].When = "false" })
 	if !pv.Skipped {
 		t.Errorf("no way taken: greet skipped %v, gives %s", pv.Skipped, pv.Gives)
+	}
+}
+
+// A preview can come by one way into a step: the steps before that way's
+// step answer through the outputs that lead to it, and that step through the
+// way's, so fallback's way reads prefs' 400 sample and fallback's.
+func TestSimulateWay(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		id      string
+		way     int
+		reads   string
+		gives   string
+		skipped bool
+		edit    func(*workflow.Definition)
+		wantErr error
+	}{
+		{
+			id: "prefs_ok", way: 0,
+			reads: `{"input": null, "nodes": {"prefs": {"status": 200, "headers": {}, "body": {"theme": "dark"}}}}`,
+			gives: `{"theme": "dark"}`,
+		},
+		{
+			id: "prefs_ok", way: 2,
+			reads: `{"input": null, "nodes": {"prefs": {"status": 400, "headers": {}, "body": {"error": "no prefs yet"}},
+			  "fallback": {"status": 200, "headers": {}, "body": {"data": {"theme": "light"}}}}}`,
+			gives: `{"theme": "light"}`,
+		},
+		// A way whose condition doesn't hold over the samples isn't taken.
+		{
+			id: "prefs_ok", way: 2, edit: func(d *workflow.Definition) { d.Edges[2].When = "false" },
+			reads:   `{"input": null, "nodes": {"prefs": {"status": 400, "headers": {}, "body": {"error": "no prefs yet"}}, "fallback": {"status": 200, "headers": {}, "body": {"data": {"theme": "light"}}}}}`,
+			skipped: true,
+		},
+		{id: "prefs_ok", way: 1, wantErr: ErrNoSuchWay},
+		{id: "prefs_ok", way: 9, wantErr: ErrNoSuchWay},
+		{id: "nope", way: 0, wantErr: ErrNoSuchNode},
+	}
+	for _, tt := range tests {
+		var d workflow.Definition
+		if err := json.Unmarshal([]byte(merged), &d); err != nil {
+			t.Fatal(err)
+		}
+		if tt.edit != nil {
+			tt.edit(&d)
+		}
+		pv, err := SimulateWay(t.Context(), &d, tt.id, tt.way)
+		if tt.wantErr != nil {
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("%s by %d: err %v, want %v", tt.id, tt.way, err, tt.wantErr)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s by %d: %v", tt.id, tt.way, err)
+		}
+		if pv.Skipped != tt.skipped || !sameJSON(t, pv.Reads, tt.reads) || (tt.gives != "" && !sameJSON(t, pv.Gives, tt.gives)) || problemCodes(pv) != "" {
+			t.Errorf("%s by %d: skipped %v, reads %s, gives %s, problems %s", tt.id, tt.way, pv.Skipped, pv.Reads, pv.Gives, problemCodes(pv))
+		}
+	}
+
+	// A way from a step's Unhandled comes with that step failing, an error
+	// made up; its 2xx, with it answering.
+	counted := `{"nodes": [{"id": "count", "kind": "transform", "expr": "$number(input.n)"},
+	    {"id": "e", "kind": "transform", "expr": "$exists(nodes.count.error) ? 0 : nodes.count.body"}],
+	  "edges": [{"from": "count", "to": "e"}, {"from": "count", "to": "e", "unhandled": true}], "sample_input": {"n": "2"}}`
+	for way, gives := range map[int]string{0: `2`, 1: `0`} {
+		var d workflow.Definition
+		if err := json.Unmarshal([]byte(counted), &d); err != nil {
+			t.Fatal(err)
+		}
+		pv, err := SimulateWay(t.Context(), &d, "e", way)
+		if err != nil || !sameJSON(t, pv.Gives, gives) {
+			t.Errorf("e by %d: gives %s, reads %s, err %v; want %s", way, pv.Gives, pv.Reads, err, gives)
+		}
 	}
 }

@@ -24,7 +24,7 @@ type NodeEvent struct {
 	Kind       engine.EventKind
 	Attempt    int // the attempt starting, or the attempts made once it ended
 	At         time.Time
-	HTTPStatus int      // on the event that ends an http node that got an answer
+	HTTPStatus int      // on the event that ends an http node that got an answer, or a transform's case
 	Failure    *Failure // on the event that ends a failed node
 	Ways       []Way    // on the event that ends a merge that ran
 }

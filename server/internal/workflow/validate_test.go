@@ -62,8 +62,8 @@ func TestValidate_AcceptsSamples(t *testing.T) {
 }
 
 // A step can answer through outputs besides 2xx, each with a sample or
-// none, and two steps can be joined once per output: here log, a merge,
-// follows user whichever way it answered.
+// none, and two steps can be joined once per output: here log, a
+// transform, follows user whichever way it answered.
 func TestValidate_AcceptsOutputs(t *testing.T) {
 	t.Parallel()
 	d := decode(t, `{"nodes": [
@@ -71,7 +71,7 @@ func TestValidate_AcceptsOutputs(t *testing.T) {
 		 "outputs": [{"status": 404, "sample": {"headers": {"Content-Type": "application/json"}, "body": {"error": "gone"}}},
 		             {"status": 409}]},
 		{"id": "create", "kind": "transform", "expr": "1"},
-		{"id": "log", "kind": "merge", "expr": "nodes.user.status"}],
+		{"id": "log", "kind": "transform", "expr": "nodes.user.status"}],
 		"edges": [{"from": "user", "to": "create", "on": 404},
 		          {"from": "user", "to": "log"},
 		          {"from": "user", "to": "log", "on": 404}]}`)
@@ -97,17 +97,17 @@ func TestValidate_AcceptsResponses(t *testing.T) {
 			"response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "on": 404}]}}`,
 		"branches one node keeps apart": `{"nodes": [` + branched + `], "edges": ` + branches + `,
 			"response": {"answers": [{"status": 200, "from": "found"}, {"status": 404, "from": "gone"}]}}`,
-		"a switch giving the answers it's joined to": `{"nodes": [{"id": "respond", "kind": "transform",
-			"switch": {"cases": [{"when": "input.id = 0", "status": 404, "body": "{ 'error': 'gone' }"}], "otherwise": {"status": 200}}}],
-			"response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}]}}`,
+		"a switch's cases, each to the answer of its status": `{"nodes": [{"id": "respond", "kind": "transform",
+			"switch": {"cases": [{"name": "gone", "when": "input.id = 0", "status": 404, "body": "{ 'error': 'gone' }"}, {"when": "true", "status": 200}]}}],
+			"response": {"answers": [{"status": 200, "from": "respond", "on": 200}, {"status": 404, "from": "respond", "on": 404}]}}`,
 		"unhandled": `{"nodes": [{"id": "respond", "kind": "transform", "expr": "1"}],
 			"response": {"answers": [{"status": 200, "from": "respond"}], "unhandled": {"body": "{ 'error': error.detail }"}}}`,
 		"a node's Unhandled to an answer of its own": `{"nodes": [` + branched + `],
 			"response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "on": 404}, {"status": 502, "from": "user", "unhandled": true}]}}`,
 		"a switch's Unhandled beside its cases": `{"nodes": [{"id": "respond", "kind": "transform",
-			"switch": {"cases": [{"when": "input.id = 0", "status": 404}], "otherwise": {"status": 200}}}],
-			"response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}, {"status": 500, "from": "respond", "unhandled": true}]}}`,
-		"an edge from Unhandled, and one from 2xx, into a merge": `{"nodes": [` + branched + `, {"id": "either_way", "kind": "merge", "expr": "nodes.user"}],
+			"switch": {"cases": [{"when": "input.id = 0", "status": 404}, {"when": "true", "status": 200}]}}],
+			"response": {"answers": [{"status": 200, "from": "respond", "on": 200}, {"status": 404, "from": "respond", "on": 404}, {"status": 500, "from": "respond", "unhandled": true}]}}`,
+		"an edge from Unhandled, and one from 2xx, into a transform": `{"nodes": [` + branched + `, {"id": "either_way", "kind": "transform", "expr": "nodes.user"}],
 			"edges": [{"from": "user", "to": "either_way"}, {"from": "user", "to": "either_way", "unhandled": true}, {"from": "either_way", "to": "found"}, {"from": "found", "to": "gone", "unhandled": true}],
 			"response": {"answers": [{"status": 200, "from": "gone"}]}}`,
 	} {
@@ -120,40 +120,63 @@ func TestValidate_AcceptsResponses(t *testing.T) {
 	}
 }
 
+// A transform's cases are its exits, each named by its status: a line
+// leaves one for a step, a transform or the answer of its status, and the
+// cases' exits keep their lines apart as an http node's outputs do.
+func TestValidate_CasesAreExits(t *testing.T) {
+	t.Parallel()
+	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
+	check := `{"id": "check", "kind": "transform", "switch": {
+		"cases": [{"name": "found", "when": "input.id > 0", "status": 200}, {"name": "missing", "when": "input.id = 0", "status": 404},
+		          {"name": "else", "when": "true", "status": 500}]}}`
+	ps := Validate(decode(t, `{"nodes": [`+check+`, {"id": "greet", "kind": "transform", "expr": "1"}, {"id": "fallback", "kind": "http", `+get+`}],
+	  "edges": [{"from": "check", "to": "greet", "on": 200}, {"from": "check", "to": "fallback", "on": 404}],
+	  "response": {"answers": [{"status": 200, "from": "greet"}, {"status": 404, "from": "fallback"}, {"status": 500, "from": "check", "on": 500}]}}`))
+	if len(ps) > 0 {
+		t.Errorf("Validate() = %v, want no problems", ps)
+	}
+	// An http node joined to two of them needs both, so it never runs.
+	ps = Validate(decode(t, `{"nodes": [`+check+`, {"id": "notify", "kind": "http", `+get+`}],
+	  "edges": [{"from": "check", "to": "notify", "on": 200}, {"from": "check", "to": "notify", "on": 404}]}`))
+	if len(ps) != 1 || ps[0].Pointer != "/nodes/1" || ps[0].Detail != "notify can never run: it needs check to answer 200 and 404" {
+		t.Errorf("an http node needing two cases: problems %v", ps)
+	}
+}
+
 // Whether two answers' lines can be taken in one run is read from the
-// graph: a node runs once each node with a line into it took one of them,
-// so only one node's outputs that share none keep two lines apart. crm runs
-// after orders and prefs; prefs' 400 leads to test_400.
+// graph: an http node runs once each node with a line into it took one of
+// them, so only one node's outputs that share none keep two lines apart.
+// crm runs after orders and prefs; prefs' 400 leads to test_400.
 func TestValidate_TwoAnswersInOneRun(t *testing.T) {
 	t.Parallel()
 	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
 	nodes := `[{"id": "people", "kind": "http", ` + get + `}, {"id": "orders", "kind": "http", ` + get + `},
 		{"id": "prefs", "kind": "http", ` + get + `, "outputs": [{"status": 400}]}, {"id": "crm", "kind": "http", ` + get + `, "outputs": [{"status": 400}]},
-		{"id": "test_400", "kind": "http", ` + get + `}, {"id": "transform", "kind": "transform", "expr": "1"}, {"id": "bad_400", "kind": "transform", "expr": "2"}]`
+		{"id": "test_400", "kind": "http", ` + get + `}, {"id": "notify", "kind": "http", ` + get + `}, {"id": "bad_400", "kind": "transform", "expr": "2"}]`
 	edges := `{"from": "people", "to": "orders"}, {"from": "people", "to": "prefs"}, {"from": "orders", "to": "crm"}, {"from": "prefs", "to": "crm"},
-		{"from": "crm", "to": "transform"}, {"from": "crm", "to": "bad_400", "on": 400}`
-	response := `{"answers": [{"status": 200, "from": "transform"}, {"status": 400, "from": "bad_400"}]}`
+		{"from": "crm", "to": "notify"}, {"from": "crm", "to": "bad_400", "on": 400}`
+	response := `{"answers": [{"status": 200, "from": "notify"}, {"status": 400, "from": "bad_400"}]}`
 	tests := []struct {
 		name, edges, want string
 	}{
-		// crm's 2xx and 400 keep transform and bad_400 apart.
+		// crm's 2xx and 400 keep notify and bad_400 apart.
 		{"kept apart by crm", edges, ""},
-		// transform needs crm, which needs prefs' 2xx, and test_400, which
-		// needs its 400: it never runs, and its answer is no overlap.
+		// notify needs crm, which needs prefs' 2xx, and test_400, which needs
+		// its 400: it never runs, and its answer is no overlap.
 		{
-			"never reached when transform needs both of prefs' outputs", edges + `, {"from": "prefs", "to": "test_400", "on": 400}, {"from": "test_400", "to": "transform"}`,
-			"/nodes/5 never_runs: transform can never run: it needs prefs to answer 2xx and 400",
+			"never reached when notify needs both of prefs' outputs", edges + `, {"from": "prefs", "to": "test_400", "on": 400}, {"from": "test_400", "to": "notify"}`,
+			"/nodes/5 never_runs: notify can never run: it needs prefs to answer 2xx and 400",
 		},
 		// crm's Unhandled is one more output, kept apart from its 2xx and 400.
 		{"kept apart by crm's Unhandled", edges + `, {"from": "crm", "to": "test_400", "unhandled": true}`, ""},
 		{
-			"never reached when transform needs crm's 2xx and its Unhandled", edges + `, {"from": "crm", "to": "test_400", "unhandled": true}, {"from": "test_400", "to": "transform"}`,
-			"/nodes/5 never_runs: transform can never run: it needs crm to answer 2xx and Unhandled",
+			"never reached when notify needs crm's 2xx and its Unhandled", edges + `, {"from": "crm", "to": "test_400", "unhandled": true}, {"from": "test_400", "to": "notify"}`,
+			"/nodes/5 never_runs: notify can never run: it needs crm to answer 2xx and Unhandled",
 		},
-		// transform needs every line into it, and crm answers one way.
+		// notify needs every line into it, and crm answers one way.
 		{
-			"never reached when transform needs two of crm's outputs", edges + `, {"from": "crm", "to": "transform", "on": 400}`,
-			"/nodes/5 never_runs: transform can never run: it needs crm to answer 2xx and 400",
+			"never reached when notify needs two of crm's outputs", edges + `, {"from": "crm", "to": "notify", "on": 400}`,
+			"/nodes/5 never_runs: notify can never run: it needs crm to answer 2xx and 400",
 		},
 	}
 	for _, tt := range tests {
@@ -171,12 +194,12 @@ func TestValidate_TwoAnswersInOneRun(t *testing.T) {
 	}
 }
 
-// A merge runs if any edge into it was taken, its expr reading whatever
-// came, so the nodes after it can follow either arm of a branch, or
-// whichever of several nodes answered. Its route merges its ways',
+// A transform runs if any edge into it was taken, its expr reading
+// whatever came, so the nodes after it can follow either arm of a branch,
+// or whichever of several nodes answered. Its route merges its ways',
 // counting a node a way rules out as not running, so the checks stay exact
 // where ways part at one node's outputs, chains of them included.
-func TestValidate_AcceptsMerges(t *testing.T) {
+func TestValidate_ATransformMerges(t *testing.T) {
 	t.Parallel()
 	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
 	for name, def := range map[string]string{
@@ -184,7 +207,7 @@ func TestValidate_AcceptsMerges(t *testing.T) {
 		// failing, answers 502 itself.
 		"the arms of a branch": `{"nodes": [
 			{"id": "prefs", "kind": "http", ` + get + `, "outputs": [{"status": 400}]}, {"id": "test_400", "kind": "http", ` + get + `},
-			{"id": "prefs_ok", "kind": "merge", "expr": "$exists(nodes.test_400) ? nodes.test_400.body.data : nodes.prefs.body"},
+			{"id": "prefs_ok", "kind": "transform", "expr": "$exists(nodes.test_400) ? nodes.test_400.body.data : nodes.prefs.body"},
 			{"id": "success_200", "kind": "transform", "expr": "nodes.prefs_ok.body"}],
 		  "edges": [{"from": "prefs", "to": "prefs_ok"}, {"from": "prefs", "to": "test_400", "on": 400},
 		            {"from": "test_400", "to": "prefs_ok"}, {"from": "prefs_ok", "to": "success_200"}],
@@ -192,26 +215,36 @@ func TestValidate_AcceptsMerges(t *testing.T) {
 		// s1 and s2 each fall back on f1 and f2 on 404, and a fallback that
 		// fails answers itself.
 		"a chain of fallbacks": `{"nodes": [
-			{"id": "s1", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "f1", "kind": "http", ` + get + `}, {"id": "e1", "kind": "merge", "expr": "1"},
-			{"id": "s2", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "f2", "kind": "http", ` + get + `}, {"id": "e2", "kind": "merge", "expr": "2"},
+			{"id": "s1", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "f1", "kind": "http", ` + get + `}, {"id": "e1", "kind": "transform", "expr": "1"},
+			{"id": "s2", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "f2", "kind": "http", ` + get + `}, {"id": "e2", "kind": "transform", "expr": "2"},
 			{"id": "done", "kind": "transform", "expr": "1"}],
 		  "edges": [{"from": "s1", "to": "e1"}, {"from": "s1", "to": "f1", "on": 404}, {"from": "f1", "to": "e1"}, {"from": "e1", "to": "s2"},
 		            {"from": "s2", "to": "e2"}, {"from": "s2", "to": "f2", "on": 404}, {"from": "f2", "to": "e2"}, {"from": "e2", "to": "done"}],
 		  "response": {"answers": [{"status": 200, "from": "done"}, {"status": 502, "from": "f1", "unhandled": true}, {"status": 503, "from": "f2", "unhandled": true}]}}`,
-		// A merge answers itself, and its Unhandled takes its expr failing.
-		"a merge's answer, and its Unhandled's": `{"nodes": [
-			{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "e", "kind": "merge", "expr": "nodes.a.status", "unhandled": {"body": "null"}}],
+		// It answers itself, and its Unhandled takes its expr failing.
+		"its answer, and its Unhandled's": `{"nodes": [
+			{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "e", "kind": "transform", "expr": "nodes.a.status", "unhandled": {"body": "null"}}],
 		  "edges": [{"from": "a", "to": "e"}, {"from": "a", "to": "e", "on": 404}],
 		  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 500, "from": "e", "unhandled": true}]}}`,
 		// Two ways one run can both bring are its expr's business.
 		"ways that both come": `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"},
-			{"id": "e", "kind": "merge", "expr": "[nodes.a.body, nodes.b.body]"}],
+			{"id": "e", "kind": "transform", "expr": "[nodes.a.body, nodes.b.body]"}],
 		  "edges": [{"from": "a", "to": "e"}, {"from": "b", "to": "e"}],
 		  "response": {"answers": [{"status": 200, "from": "e"}]}}`,
-		// Joined to two answers, it picks one as a transform does.
-		"a merge picking its answer": `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "e", "kind": "merge", "expr": "{ 'status': 201 }"}],
+		// Joined to two answers, it picks one.
+		"picking its answer": `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "e", "kind": "transform", "expr": "{ 'status': 201 }"}],
 		  "edges": [{"from": "a", "to": "e"}],
 		  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 201, "from": "e"}]}}`,
+		// success_200 answers by crm or, prefs answering 400, by test_400,
+		// and bad_400, by crm's 400, stays apart from both.
+		"either way to one answer, another kept apart": `{"nodes": [
+			{"id": "people", "kind": "http", ` + get + `}, {"id": "orders", "kind": "http", ` + get + `},
+			{"id": "prefs", "kind": "http", ` + get + `, "outputs": [{"status": 400}]}, {"id": "crm", "kind": "http", ` + get + `, "outputs": [{"status": 400}]},
+			{"id": "test_400", "kind": "http", ` + get + `}, {"id": "success_200", "kind": "transform", "expr": "1"}, {"id": "bad_400", "kind": "transform", "expr": "2"}],
+		  "edges": [{"from": "people", "to": "orders"}, {"from": "people", "to": "prefs"}, {"from": "orders", "to": "crm"}, {"from": "prefs", "to": "crm"},
+		            {"from": "prefs", "to": "test_400", "on": 400}, {"from": "crm", "to": "success_200"}, {"from": "test_400", "to": "success_200"},
+		            {"from": "crm", "to": "bad_400", "on": 400}],
+		  "response": {"answers": [{"status": 200, "from": "success_200"}, {"status": 400, "from": "bad_400"}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -222,25 +255,26 @@ func TestValidate_AcceptsMerges(t *testing.T) {
 	}
 }
 
-// A merge needs of a node only what each way needs of it, or rules out: b
-// can come as a's way doesn't, so e answering is no sign of a's 2xx, and
-// both answers can be reached. A way whose node never runs is left out,
-// so e still needs a's 2xx there, and f, with no other way, never runs.
-func TestValidate_AMergesRoute(t *testing.T) {
+// A transform needs of a node only what each way needs of it, or rules
+// out: b can come as a's way doesn't, so e answering is no sign of a's
+// 2xx, and both answers can be reached. A way whose node never runs is left
+// out, so e still needs a's 2xx there, and f, with no other way, never
+// runs.
+func TestValidate_ATransformsRoute(t *testing.T) {
 	t.Parallel()
 	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
 	tests := []struct {
 		name, def, want string
 	}{
 		{
-			"a way that needs nothing of a", `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"}, {"id": "e", "kind": "merge", "expr": "1"}],
+			"a way that needs nothing of a", `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"}, {"id": "e", "kind": "transform", "expr": "1"}],
 			  "edges": [{"from": "a", "to": "e"}, {"from": "b", "to": "e"}],
 			  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 404, "from": "a", "on": 404}]}}`,
-			"/response/answers/1/from overlap: 200 (e) and 404 (a) can both be reached in one run: merge them into one node",
+			"/response/answers/1/from overlap: 200 (e) and 404 (a) can both be reached in one run: join both to one transform, which picks the answer",
 		},
 		{
 			"ways that never come", `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"},
-			    {"id": "c", "kind": "transform", "expr": "2"}, {"id": "d", "kind": "transform", "expr": "3"}, {"id": "e", "kind": "merge", "expr": "4"}, {"id": "f", "kind": "merge", "expr": "5"}],
+			    {"id": "c", "kind": "transform", "expr": "2"}, {"id": "d", "kind": "http", ` + get + `}, {"id": "e", "kind": "transform", "expr": "4"}, {"id": "f", "kind": "transform", "expr": "5"}],
 			  "edges": [{"from": "a", "to": "b"}, {"from": "a", "to": "c", "on": 404}, {"from": "a", "to": "d"}, {"from": "c", "to": "d"},
 			            {"from": "b", "to": "e"}, {"from": "d", "to": "e"}, {"from": "d", "to": "f"}],
 			  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 404, "from": "a", "on": 404}, {"status": 201, "from": "f"}]}}`,
@@ -261,15 +295,15 @@ func TestValidate_AMergesRoute(t *testing.T) {
 	}
 }
 
-// A node after a merge that also needs a node the merge's ways rule out, or
-// one of them to answer otherwise, can never run; two merges can leave it
-// only not running.
-func TestValidate_NeverRunsAfterAMerge(t *testing.T) {
+// An http node after a transform that also needs a node the transform's
+// ways rule out, or one of them to answer otherwise, can never run; two
+// transforms can leave it only not running.
+func TestValidate_NeverRunsAfterATransform(t *testing.T) {
 	t.Parallel()
 	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
 	ps := Validate(decode(t, `{"nodes": [
 		{"id": "prefs", "kind": "http", `+get+`, "outputs": [{"status": 400}]}, {"id": "t", "kind": "http", `+get+`, "outputs": [{"status": 500}]},
-		{"id": "e", "kind": "merge", "expr": "1"}, {"id": "d", "kind": "transform", "expr": "1"}],
+		{"id": "e", "kind": "transform", "expr": "1"}, {"id": "d", "kind": "http", `+get+`}],
 	  "edges": [{"from": "prefs", "to": "e"}, {"from": "prefs", "to": "t", "on": 400}, {"from": "t", "to": "e"},
 	            {"from": "e", "to": "d"}, {"from": "t", "to": "d", "on": 500}]}`))
 	var got []string
@@ -282,11 +316,11 @@ func TestValidate_NeverRunsAfterAMerge(t *testing.T) {
 	}
 	ps = Validate(decode(t, `{"nodes": [
 		{"id": "p", "kind": "http", `+get+`, "outputs": [{"status": 400}]}, {"id": "x", "kind": "http", `+get+`, "outputs": [{"status": 404}, {"status": 500}]},
-		{"id": "e1", "kind": "merge", "expr": "1"}, {"id": "e2", "kind": "merge", "expr": "2"}, {"id": "d", "kind": "transform", "expr": "1"}],
+		{"id": "e1", "kind": "transform", "expr": "1"}, {"id": "e2", "kind": "transform", "expr": "2"}, {"id": "d", "kind": "http", `+get+`}],
 	  "edges": [{"from": "p", "to": "x", "on": 400}, {"from": "p", "to": "e1"}, {"from": "x", "to": "e1"}, {"from": "p", "to": "e2"}, {"from": "x", "to": "e2", "on": 404},
 	            {"from": "e1", "to": "d"}, {"from": "e2", "to": "d"}, {"from": "x", "to": "d", "on": 500}]}`))
 	if len(ps) != 1 || ps[0].Detail != "d can never run: it needs x to answer 500, and to be skipped" {
-		t.Errorf("two merges: problems %v", ps)
+		t.Errorf("two transforms: problems %v", ps)
 	}
 }
 
@@ -585,24 +619,38 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 			want: []string{"/response/answers/1/from overlap"},
 		},
 		{
-			name: "a switch status no answer it's joined to has",
-			def: `{"nodes": [{"id": "a", "kind": "transform", "switch": {"cases": [{"when": "true", "status": 404}, {"when": "false", "status": 418}], "otherwise": {"status": 500}}}],
-			       "response": {"answers": [{"status": 404, "from": "a"}, {"status": 200, "from": "a"}]}}`,
-			want: []string{"/nodes/0/switch/cases/1/status unknown_answer", "/nodes/0/switch/otherwise/status unknown_answer", "/response/answers/1/from never_given"},
+			name: "a case's exit joined to the answer of another status",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "switch": {"cases": [{"when": "true", "status": 404}, {"when": "true", "status": 200}]}}],
+			       "response": {"answers": [{"status": 200, "from": "a", "on": 404}, {"status": 404, "from": "a", "on": 200}]}}`,
+			want: []string{"/response/answers/0/from other_status", "/response/answers/1/from other_status"},
+		},
+		{
+			name: "lines from a switch naming no case, or a status none gives",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "switch": {"cases": [{"when": "true", "status": 404}, {"when": "true", "status": 200}]}},
+			                 {"id": "b", "kind": "transform", "expr": "1"}, {"id": "c", "kind": "transform", "expr": "2"}],
+			       "edges": [{"from": "a", "to": "b"}, {"from": "a", "to": "c", "on": 418}],
+			       "response": {"answers": [{"status": 404, "from": "a"}, {"status": 418, "from": "a", "on": 418}]}}`,
+			want: []string{"/edges/0/on required", "/edges/1/on unknown_output", "/response/answers/0/on required", "/response/answers/1/on unknown_output"},
+		},
+		{
+			name: "three cases with one status, and a switch with none",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "switch": {"cases": [{"when": "true", "status": 404}, {"when": "false", "status": 404}, {"when": "false", "status": 404}]}},
+			                 {"id": "b", "kind": "transform", "switch": {"cases": []}}]}`,
+			want: []string{"/nodes/0/switch/cases/1/status duplicate_output", "/nodes/0/switch/cases/2/status duplicate_output", "/nodes/1/switch/cases required"},
 		},
 		{
 			name: "a case with no condition and a bad status",
-			def:  `{"nodes": [{"id": "a", "kind": "transform", "switch": {"cases": [{"status": 99}, {"when": "true", "status": 0}, {"when": "true", "status": 600}], "otherwise": {"status": 0}}}]}`,
-			want: []string{"/nodes/0/switch/cases/0/when required", "/nodes/0/switch/cases/0/status invalid_status", "/nodes/0/switch/cases/1/status required", "/nodes/0/switch/cases/2/status invalid_status", "/nodes/0/switch/otherwise/status required"},
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "switch": {"cases": [{"status": 99}, {"when": "true", "status": 0}, {"when": "true", "status": 600}]}}]}`,
+			want: []string{"/nodes/0/switch/cases/0/when required", "/nodes/0/switch/cases/0/status invalid_status", "/nodes/0/switch/cases/1/status required", "/nodes/0/switch/cases/2/status invalid_status"},
 		},
 		{
 			name: "a transform with an expr and a switch",
-			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1", "switch": {"otherwise": {"status": 200}}}]}`,
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1", "switch": {"cases": [{"when": "true", "status": 200}]}}]}`,
 			want: []string{"/nodes/0/switch not_allowed"},
 		},
 		{
 			name: "an http node with a switch",
-			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "switch": {"otherwise": {"status": 200}}}]}`,
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "switch": {"cases": [{"when": "true", "status": 200}]}}]}`,
 			want: []string{"/nodes/0/switch not_allowed"},
 		},
 		{
@@ -638,23 +686,11 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 			want: []string{"/nodes/0/unhandled/body required"},
 		},
 		{
-			name: "a merge with no edge into it",
+			// A transform merges now; a revision saved with a merge names a
+			// kind that's gone.
+			name: "a merge",
 			def:  `{"nodes": [{"id": "e", "kind": "merge", "expr": "1"}]}`,
-			want: []string{"/nodes/0 required"},
-		},
-		{
-			name: "a merge with what other kinds have, and no expr",
-			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"},
-			                 {"id": "e", "kind": "merge", ` + get + `, "switch": {"otherwise": {"status": 200}}, "sample": {"body": null}, "outputs": [{"status": 404}]}],
-			       "edges": [{"from": "a", "to": "e"}]}`,
-			want: []string{"/nodes/1/request not_allowed", "/nodes/1/switch not_allowed", "/nodes/1/expr required", "/nodes/1/sample not_allowed", "/nodes/1/outputs not_allowed"},
-		},
-		{
-			name: "a line from a merge naming an output",
-			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "e", "kind": "merge", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}],
-			       "edges": [{"from": "a", "to": "e"}, {"from": "e", "to": "b", "on": 404}],
-			       "response": {"answers": [{"status": 200, "from": "e", "on": 404}]}}`,
-			want: []string{"/edges/1/on not_allowed", "/response/answers/0/on not_allowed"},
+			want: []string{"/nodes/0/kind invalid_kind"},
 		},
 		{
 			name: "an output beside a response",
@@ -720,14 +756,14 @@ func TestProblems_Error(t *testing.T) {
 	}
 }
 
-// A step whose lines need outputs of one step that share none can never
-// run, and says so, whichever line it finds that on; the steps after it
-// can't either, aren't named again, and their answers are no overlap. Two
-// of one step's lines into another can never both be taken.
+// An http step whose lines need outputs of one step that share none can
+// never run, and says so, whichever line it finds that on; the steps after
+// it can't either, aren't named again, and their answers are no overlap.
+// Two of one step's lines into another can never both be taken.
 func TestValidate_NeverRuns(t *testing.T) {
 	t.Parallel()
 	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
-	step := func(id string) string { return `{"id": "` + id + `", "kind": "transform", "expr": "1"}` }
+	step := func(id string) string { return `{"id": "` + id + `", "kind": "http", ` + get + `}` }
 	ps := Validate(decode(t, `{"nodes": [{"id": "a", "kind": "http", `+get+`, "outputs": [{"status": 404}, {"status": 409}]},
 		`+step("b")+`, `+step("c")+`, `+step("d")+`, `+step("each_way")+`, `+step("later")+`, `+step("conflicted")+`, `+step("f")+`],
 	  "edges": [

@@ -7,10 +7,11 @@ came before C: its samples, previews, outputs by status and a step's blocks
 are committed (f9e7484, e98e50a, 2026-10-30), and so is Phase C, runs
 (ad89609, 2026-10-30), and D's API's answers, after C (8cbc5b1,
 2026-11-01), and a step's Unhandled block (80d55d4), its body (4fb0aec)
-and strict joins (e898238). Merge, a step that runs if any of its lines
-came, once all have ended, is built (2026-11-01): first as Either
-(4877f7a), then reworked.
-Phase E, the browser test, comes after.
+and strict joins (e898238). A step that runs if any of its lines came,
+once all have ended, was built as Either (4877f7a), reworked into Merge
+(4c8ef26), then folded into transform, which now merges its lines, and a
+transform's cases became its exits: "a step and a transform", parts 1 and
+2 (2026-11-01). Phase E, the browser test, comes after.
 Building Phase A raised question 8, since answered.
 
 ## Goal
@@ -1010,7 +1011,8 @@ Decided with you while building (2026-11-01), from your Fixes check:
       sources.md.
 
 **Phase D: Merge, the Either reworked** (2026-11-01, your call, after the
-Either was committed in 4877f7a)
+Either was committed in 4877f7a; committed as 4c8ef26, then folded into
+transform below)
 
 You asked whether a join that accepts whatever comes, its JSONata handling
 it, would be simpler than the Either. Decided with you on 2026-11-01:
@@ -1036,6 +1038,87 @@ it, would be simpler than the Either. Decided with you on 2026-11-01:
 - [x] Schema, validation, the engine, previews, runs and the editor: Either
       becomes Merge.
 - [x] Failing tests first; mutation checks; Chromium through nginx.
+- [x] Docs: the roadmap's D13 and rule, plan 02, CLAUDE.md, web.md,
+      sources.md, and this plan as built.
+
+**Phase D: a step and a transform, the transform merging, its cases as
+exits** (2026-11-01, your call, before Phase E; it replaces the Merge,
+staged)
+
+In your Fixes check, merge_200's Input held people and prefs only: a
+preview follows one run, each step answering 2xx where that leads on, so
+prefs answered 2xx and test_400 never ran there, whatever its sample. You
+asked how a transform and a Merge differ (when they run, and cases, which
+only a transform has), then cut it down: "its just step and
+merger/transformer". Decided with you on 2026-11-01:
+- **Two kinds.** A step is an HTTP call, and still runs only when every
+  line into it is taken. A transform is the merger: it waits for every
+  line into it to end and runs if any came, a step whose line didn't come
+  missing from what it reads, as the Merge's did. The merge kind goes,
+  and a setting for when a transform runs was the other option, dropped
+  as one thing too many.
+- **Its lines**: with more than one into it, each is dashed, as each may
+  not come; with one, it's needed, and solid. A line comes to its one
+  point: no ways column, no point per way, no Add a way from, as Connect
+  to on the step before adds one without drawing.
+- **Its preview comes by one way at a time**, picked in its Input:
+  "Preview a run that comes by", its first way by default. The steps
+  before that way answer through the outputs that lead there, so picking
+  test_400 runs it with its sample, prefs answering 400 with its own. The
+  preview request names the way as `way`, the edge's place.
+- **Cases are tabs, and exits.** Each case is a tab with a name you can
+  change, a condition, its JSONata and its exit code, a status. The first
+  case whose condition holds runs its JSONata and exits with its code;
+  steps after read nodes.<id>.status and nodes.<id>.body. Each is a block
+  on the card's right, "found · 200", with its point, and a click opens
+  its tab; a line leaves it for a step, a transform or an answer.
+- **No Otherwise** (your call once it was built): when no case holds, the
+  step fails, and its Unhandled block takes that, as it takes any of its
+  failures; with none joined, the failure fails the run. Otherwise, a last
+  case with no condition, was the other option, one thing more.
+
+Mine, while planning, for you to veto:
+- **An exit is its code**: a line from a case is written `on: <status>`,
+  as a line from an HTTP step's response is, so a transform gives a code
+  once; two conditions for one code join with `or`. An answer takes one
+  line, so two cases with one code couldn't both answer anyway. A name is
+  a label, so renaming moves no line; changing a code takes its lines
+  along. Unnamed, a case is Case and its place.
+- **An exit joined to the response answers its own code**: a case that
+  exits 404 joins the 404 answer, and the editor says so if it doesn't.
+  Each exit gives one answer. A transform with one expression keeps
+  picking among answers with {status, body}, as today.
+- **A transform with an expression** keeps its card and panel; Use cases
+  makes its expression the first case's JSONata, its lines going along,
+  and each case waits for its condition.
+- **Saved workflows**: steps after a transform with cases read
+  nodes.<id>.status and .body, not body.status and body.body; only the
+  two pw-cases test workflows have cases. A transform with several lines
+  now runs when any came, not all; none of yours has two. Your Fixes
+  check moves its merge to a transform, as a new revision.
+- **The words**: no Merge step; problems name the kind once, not in two
+  copies; Then's "merge this step with the one that gives the answer"
+  becomes "join both to a transform"; never-runs, now a step's problem
+  only, ends "to run it after whichever comes, join them to a transform
+  first".
+- **A run** records the code a transform with cases exited with, as an
+  HTTP step's status, and the lines it came by.
+
+Part 1, the transform merging:
+- [x] Schema, validation, routes, the engine and previews (`way`): the
+      merge kind folded into transform.
+- [x] The editor: dashed lines, the way picker, It came by; the Merge
+      card, its ways and Add a way from gone.
+Part 2, cases as tabs and exits:
+- [x] Schema and validation: a case's `name`, lines `on` a code, a code
+      once per transform, an exit's answer; Otherwise gone.
+- [x] The engine and runs: a case's status and body, its exit, the code
+      recorded, no case holding a failure.
+- [x] The editor: tabs, blocks with points, renaming, a code change moving
+      its lines, Use cases moving them to the first case.
+Both:
+- [x] Failing tests first; mutation checks; Chromium through nginx, light
+      and dark.
 - [x] Docs: the roadmap's D13 and rule, plan 02, CLAUDE.md, web.md,
       sources.md, and this plan as built.
 
@@ -1919,9 +2002,102 @@ were committed (80d55d4, 4fb0aec). Decided while building:
   saying it can never run, and why. No CSP violations and no console
   problems.
 
+## Cases as exits, as built
+
+Part 2 of "a step and a transform", built on 2026-11-01 on top of part 1,
+staged. Decided while building:
+- **A case answers as an http node does.** The engine gives a switch's
+  status and body apart: the run records the status as an http node's
+  (`http_status`, `response.status`), its part of the data document is
+  `{status, body}`, a body left out null, and the output it answered
+  through is its status exactly, 200 among them, not 2xx: `exitOf` for
+  the engine, `wayOf(run, cases)` for the editor's run lines. A preview
+  of it still gives `{status, body}`.
+- **No case holding is `ErrNoCase`**, "no case holds", a failure of the
+  node's own; a preview says so at the switch, and each tab says "With
+  these samples, no case holds: the step fails, and its Unhandled takes
+  that". A switch needs a case (`/switch/cases` required), so a step
+  with cases keeps its last one: Remove is off for it.
+- **Lines from a transform with cases** name a case's status, required;
+  one naming none or a status no case gives is a problem, and the canvas
+  doesn't draw it. An answer joined to a case's exit has its status, or
+  it's `other_status`. The checks of a switch's statuses against the
+  answers it's joined to (`unknown_answer`, `never_given`) went, as
+  lines name exits now.
+- **Its panel**: Input, once, above the tabs, with the way picker, as a
+  field picked goes into the field the cursor was last in, any tab's; a
+  tab per case, keyed `case:<k>` so typing a new status keeps it open,
+  moved with its case; each says whether its case holds over the samples,
+  else which does; then what leaves its exit, "Then, on missing". + Case
+  takes a name and a status, the first answer's no case has by default,
+  else the first free from 400. A status another case has is refused
+  where it's typed: "found exits with 200." A problem in a case opens its
+  tab.
+- **Its card** keeps the status whole and lets the name give way, as the
+  status names the exit.
+- **Mutations**: one survived, the engine writing a body left out as null:
+  json.RawMessage prints nil as null in this Go (1.27), so that line was a
+  second check and went, a comment saying why.
+- **Checked**: Go tests under `-race`, the linter; web typecheck, lint,
+  format and 397 tests. 30 mutations, 15 in the server (validation, the
+  answers' check, exits, the entry, no case holding, previews) and 15 in
+  the editor (handles, edits moving and taking lines, the run's marks,
+  the tabs, + Case, a taken status), each caught but the equivalent one.
+  Chromium through nginx, light and dark: a transform with cases (its
+  exits, its tabs, what each says over the samples), a run that took
+  missing (marked, its line to the 404 answer taken, "It gave 404"), a run
+  in which no case held (Unhandled marked, answered 422, "no case holds"),
+  renaming a case and adding one with + Case. No CSP violations and no
+  console problems.
+
+## A transform merging, as built
+
+Part 1 of "a step and a transform", built on 2026-11-01 after the Merge was
+committed (4c8ef26). Decided while building:
+- **A transform with a line into it joins as the Merge did**, in the
+  engine, its routes and its previews; one with none still runs first. It
+  records the lines it came by, `ways`, one or several. An http node keeps
+  needing every line, so never-runs is a problem of a step that isn't a
+  transform, or of one whose kind is gone; its words end "It runs only
+  when every line into it is taken; to run it after whichever comes, join
+  them to a transform first".
+- **Tests**: the ones that showed a step never running used a transform
+  with two lines, and use an http step now. The transform cases joined the
+  merge tests, your Fixes check's shape among them: success_200 by crm or
+  test_400, and bad_400, by crm's 400, kept apart.
+- **The way picker** lists the lines into the transform as the canvas
+  names them. A way picked is kept by its ends, so it stays as lines come
+  and go; the preview request names it by its place in the draft
+  previewed. It drives the expression's preview, or the cases'; the
+  Unhandled body's stays the run in which each step answers 2xx.
+- **It came by** shows only with more than one line in, and so does the
+  connection panel's "a transform, runs if any of its ways is taken".
+- **The words**: an answer's refusal, Then and the overlap problem said to
+  "merge them into one step"; they say to join both to a transform now,
+  the overlap problem "to one transform, which picks the answer".
+- **Divergence**: revisions saved with a merge node, your Fixes check's 32
+  and 33 and the pw-merge test workflows, name a kind the server no longer
+  knows. Your Fixes check is revision 34, its merge_200 a transform.
+- **Checked**: Go tests under `-race`, web typecheck, lint and tests
+  (see the wrap-up for `just check`). 25 mutations, 17 in the server
+  (joins, routes, the engine's join, ways, previews by way, the API) and
+  8 in the editor, each caught, three only after a test was added: a way
+  told from another out of the same step, a lone line's connection text,
+  and a kind the editor doesn't know. Chromium through nginx, light and
+  dark: no Merge to add; a transform's lines dashed, a lone one solid; its
+  preview by its first way, then by test_400, prefs answering 400 with its
+  sample; no picker on a transform with one line; a run in which count
+  failed into Unhandled (that line solid, the other dashed, "It came by
+  count · Unhandled.", none on report); your Fixes check, no problems, its
+  merge_200 reading test_400's sample, {"node": "test4000"}, its picker
+  offering test_400 · 2xx, crm · 2xx and crm · 500; a workflow saved with
+  a merge, naming its kind as unknown. No CSP violations and no console
+  problems.
+
 ## Merge, as built
 
-Reworked from the Either on 2026-11-01, after it was committed (4877f7a).
+Reworked from the Either on 2026-11-01, after it was committed (4877f7a),
+and folded into transform the same day (above); kept as it was built.
 Decided while building:
 - **A merge is a transform that joins differently.** It compiles its expr
   and runs it as a transform's, over every finished step before it; only

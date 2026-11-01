@@ -140,18 +140,17 @@
     --xy-edge-label-color: var(--destructive);
   }
   /* A connection the run shown didn't take is dashed, and so is a way into
-     a Merge step until a run says whether it came: dashed means it may
-     not be taken, or wasn't. Its name says so in words too, for a screen
-     reader. */
+     a transform with several until a run says whether it came: dashed
+     means it may not be taken, or wasn't. Its name says so in words too,
+     for a screen reader. */
   .react-flow__edge.untaken .react-flow__edge-path,
   .react-flow__edge.way .react-flow__edge-path {
     stroke-dasharray: 4 4;
   }
-  /* An answer's point on the response card, and a way's or + Add's on an
-     Merge step, takes a line let go anywhere on its block, not only on the
-     point: React Flow joins the point under the pointer, so the point covers
-     the block, and draws its dot on the block's left edge, where the line
-     ends. */
+  /* An answer's point on the response card takes a line let go anywhere
+     on its block, not only on the point: React Flow joins the point under
+     the pointer, so the point covers the block, and draws its dot on the
+     block's left edge, where the line ends. */
   .react-flow__handle.block-point {
     inset: 0;
     width: auto;

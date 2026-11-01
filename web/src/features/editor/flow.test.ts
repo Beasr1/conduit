@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import {
+  exitsOf,
   type Flow,
   freeSpot,
   lineFrom,
@@ -251,7 +252,7 @@ test("a line from a step's Unhandled leaves from its strip", () => {
   expect(flow.undrawn).toEqual([2]);
 });
 
-test("a Merge step's ways each come into a point of their own, and it grows to fit them", () => {
+test("lines into a transform with more than one come to its one point, dashed, as each may not come", () => {
   const flow = toFlow({
     nodes: [
       {
@@ -261,7 +262,7 @@ test("a Merge step's ways each come into a point of their own, and it grows to f
         outputs: [{ status: 400 }],
       },
       { id: "fallback", kind: "transform", expr: "1" },
-      { id: "prefs_ok", kind: "merge", expr: "1" },
+      { id: "prefs_ok", kind: "transform", expr: "1" },
       { id: "greet", kind: "transform", expr: "2" },
     ],
     edges: [
@@ -273,24 +274,37 @@ test("a Merge step's ways each come into a point of their own, and it grows to f
     ],
   });
   expect(
-    flow.edges.map((e) => `${e.id} ${e.sourceHandle} ${e.targetHandle}`),
+    flow.edges.map(
+      (e) =>
+        `${e.id} ${e.sourceHandle} ${e.targetHandle}${e.data?.way ? " way" : ""}`,
+    ),
   ).toEqual([
-    "prefs->prefs_ok 2xx way:prefs:0",
+    "prefs->prefs_ok 2xx in way",
     "prefs->fallback 400 in",
-    "fallback->prefs_ok out way:fallback:0",
-    "fallback->prefs_ok#1 unhandled way:fallback:-1",
+    "fallback->prefs_ok out in way",
+    "fallback->prefs_ok#1 unhandled in way",
     "prefs_ok->greet out in",
   ]);
-  // Three ways and + Add, 24 px apiece, above its Unhandled strip; with
-  // none, it's as tall as a transform.
-  expect(flow.nodes.find((n) => n.id === "prefs_ok")).toMatchObject({
-    type: "merge",
-    height: 120,
-    measured: { height: 120 },
-  });
+  // A step of a kind the editor doesn't know needs every line, as far as
+  // the canvas can tell.
   expect(
-    toFlow({ nodes: [{ id: "e", kind: "merge", expr: "1" }] }).nodes[0],
-  ).toMatchObject({ type: "merge", height: NODE_HEIGHT + 24 });
+    toFlow({
+      nodes: [
+        { id: "a", kind: "transform", expr: "1" },
+        { id: "b", kind: "transform", expr: "2" },
+        { id: "gone", kind: "merge" as NodeKind, expr: "3" },
+      ],
+      edges: [
+        { from: "a", to: "gone" },
+        { from: "b", to: "gone" },
+      ],
+    }).edges.map((e) => e.data?.way ?? false),
+  ).toEqual([false, false]);
+  // It's drawn as a transform is, however many lines come into it.
+  expect(flow.nodes.find((n) => n.id === "prefs_ok")).toMatchObject({
+    type: "transform",
+    height: NODE_HEIGHT + 24,
+  });
   expect(
     waysInto(
       {
@@ -304,9 +318,41 @@ test("a Merge step's ways each come into a point of their own, and it grows to f
       "e",
     ),
   ).toEqual([
-    { index: 0, from: "a", on: 404, handle: "way:a:404" },
-    { index: 2, from: "b", on: UNHANDLED, handle: "way:b:-1" },
+    { index: 0, from: "a", on: 404 },
+    { index: 2, from: "b", on: UNHANDLED },
   ]);
+});
+
+test("a transform with cases has an exit per case, its lines leaving each by its status", () => {
+  const flow = toFlow({
+    nodes: [
+      {
+        id: "check",
+        kind: "transform",
+        switch: {
+          cases: [
+            { name: "found", when: "true", status: 200 },
+            { when: "false", status: 404 },
+          ],
+        },
+      },
+      { id: "next", kind: "transform", expr: "1" },
+    ],
+    edges: [
+      { from: "check", to: "next", on: 200 },
+      { from: "check", to: "next", on: 404 },
+      // One naming no case can't be drawn.
+      { from: "check", to: "next" },
+    ],
+  });
+  expect(flow.edges.map((e) => `${e.id} ${e.sourceHandle}`)).toEqual([
+    "check->next 200",
+    "check->next#1 404",
+  ]);
+  expect(flow.undrawn).toEqual([2]);
+  // Its exits, then + Case, 24 px apiece, above its Unhandled strip.
+  expect(flow.nodes[0]).toMatchObject({ height: NODE_HEIGHT + 24 });
+  expect(exitsOf(undefined)).toEqual([]);
 });
 
 test("the editor counts Unhandled beside a step's other outputs", () => {

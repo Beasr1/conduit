@@ -128,59 +128,57 @@ func (v *validator) checkNode(p string, n Node) {
 		case n.Expr == "":
 			v.add(p+"/expr", "required", "a transform node needs an expr, or a switch")
 		}
-	case NodeKindMerge:
-		if n.Request != nil {
-			v.add(p+"/request", "not_allowed", "a merge node has an expr, not a request")
-		}
-		if n.Switch != nil {
-			v.add(p+"/switch", "not_allowed", "a merge node has an expr, not a switch")
-		}
-		if n.Expr == "" {
-			v.add(p+"/expr", "required", "a merge node needs an expr, which reads whatever came into it")
-		}
 	default:
-		v.add(p+"/kind", "invalid_kind", "the kind %q isn't http, transform or merge", n.Kind)
+		v.add(p+"/kind", "invalid_kind", "the kind %q isn't http or transform", n.Kind)
 	}
 	switch {
 	case n.Sample == nil:
 	case n.Kind == NodeKindHTTP:
 		v.checkSample(p+"/sample", n.Sample, false)
-	case n.Kind == NodeKindTransform, n.Kind == NodeKindMerge:
-		v.add(p+"/sample", "not_allowed", "a %s node's value comes from its expr, so it has no sample", n.Kind)
+	case n.Kind == NodeKindTransform:
+		v.add(p+"/sample", "not_allowed", "a transform node's value comes from its expr, so it has no sample")
 	}
 	switch {
 	case len(n.Outputs) == 0:
 	case n.Kind == NodeKindHTTP:
 		v.checkOutputs(p+"/outputs", n.Outputs)
-	case n.Kind == NodeKindTransform, n.Kind == NodeKindMerge:
-		v.add(p+"/outputs", "not_allowed", "a %s node has one output, so it lists none", n.Kind)
+	case n.Kind == NodeKindTransform:
+		v.add(p+"/outputs", "not_allowed", "a transform node has one output, so it lists none")
 	}
 	if n.Unhandled != nil && strings.TrimSpace(n.Unhandled.Body) == "" {
 		v.add(p+"/unhandled/body", "required", "an Unhandled body needs JSONata: write it, or remove it")
 	}
 }
 
-// checkSwitch checks a transform node's switch: each case's condition and
-// status, and otherwise's status. A status may repeat, as two conditions
-// can give one answer.
+// checkSwitch checks a transform node's switch: it has a case, and each
+// case a condition and a status. A status names a case's exit, so the
+// switch gives it once.
 func (v *validator) checkSwitch(p string, s *Switch) {
+	if len(s.Cases) == 0 {
+		v.add(p+"/cases", "required", "a switch needs a case")
+	}
+	given := make(map[int]bool, len(s.Cases))
 	for k, c := range s.Cases {
 		q := fmt.Sprintf("%s/cases/%d", p, k)
 		if strings.TrimSpace(c.When) == "" {
 			v.add(q+"/when", "required", "a case needs a condition")
 		}
-		v.checkCaseStatus(q+"/status", c.Status)
+		v.checkCaseStatus(q+"/status", c.Status, given)
 	}
-	v.checkCaseStatus(p+"/otherwise/status", s.Otherwise.Status)
 }
 
-func (v *validator) checkCaseStatus(p string, status int) {
+// checkCaseStatus checks the status of a case against the ones the switch
+// gives already.
+func (v *validator) checkCaseStatus(p string, status int, given map[int]bool) {
 	switch {
 	case status == 0:
 		v.add(p, "required", "a case needs a status")
 	case status < 200 || status > 599:
 		v.add(p, "invalid_status", "a case's status is 200 to 599; %d isn't", status)
+	case given[status]:
+		v.add(p, "duplicate_output", "the switch gives %d already: a status names one exit, so it's given once", status)
 	}
+	given[status] = true
 }
 
 // checkOutputs checks an http node's outputs besides 2xx: each a status
@@ -334,9 +332,43 @@ func PointerTokens(pointer string) []string {
 }
 
 // OnUnhandled is the output a line from a node's Unhandled block leaves
-// from, counted beside the others: a status, and 0 for 2xx and a
-// transform's one output.
+// from, counted beside the others: a status, and 0 for 2xx and the one
+// output of a transform with an expr.
 const OnUnhandled = -1
+
+// checkOn checks output on of node n, as a line, what it is, leaves from
+// it: one an http node lists, or 2xx; one a transform's case gives, which
+// a line from it names; or a transform's one output, which a line from it
+// doesn't. Any node's Unhandled block is one. ok says on is one of n's.
+func (v *validator) checkOn(p string, n Node, on int, what string) (ok bool) {
+	switch {
+	case on == OnUnhandled:
+	case n.Kind == NodeKindHTTP && on != 0 && !slices.ContainsFunc(n.Outputs, func(o Output) bool { return o.Status == on }):
+		v.add(p, "unknown_output", "%s has no %d output", n.ID, on)
+		return false
+	case n.Kind != NodeKindTransform:
+	case n.Switch == nil && on != 0:
+		v.add(p, "not_allowed", "a transform node has one output, so %s from it names none", what)
+		return false
+	case n.Switch == nil:
+	case on == 0:
+		v.add(p, "required", "%s from a transform with cases leaves one of them: name its status", what)
+		return false
+	case !slices.Contains(n.Switch.Statuses(), on):
+		v.add(p, "unknown_output", "%s has no case giving %d", n.ID, on)
+		return false
+	}
+	return true
+}
+
+// Statuses is what the switch can give, a status per case: its exits.
+func (s *Switch) Statuses() []int {
+	out := make([]int, 0, len(s.Cases))
+	for _, c := range s.Cases {
+		out = append(out, c.Status)
+	}
+	return out
+}
 
 // Output is the output of its source the edge leaves from: on, or
 // OnUnhandled.
@@ -380,16 +412,7 @@ func (v *validator) checkEdges(edges []Edge, nodes []Node, index map[string]int)
 			v.add(p+"/unhandled", "not_allowed", "an edge leaves from one block: the %d output or Unhandled", e.On)
 			continue
 		}
-		if e.On != 0 {
-			switch n := nodes[from]; n.Kind {
-			case NodeKindHTTP:
-				if !slices.ContainsFunc(n.Outputs, func(o Output) bool { return o.Status == e.On }) {
-					v.add(p+"/on", "unknown_output", "%s has no %d output", e.From, e.On)
-				}
-			case NodeKindTransform, NodeKindMerge:
-				v.add(p+"/on", "not_allowed", "a %s node has one output, so an edge from it names none", n.Kind)
-			}
-		}
+		v.checkOn(p+"/on", nodes[from], e.Output(), "an edge")
 		key := [3]int{from, to, e.Output()}
 		if j, dup := seen[key]; dup {
 			v.add(p, "duplicate_edge", "/edges/%d already connects %s to %s from the same output", j, e.From, e.To)

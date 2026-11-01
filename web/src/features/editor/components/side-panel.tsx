@@ -14,7 +14,6 @@ import { useEditor } from "@/features/editor/store";
 const stepTitles: Record<string, string> = {
   http: "HTTP step",
   transform: "Transform step",
-  merge: "Merge step",
 };
 
 // SidePanel holds the settings of what's picked on the canvas, one thing at a

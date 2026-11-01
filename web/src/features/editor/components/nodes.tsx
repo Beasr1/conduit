@@ -11,21 +11,16 @@ import { useShallow } from "zustand/react/shallow";
 import { ProblemMark } from "@/features/editor/components/problem-mark";
 import { RunMark } from "@/features/editor/components/step-run";
 import {
+  exitsOf,
   type FlowNode,
   handlesOf,
   UNHANDLED,
   UNHANDLED_HANDLE,
-  wayHandle,
-  wayLabel,
-  waysInto,
 } from "@/features/editor/flow";
 import { atStep, useProblemCount } from "@/features/editor/hooks/use-problems";
 import { useRun, useStepRun } from "@/features/editor/hooks/use-runs";
 import { runSaid, wayOf } from "@/features/editor/runs";
 import { type Refused, useEditor } from "@/features/editor/store";
-import type { components } from "@/gen/schema";
-
-type Switch = components["schemas"]["Switch"];
 
 // Frame is a step's request block, and the inside of a step that has no
 // others: its id, a line saying what it does, and the handle connections
@@ -188,108 +183,73 @@ const HttpNode = memo(function HttpNode({ id, data }: NodeProps<FlowNode>) {
   );
 });
 
+// A transform step with an expression gives its value from its one point on
+// the right. One with cases is blocks, as an HTTP step is: its id on the
+// left, and on the right an exit per case, each named and with its status
+// and the handle its lines leave from, then + Case, with its Unhandled strip
+// along the bottom, which takes no case holding. A click on a block opens
+// its tab.
 const TransformNode = memo(function TransformNode({
+  id,
   data,
 }: NodeProps<FlowNode>) {
   const node = useEditor((s) => s.draft.nodes[data.index]);
   const problems = useProblemCount(atStep(data.index));
   const run = useStepRun(node?.id ?? "");
+  // React Flow finds a node's handles when it mounts; an exit added or
+  // taken away later has to be pointed out.
+  const update = useUpdateNodeInternals();
+  const handles = (node ? handlesOf(node) : []).join(" ");
+  useEffect(() => update(id), [update, id, handles]);
   if (!node) return null;
+  // While a run is shown, the exit it took is marked.
+  const took = run?.state === "succeeded" ? run.status : undefined;
   return (
     <Card problems={problems} strip={<UnhandledStrip step={node.id} />}>
       <Frame id={node.id} problems={problems}>
         {run ? (
           <RunMark run={run} />
         ) : node.switch ? (
-          casesLine(node.switch)
+          "Cases"
         ) : (
           node.expr || "No expression yet"
         )}
       </Frame>
-      <Handle type="source" position={Position.Right} id="out" />
-    </Card>
-  );
-});
-
-// casesLine is a switch in a few words: the statuses its cases give, then
-// Otherwise's: "400 · 404 · else 200".
-function casesLine(s: Switch): string {
-  return [
-    ...(s.cases ?? []).map((c) => c.status),
-    `else ${s.otherwise.status}`,
-  ].join(" · ");
-}
-
-// A Merge step runs if any of its ways came, once all have ended: each way
-// is a block on its left, named for the step and response it comes from,
-// with the point its line arrives at, then + Add, where a new line is let
-// go; each point covers its block. Its value goes on from its point on the
-// right, and its Unhandled strip runs along the bottom. While a run is
-// shown, each way that came is marked.
-const MergeNode = memo(function MergeNode({ id, data }: NodeProps<FlowNode>) {
-  const node = useEditor((s) => s.draft.nodes[data.index]);
-  const step = node?.id ?? "";
-  const handles = useEditor(
-    useShallow((s) => waysInto(s.draft, step).map((w) => w.handle)),
-  );
-  const labels = useEditor(
-    useShallow((s) =>
-      waysInto(s.draft, step).map((w) => wayLabel(s.draft, w.from, w.on)),
-    ),
-  );
-  const problems = useProblemCount(atStep(data.index));
-  const run = useStepRun(step);
-  const came = new Set((run?.came ?? []).map(wayHandle));
-  // It grows with its ways, each with its point.
-  const update = useUpdateNodeInternals();
-  const points = handles.join(" ");
-  useEffect(() => update(id), [update, id, points]);
-  if (!node) return null;
-  return (
-    <Card problems={problems} strip={<UnhandledStrip step={node.id} />}>
-      <div className="flex w-32 shrink-0 flex-col border-r font-mono text-xs">
-        {handles.map((h, k) => (
+      {node.switch ? (
+        <div className="flex w-32 shrink-0 flex-col border-l font-mono text-xs">
+          {/* The status names the exit, so it stays whole; the name gives
+              way. */}
+          {exitsOf(node).map((exit) => (
+            <div
+              key={exit.part}
+              data-part={exit.part}
+              className="relative flex min-w-0 flex-1 items-center gap-1 border-b px-2.5 [&_svg]:size-3 [&_svg]:shrink-0"
+            >
+              <span className="min-w-0 truncate">{exit.label}</span>{" "}
+              <span className="shrink-0">· {exit.status}</span>
+              {exit.status === took && (
+                <>
+                  <CheckIcon aria-hidden />
+                  <span className="sr-only">, the case that held</span>
+                </>
+              )}
+              <Handle
+                type="source"
+                position={Position.Right}
+                id={String(exit.status)}
+              />
+            </div>
+          ))}
           <div
-            key={k}
-            className="relative flex flex-1 items-center gap-1 border-b px-2.5 [&_svg]:size-3 [&_svg]:shrink-0"
+            data-part="add"
+            className="flex flex-1 items-center px-2.5 text-muted-foreground"
           >
-            <Handle
-              type="target"
-              position={Position.Left}
-              id={h}
-              className="block-point"
-            />
-            <span className="truncate">{labels[k]}</span>
-            {came.has(h) && (
-              <>
-                <CheckIcon aria-hidden />
-                <span className="sr-only">, a way that came</span>
-              </>
-            )}
+            + Case
           </div>
-        ))}
-        <div className="relative flex flex-1 items-center px-2.5 text-muted-foreground">
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="in"
-            className="block-point"
-          />
-          + Add
         </div>
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 px-3">
-        <span className="flex items-center gap-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0">
-          <span className="truncate font-mono text-sm font-medium">
-            {node.id || "(no id)"}
-          </span>
-          {problems > 0 && <ProblemMark count={problems} />}
-        </span>
-        <span className="truncate text-xs text-muted-foreground [&_svg]:size-3 [&_svg]:shrink-0">
-          {run ? <RunMark run={run} /> : "Merge"}
-        </span>
-      </div>
-      <Handle type="source" position={Position.Right} id="out" />
+      ) : (
+        <Handle type="source" position={Position.Right} id="out" />
+      )}
     </Card>
   );
 });
@@ -435,7 +395,8 @@ function Refusal({ refused: { step, answer } }: { refused: Refused }) {
     return (
       <>
         {taken.status} takes one line, from {name(taken.from)}. To answer{" "}
-        {taken.status} from {name(step)} too, merge them into one step.
+        {taken.status} from {name(step)} too, join both to a transform, and the
+        transform to the answer.
       </>
     );
   if (answers.length === 0)
@@ -452,7 +413,6 @@ function Refusal({ refused: { step, answer } }: { refused: Refused }) {
 export const nodeTypes = {
   http: HttpNode,
   transform: TransformNode,
-  merge: MergeNode,
   unknown: UnknownNode,
   response: ResponseNode,
 };

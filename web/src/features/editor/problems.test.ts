@@ -12,7 +12,6 @@ import {
   updateCase,
   updateEdge,
   updateNode,
-  updateOtherwise,
 } from "@/features/editor/edits";
 import {
   follow,
@@ -92,14 +91,6 @@ test.each<[string, Place]>([
   [
     "/nodes/1/switch/cases/0/body",
     { on: "step", index: 1, field: "case_body", case: 0 },
-  ],
-  [
-    "/nodes/1/switch/otherwise/status",
-    { on: "step", index: 1, field: "otherwise_status" },
-  ],
-  [
-    "/nodes/1/switch/otherwise/body",
-    { on: "step", index: 1, field: "otherwise_body" },
   ],
   ["/nodes/1/switch/cases", { on: "step", index: 1, field: "switch" }],
   [
@@ -304,8 +295,10 @@ test("an answer's problem goes once that answer changes, and its line's once the
         id: "a",
         kind: "transform",
         switch: {
-          cases: [{ when: "", status: 400 }],
-          otherwise: { status: 200 },
+          cases: [
+            { when: "", status: 400 },
+            { when: "true", status: 200 },
+          ],
         },
       },
     ],
@@ -315,7 +308,7 @@ test("an answer's problem goes once that answer changes, and its line's once the
     follow(
       when,
       cased,
-      updateOtherwise(cased, 0, (o) => ({ ...o, body: "1" })),
+      updateCase(cased, 0, 1, (c) => ({ ...c, body: "1" })),
     ),
   ).toEqual(when);
   expect(
@@ -354,7 +347,7 @@ const broken: Definition = {
   response: {
     answers: [
       { status: 99, from: "zz", on: 409 },
-      { status: 99, from: "a" },
+      { status: 99, from: "a", on: 409 },
       { status: 98, from: "a", unhandled: true },
     ],
   },
@@ -399,8 +392,8 @@ test.each([
   ],
   [
     "/response/answers/1/from",
-    "never_given",
-    "a never gives 99: add a case for it, or join another step to it.",
+    "other_status",
+    "a's case exits with 409, so its line joins the 409 answer: draw it there instead.",
   ],
   ["/response/answers", "required", "Add an answer: a status the API gives."],
   [
@@ -410,7 +403,11 @@ test.each([
   ],
   ["/nodes/0/switch/cases/0/when", "required", "Add a condition."],
   ["/nodes/0/switch/cases/0/status", "required", "Give it a status."],
-  ["/nodes/0/switch/otherwise/status", "required", "Give it a status."],
+  [
+    "/nodes/0/switch/cases",
+    "required",
+    "Add a case: a step with cases needs one.",
+  ],
   [
     "/nodes/0/switch/cases/0/status",
     "invalid_status",
@@ -559,80 +556,69 @@ test("the server's detail stands where it says what went wrong", () => {
       broken,
     ),
   ).toBe(
-    "a can never run: it needs b to answer 2xx and 404. A step runs only when every line into it is taken; to run it after whichever comes, join them to a Merge step first.",
+    "a can never run: it needs b to answer 2xx and 404. It runs only when every line into it is taken; to run it after whichever comes, join them to a transform first.",
   );
 });
 
-// prefs answers 2xx or 400, and fallback follows its 400. prefs_ok, a
-// Merge, takes both, and gives on to greet from a response it doesn't have,
-// as it does to an answer.
-const merged: Definition = {
-  nodes: [
-    {
-      id: "prefs",
-      kind: "http",
-      request: { method: "GET", url: "https://prefs.example.com" },
-      outputs: [{ status: 400 }],
-    },
-    { id: "fallback", kind: "transform", expr: "1" },
-    { id: "prefs_ok", kind: "merge", expr: "2" },
-    { id: "greet", kind: "transform", expr: "3" },
-  ],
-  edges: [
-    { from: "prefs", to: "prefs_ok" },
-    { from: "prefs", to: "fallback", on: 400 },
-    { from: "fallback", to: "prefs_ok" },
-    { from: "prefs_ok", to: "greet", on: 404 },
-  ],
-  response: { answers: [{ status: 200, from: "prefs_ok", on: 404 }] },
-};
-
-test.each([
-  [
-    "/nodes/2",
-    "required",
-    "Draw a line into it from each step it follows: a Merge step runs if any of them comes.",
-  ],
-  ["/nodes/2/expr", "required", "Add an expression."],
-  [
-    "/nodes/2/kind",
-    "required",
-    "Give the step a kind: HTTP, transform or Merge.",
-  ],
-  [
-    "/nodes/2/request",
-    "not_allowed",
-    "A Merge step has an expression, and sends no request.",
-  ],
-  [
-    "/nodes/2/switch",
-    "not_allowed",
-    "A Merge step has an expression, not cases.",
-  ],
-  [
-    "/nodes/2/sample",
-    "not_allowed",
-    "A Merge step's value comes from its expression, so it has no sample.",
-  ],
-  [
-    "/nodes/2/outputs",
-    "not_allowed",
-    "A Merge step gives one value, so it has no other responses.",
-  ],
-  [
-    "/edges/3/on",
-    "not_allowed",
-    "A Merge step has no responses for a connection to leave from.",
-  ],
-  [
-    "/response/answers/0/on",
-    "not_allowed",
-    "A Merge step has one point, so its line into an answer names no response.",
-  ],
-])("a Merge's %s, %s: says %j", (pointer, code, said) => {
-  expect(say({ pointer, code, detail: "the server's words" }, merged)).toBe(
-    said,
+// A transform's cases are its exits, each named by its status.
+test("a case's problems say what a status as an exit asks of it", () => {
+  const of: Definition = {
+    nodes: [
+      {
+        id: "check",
+        kind: "transform",
+        switch: {
+          cases: [
+            { when: "true", status: 404 },
+            { when: "true", status: 404 },
+          ],
+        },
+      },
+      { id: "next", kind: "transform", expr: "1" },
+    ],
+    edges: [
+      { from: "check", to: "next" },
+      { from: "check", to: "next", on: 418 },
+    ],
+    response: { answers: [{ status: 418, from: "check", on: 418 }] },
+  };
+  const says = (pointer: string, code: string) =>
+    say({ pointer, code, detail: "the server's words" }, of);
+  expect(says("/nodes/0/switch/cases/1/status", "duplicate_output")).toBe(
+    "Another case of this step exits with this status: give this one its own, or join their conditions with or.",
   );
+  expect(says("/edges/0/on", "required")).toBe(
+    "A line from a step with cases leaves one of them: draw it from a case's point.",
+  );
+  expect(says("/edges/1/on", "unknown_output")).toBe(
+    "check has no case exiting with 418. Add one with + Case on the step, or draw the connection from another.",
+  );
+  expect(says("/response/answers/0/on", "unknown_output")).toBe(
+    "check has no case exiting with 418. Join this answer from another of its points.",
+  );
+});
+
+// A transform is the kind besides HTTP, its problems as its own.
+test.each([
+  ["/nodes/0/kind", "required", "Give the step a kind: HTTP or transform."],
+  [
+    "/nodes/0/request",
+    "not_allowed",
+    "A transform step has an expression, and sends no request.",
+  ],
+  [
+    "/nodes/0/sample",
+    "not_allowed",
+    "A transform step's value comes from its expression, so it has no sample.",
+  ],
+  [
+    "/nodes/0/outputs",
+    "not_allowed",
+    "A transform step gives one value, so it has no other responses.",
+  ],
+])("a transform's %s, %s: says %j", (pointer, code, said) => {
+  const of: Definition = { nodes: [{ id: "t", kind: "transform", expr: "1" }] };
+  expect(say({ pointer, code, detail: "the server's words" }, of)).toBe(said);
 });
 
 // The schema compiler's report starts with the schema's made-up base URL; the

@@ -2,11 +2,8 @@ import type { XYPosition } from "@xyflow/react";
 
 import {
   freeSpot,
-  handlesOf,
-  hasStrip,
   lineFrom,
   NODE_WIDTH,
-  onOf,
   outputOf,
   RANK_GAP,
   toFlow,
@@ -19,7 +16,6 @@ type Case = components["schemas"]["Case"];
 type Definition = components["schemas"]["Definition"];
 type Edge = components["schemas"]["Edge"];
 type Node = components["schemas"]["Node"];
-type Otherwise = components["schemas"]["Otherwise"];
 type Position = components["schemas"]["Position"];
 type Response = components["schemas"]["Response"];
 type Switch = components["schemas"]["Switch"];
@@ -121,25 +117,6 @@ export function connect(
   return { ...d, edges: [...(d.edges ?? []), edge] };
 }
 
-// newWays is the outputs that could join the Merge step with id as a
-// way: each other step's, its Unhandled among them, but those joined to it
-// already, and any that would close a loop. A step whose id is missing or
-// shared can't be named by one.
-export function newWays(
-  d: Definition,
-  id: string,
-): { from: string; on: number | undefined }[] {
-  const ids = d.nodes.map((n) => n.id);
-  return d.nodes.flatMap((n) => {
-    if (n.id === "" || ids.indexOf(n.id) !== ids.lastIndexOf(n.id)) return [];
-    const outputs = handlesOf(n).map(onOf);
-    if (hasStrip(n)) outputs.push(UNHANDLED);
-    return outputs
-      .filter((on) => canConnect(d, n.id, id, on))
-      .map((on) => ({ from: n.id, on }));
-  });
-}
-
 // joinedTo is the places in the response's answers of those joined to
 // output on of node from (2xx, or a transform's one, when there's none; or
 // its Unhandled block): the answers that output gives.
@@ -170,12 +147,13 @@ export function refusal(
 }
 
 // joinAnswer joins node from, on its output on (2xx, or a transform's one,
-// when there's none; or its Unhandled block), to answer k, in place of any
-// line it had. A transform joined to a second answer picks between them, so
-// it becomes a switch: otherwise keeps its expression as the first answer's
-// body, and a case for the new status waits to be filled. A switch gets a
-// case for a status it doesn't give yet. A line from Unhandled picks
-// nothing, and changes neither.
+// when there's none; a case's exit; or its Unhandled block), to answer k,
+// in place of any line it had. A transform with an expression joined to a
+// second answer picks between them, so it gets cases: the first keeps its
+// expression as the first answer's body, and one for the new status follows
+// it, each waiting for its condition, and each answer's line on the exit of
+// its status. A line from Unhandled, or from a case, picks nothing, and
+// changes neither.
 export function joinAnswer(
   d: Definition,
   k: number,
@@ -193,14 +171,11 @@ export function joinAnswer(
   };
   const index = d.nodes.findIndex((n) => n.id === from);
   const node = d.nodes[index];
-  if (node?.kind !== "transform" || on === UNHANDLED) return joined;
-  if (node.switch)
-    return updateNode(joined, index, (n) => withCase(n, answer.status));
+  if (node?.kind !== "transform" || node.switch || on === UNHANDLED)
+    return joined;
   const first = answers[before[0] ?? -1]?.status;
   if (first === undefined) return joined;
-  return updateNode(joined, index, (n) =>
-    withCase(toSwitch(n, first), answer.status),
-  );
+  return toCases(joined, index, first);
 }
 
 // leaveAnswer takes away the line into answer k; the answer stays.
@@ -314,40 +289,109 @@ function withResponse(d: Definition, r: Response): Definition {
   return next;
 }
 
-// toSwitch turns transform node n's expression into the otherwise of a
-// switch, with status, and no cases yet.
-export function toSwitch(n: Node, status: number): Node {
-  const next: Node = {
-    ...n,
-    switch: { otherwise: { status, ...(n.expr ? { body: n.expr } : {}) } },
-  };
-  delete next.expr;
-  return next;
-}
-
-// withCase gives switch node n a case for status, its condition to fill,
-// unless a case or its otherwise gives status already.
-function withCase(n: Node, status: number): Node {
-  const s = n.switch;
-  if (!s) return n;
-  const gives = [s.otherwise.status, ...(s.cases ?? []).map((c) => c.status)];
-  if (gives.includes(status)) return n;
-  return {
-    ...n,
-    switch: { ...s, cases: [...(s.cases ?? []), { when: "", status }] },
-  };
-}
-
-// addCase gives switch node index a case for status, after its others.
-export function addCase(
+// toCases turns transform node index's expression into cases: it becomes
+// the body of the first, which exits with status, and each other answer the
+// step is joined to gets a case of its own; each case's condition waits to
+// be filled. Each line goes along: one into an answer leaves the exit of the
+// answer's status, and one to a step the first case's.
+export function toCases(
   d: Definition,
   index: number,
   status: number,
 ): Definition {
+  const n = d.nodes[index];
+  if (n?.kind !== "transform" || n.switch) return d;
+  const id = n.id;
+  const one = (line: { from?: string; on?: number; unhandled?: boolean }) =>
+    line.from === id && outputOf(line) === undefined;
+  const answers = d.response?.answers ?? [];
+  const others = answers
+    .filter((a) => one(a) && a.status !== status)
+    .map((a) => ({ when: "", status: a.status }));
+  const cased = updateNode(d, index, (node) => {
+    const first = {
+      when: "",
+      status,
+      ...(node.expr ? { body: node.expr } : {}),
+    };
+    const next: Node = { ...node, switch: { cases: [first, ...others] } };
+    delete next.expr;
+    return next;
+  });
+  return {
+    ...cased,
+    ...(cased.edges && {
+      edges: cased.edges.map((e) => (one(e) ? { ...e, on: status } : e)),
+    }),
+    ...(cased.response?.answers && {
+      response: {
+        ...cased.response,
+        answers: answers.map((a) => (one(a) ? { ...a, on: a.status } : a)),
+      },
+    }),
+  };
+}
+
+// addCase gives switch node index a case for status, after its others, and
+// its name, if it's given one.
+export function addCase(
+  d: Definition,
+  index: number,
+  status: number,
+  name?: string,
+): Definition {
   return updateSwitch(d, index, (s) => ({
     ...s,
-    cases: [...(s.cases ?? []), { when: "", status }],
+    cases: [
+      ...(s.cases ?? []),
+      { ...(name ? { name } : {}), when: "", status },
+    ],
   }));
+}
+
+// setCaseStatus gives case k of switch node index status, and the lines
+// leaving its exit go along.
+export function setCaseStatus(
+  d: Definition,
+  index: number,
+  k: number,
+  status: number,
+): Definition {
+  const n = d.nodes[index];
+  const was = n?.switch?.cases?.[k]?.status;
+  if (!n || was === undefined || was === status) return d;
+  return moveExit(
+    updateCase(d, index, k, (c) => ({ ...c, status })),
+    n.id,
+    was,
+    status,
+  );
+}
+
+// moveExit has the lines leaving node id's exit was leave its exit now
+// instead.
+function moveExit(
+  d: Definition,
+  id: string,
+  was: number,
+  now: number,
+): Definition {
+  const moving = (line: { from?: string; on?: number }) =>
+    line.from === id && line.on === was;
+  return {
+    ...d,
+    ...(d.edges && {
+      edges: d.edges.map((e) => (moving(e) ? { ...e, on: now } : e)),
+    }),
+    ...(d.response?.answers && {
+      response: {
+        ...d.response,
+        answers: d.response.answers.map((a) =>
+          moving(a) ? { ...a, on: now } : a,
+        ),
+      },
+    }),
+  };
 }
 
 // updateCase puts what change makes of case k in its place.
@@ -363,16 +407,20 @@ export function updateCase(
   });
 }
 
-// removeCase takes case k away.
+// removeCase takes case k away, and with it the lines leaving its exit, as
+// removing an output takes its.
 export function removeCase(
   d: Definition,
   index: number,
   k: number,
 ): Definition {
-  return updateSwitch(d, index, (s) => ({
+  const n = d.nodes[index];
+  const status = n?.switch?.cases?.[k]?.status;
+  const removed = updateSwitch(d, index, (s) => ({
     ...s,
     cases: (s.cases ?? []).filter((_, i) => i !== k),
   }));
+  return status === undefined ? removed : leaveExit(removed, n?.id, status);
 }
 
 // moveCase moves case k to place to, as the first that holds answers.
@@ -389,19 +437,6 @@ export function moveCase(
     cases.splice(to, 0, c);
     return { ...s, cases };
   });
-}
-
-// updateOtherwise puts what change makes of a switch's otherwise in its
-// place.
-export function updateOtherwise(
-  d: Definition,
-  index: number,
-  change: (o: Otherwise) => Otherwise,
-): Definition {
-  return updateSwitch(d, index, (s) => ({
-    ...s,
-    otherwise: change(s.otherwise),
-  }));
 }
 
 function updateSwitch(
@@ -475,19 +510,28 @@ export function removeOutput(
   index: number,
   status: number,
 ): Definition {
-  const id = d.nodes[index]?.id;
-  let removed = updateNode(d, index, (n) => {
+  const removed = updateNode(d, index, (n) => {
     const next = { ...n };
     const outputs = (n.outputs ?? []).filter((o) => o.status !== status);
     if (outputs.length > 0) next.outputs = outputs;
     else delete next.outputs;
     return next;
   });
-  removed = unjoinWhere(removed, (a) => a.from === id && a.on === status);
-  if (!removed.edges) return removed;
+  return leaveExit(removed, d.nodes[index]?.id, status);
+}
+
+// leaveExit takes away the lines leaving node id's output status: its edges,
+// and its lines into answers.
+function leaveExit(
+  d: Definition,
+  id: string | undefined,
+  status: number,
+): Definition {
+  const left = unjoinWhere(d, (a) => a.from === id && a.on === status);
+  if (!left.edges) return left;
   return {
-    ...removed,
-    edges: removed.edges.filter((e) => e.from !== id || e.on !== status),
+    ...left,
+    edges: left.edges.filter((e) => e.from !== id || e.on !== status),
   };
 }
 

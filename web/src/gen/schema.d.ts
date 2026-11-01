@@ -381,6 +381,8 @@ export interface components {
             node?: string;
             /** @description The connection to preview, by its place in the definition's edges. Not with node. */
             edge?: number;
+            /** @description With node, a connection into that step, by its place in the definition's edges, that the run previewed comes by, as a transform any of whose connections may come. The steps before that connection's source answer through the outputs that lead to it, and the source through the connection's. Absent, each step answers 2xx where that leads on. */
+            way?: number;
         };
         Preview: {
             /** @description The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples. */
@@ -388,10 +390,10 @@ export interface components {
             /** @description A connection's preview only, whether a run would take it with these samples. */
             taken?: boolean;
             sends?: components["schemas"]["RenderedRequest"];
-            /** @description A transform or merge step's value, or the workflow's output. Absent when it gave none. */
+            /** @description A transform step's value, or the workflow's output. Absent when it gave none. */
             gives?: unknown;
             unhandled?: components["schemas"]["UnhandledPreview"];
-            /** @description A run would skip the step, or a connection's source, with these samples, as a step joined to it takes no connection into it, or none into a merge is taken. */
+            /** @description A run would skip the step, or a connection's source, with these samples, as a connection into an http step isn't taken, or none into a transform is. */
             skipped: boolean;
             /** @description What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there. */
             problems: components["schemas"]["ProblemError"][];
@@ -519,7 +521,7 @@ export interface components {
             request?: components["schemas"]["NodeRequest"];
             response?: components["schemas"]["NodeResponse"];
             error?: components["schemas"]["RunError"];
-            /** @description A merge node's, the edges into it that were taken, in the definition's order. */
+            /** @description A transform node's, the edges into it that were taken, in the definition's order. */
             ways?: components["schemas"]["Way"][];
             /**
              * Format: date-time
@@ -541,9 +543,9 @@ export interface components {
             body?: unknown;
             truncated?: boolean;
         };
-        /** @description What an http node got back, or a transform or merge node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest. */
+        /** @description What an http node got back, or a transform node's value, with the status of the case that gave it when it has cases. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest. */
         NodeResponse: {
-            /** @description http nodes only. */
+            /** @description An http node's, or the status of a transform's case, which names the exit it took. */
             status?: number;
             /** @description http nodes only. */
             headers?: {
@@ -565,25 +567,25 @@ export interface components {
             attempt: number;
             /** Format: date-time */
             at: string;
-            /** @description On the event that ends an http node that got an answer. */
+            /** @description On the event that ends an http node that got an answer, or a transform whose case gave it. */
             http_status?: number;
             error?: components["schemas"]["RunError"];
-            /** @description On the event that ends a merge node that ran, the edges into it that were taken. */
+            /** @description On the event that ends a transform node that ran, the edges into it that were taken. */
             ways?: components["schemas"]["Way"][];
         };
-        /** @description An edge into a merge node that was taken, as the definition writes it. */
+        /** @description An edge into a transform node that was taken, as the definition writes it. */
         Way: {
             from: string;
-            /** @description The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform or a merge. */
+            /** @description The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform. */
             on?: number;
             /** @description It left from's Unhandled block, and on is absent. */
             unhandled?: boolean;
         };
         /**
-         * @description An http node calls an upstream, and a transform node gives what its JSONata does, if every edge into it was taken; a merge node gives what its JSONata does if any was, reading whatever came.
+         * @description An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once any was, reading whichever nodes came; one with no edge into it runs first.
          * @enum {string}
          */
-        NodeKind: "http" | "transform" | "merge";
+        NodeKind: "http" | "transform";
         /** @description Retries transport errors, timeouts, 429 and 5xx responses, with backoff and Retry-After honoured. */
         Retry: {
             /** @description Total attempts, the first included. */
@@ -611,22 +613,17 @@ export interface components {
             retry?: components["schemas"]["Retry"];
         };
         Case: {
+            /** @description What the editor calls the case, on its exit and its tab. Absent, it's Case and its place. */
+            name?: string;
             /** @description JSONata, cast to a boolean as an edge's condition is. */
             when?: string;
             status: number;
             /** @description JSONata whose value is the body. Absent means none. */
             body?: string;
         };
-        /** @description What a switch gives when no case holds. */
-        Otherwise: {
-            status: number;
-            /** @description JSONata whose value is the body. Absent means none. */
-            body?: string;
-        };
-        /** @description A transform node's cases, in place of an expr. The first case whose condition holds gives its status and body, else otherwise does, so the node's value is {status, body}. */
+        /** @description A transform node's cases, in place of an expr. The first case whose condition holds gives its status and body, as an http node's answer would, so the nodes after read them as nodes.<id>.status and nodes.<id>.body. Each case is an exit of the node, named by its status, so a switch gives a status once, and a run takes the lines from the exit it took. When none holds, the node fails, and its Unhandled block takes that as it takes any failure. */
         Switch: {
-            cases?: components["schemas"]["Case"][];
-            otherwise: components["schemas"]["Otherwise"];
+            cases: components["schemas"]["Case"][];
         };
         Sample: {
             /** @description Absent means 200. Only a node's 2xx sample has one; an output's sample takes the output's. */
@@ -655,7 +652,7 @@ export interface components {
             kind: components["schemas"]["NodeKind"];
             /** @description The call an http node makes. */
             request?: components["schemas"]["HTTPRequest"];
-            /** @description A transform or merge node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch, and a merge node an expr. */
+            /** @description A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch. */
             expr?: string;
             /** @description A transform node's cases, in place of an expr. */
             switch?: components["schemas"]["Switch"];
@@ -668,7 +665,7 @@ export interface components {
         Edge: {
             from: string;
             to: string;
-            /** @description The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and the only output of a transform or a merge, or the Unhandled block when unhandled is set. */
+            /** @description The output of its source the edge leaves from, by status, one an http node lists or one a transform's case gives. Absent means an http node's 2xx, the only output of a transform with an expr, or the Unhandled block when unhandled is set. */
             on?: number;
             /** @description The edge leaves from its source's Unhandled block, and on is absent. Every node has one. It takes what the node's other outputs don't, a failure of its own, a status it doesn't list among them, so a run goes on down the edges from it, its node failed; with no line from it, the failure fails the run. Steps after it read the failure as nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer. */
             unhandled?: boolean;
@@ -678,9 +675,9 @@ export interface components {
         Answer: {
             /** @description The HTTP status the answer has. Listed once in a response. */
             status: number;
-            /** @description The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs. */
+            /** @description The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform with an expr, whose result is {status, body}, the status one of theirs. A transform's case is joined to the answer of its own status. */
             from?: string;
-            /** @description The output of from that the line leaves from, as an edge's. Absent means 2xx, and the only output of a transform or a merge, or the Unhandled block when unhandled is set. */
+            /** @description The output of from that the line leaves from, as an edge's. Absent means an http node's 2xx, the only output of a transform with an expr, or the Unhandled block when unhandled is set. */
             on?: number;
             /** @description The line leaves from from's Unhandled block, as an edge can, and on is absent. The answer's body is then from's body, what an http node got back with a status it doesn't list, else none. A node's Unhandled block is joined to one answer at most. */
             unhandled?: boolean;
@@ -713,7 +710,7 @@ export interface components {
                 [key: string]: components["schemas"]["Position"];
             };
         };
-        /** @description A workflow. A node runs once its parents have finished, if every edge into it was taken; a merge node runs if any was. Otherwise it's skipped. */
+        /** @description A workflow. A node runs once its parents have finished, an http node if every edge into it was taken and a transform node if any was. Otherwise it's skipped. */
         Definition: {
             nodes: components["schemas"]["Node"][];
             edges?: components["schemas"]["Edge"][];

@@ -68,12 +68,11 @@ type node struct {
 	catches   bool
 	unhandled *transform.Expr
 
-	// transform nodes: an expr, or a switch, whose otherwise is never nil;
-	// merge nodes: an expr. whole says every expression in it compiled.
-	expr      *transform.Expr
-	cases     []switchCase
-	otherwise *switchCase
-	whole     bool
+	// transform nodes: an expr, or a switch's cases, never nil for one with
+	// a switch. whole says every expression in it compiled.
+	expr  *transform.Expr
+	cases []switchCase
+	whole bool
 
 	in        []int // edges into this node
 	out       []int // edges out of it
@@ -85,8 +84,7 @@ type param struct {
 	value *transform.Template
 }
 
-// switchCase is one of a switch's cases, or its otherwise, whose when is
-// nil.
+// switchCase is one of a switch's cases.
 type switchCase struct {
 	when   *transform.Condition
 	status int
@@ -139,8 +137,8 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 				pn.outputs = append(pn.outputs, o.Status)
 			}
 		case n.Kind == workflow.NodeKindTransform && n.Switch != nil:
-			pn.cases, pn.otherwise, pn.whole = c.cases(ptr+"/switch", n.Switch)
-		case (n.Kind == workflow.NodeKindTransform || n.Kind == workflow.NodeKindMerge) && n.Expr != "":
+			pn.cases, pn.whole = c.cases(ptr+"/switch", n.Switch)
+		case n.Kind == workflow.NodeKindTransform && n.Expr != "":
 			pn.expr = c.expr(ptr+"/expr", n.Expr)
 			pn.whole = pn.expr != nil
 		}
@@ -250,9 +248,9 @@ func (c *compiler) expr(pointer, src string) *transform.Expr {
 	return x
 }
 
-// cases compiles a switch: its cases, its otherwise, and whether every
+// cases compiles a switch: its cases, and whether every
 // expression in them compiled.
-func (c *compiler) cases(pointer string, s *workflow.Switch) ([]switchCase, *switchCase, bool) {
+func (c *compiler) cases(pointer string, s *workflow.Switch) ([]switchCase, bool) {
 	whole := true
 	body := func(ptr, src string) *transform.Expr {
 		if src == "" {
@@ -274,8 +272,7 @@ func (c *compiler) cases(pointer string, s *workflow.Switch) ([]switchCase, *swi
 		whole = whole && when != nil
 		out[k] = switchCase{when: when, status: sc.Status, body: body(ptr, sc.Body)}
 	}
-	otherwise := &switchCase{status: s.Otherwise.Status, body: body(pointer+"/otherwise", s.Otherwise.Body)}
-	return out, otherwise, whole
+	return out, whole
 }
 
 func (c *compiler) template(pointer, src string) *transform.Template {

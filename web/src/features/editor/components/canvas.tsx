@@ -33,7 +33,6 @@ import {
   RESPONSE,
   responseCard,
   toFlow,
-  wayHandle,
 } from "@/features/editor/flow";
 import {
   useProblemCount,
@@ -82,10 +81,10 @@ export function Canvas() {
   // dashed, and its name says whether the run took it. A line into an
   // answer is taken once the run answered with it: gave is that status, or
   // -1 while the run goes on. A run that failed took none, even one the
-  // response's Unhandled answered. A line into a Merge is taken when it's
-  // among the ways the Merge says it came by. Until a run says, a way into a
-  // Merge is dashed too, as it may not be taken; so is one the run is still
-  // to decide.
+  // response's Unhandled answered. A line into a transform is taken when
+  // it's among the ways the transform says it came by. Until a run says, a
+  // way into a transform with several is dashed too, as it may not be taken;
+  // so is one the run is still to decide.
   const troubled = useProblems((p) => p.on === "connection");
   const steps = useRunSteps();
   const gave = useRun(
@@ -133,9 +132,14 @@ export function Canvas() {
       const to = line && !answer ? steps?.(line.to) : undefined;
       const taken =
         line && to?.came
-          ? to.came.some((w) => wayHandle(w) === wayHandle(line))
+          ? to.came.some((w) => w.from === line.from && outputOf(w) === line.on)
           : steps && line
-            ? takenOf(line.on, steps(line.from), into())
+            ? takenOf(
+                line.on,
+                steps(line.from),
+                into(),
+                draft.nodes.some((n) => n.id === line.from && n.switch),
+              )
             : undefined;
       const may = e.data?.way === true && taken === undefined;
       if (!on && !bad && !may && taken === undefined) return e;
@@ -266,7 +270,6 @@ export function Canvas() {
       <Panel position="top-left" className="nokey flex gap-2">
         <AddNodeDialog kind="http" />
         <AddNodeDialog kind="transform" />
-        <AddNodeDialog kind="merge" />
         <Button
           variant="outline"
           size="sm"

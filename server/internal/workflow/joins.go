@@ -8,12 +8,12 @@ import (
 )
 
 // route is what a node runs only after: for each node it needs, the outputs
-// that node may answer through, sorted, notRun among them where a merge
+// that node may answer through, sorted, notRun among them where a transform
 // lets the node not run. A nil route is a node that never runs.
 type route map[int][]int
 
-// notRun is a node not running, counted beside its outputs: a merge's route
-// allows it of a node that one of its ways rules out.
+// notRun is a node not running, counted beside its outputs: a transform's
+// route allows it of a node that one of its ways rules out.
 const notRun = -2
 
 // conflict is why a node never runs: it needs node of to answer through
@@ -24,19 +24,14 @@ type conflict struct {
 }
 
 // checkJoins works out what each node runs only after, and reports each
-// node that can never run, where that starts: a node runs only if every
-// line into it was taken (plan 04, strict joins), and a merge if any was,
-// so a merge no line comes into never runs. edges have no cycle.
+// node that can never run, where that starts: an http node runs only if
+// every line into it was taken (plan 04, strict joins), and a transform if
+// any was. edges have no cycle.
 func (v *validator) checkJoins(d *Definition, edges []edgeRef) []route {
 	in, order := graphOf(len(d.Nodes), edges)
 	need, conflicts := needs(d.Nodes, in, order)
 	for _, c := range conflicts {
 		v.add(fmt.Sprintf("/nodes/%d", c.node), "never_runs", "%s can never run: %s", d.Nodes[c.node].ID, c.words(d))
-	}
-	for i, n := range d.Nodes {
-		if n.Kind == NodeKindMerge && len(in[i]) == 0 {
-			v.add(fmt.Sprintf("/nodes/%d", i), "required", "a merge node needs an edge into it, as it runs if any of them was taken")
-		}
 	}
 	return need
 }
@@ -67,17 +62,17 @@ func graphOf(n int, edges []edgeRef) (in [][]edgeRef, order []int) {
 	return in, order
 }
 
-// needs is each node's route. A node runs once every line into it was
-// taken, so it needs each line's node to answer through the output the line
-// leaves from, and what that node needs. Two needs of one node sharing no
-// output leave it none: the node never runs, and conflicts says why, for
+// needs is each node's route. An http node runs once every line into it
+// was taken, so it needs each line's node to answer through the output the
+// line leaves from, and what that node needs. Two needs of one node sharing
+// no output leave it none: the node never runs, and conflicts says why, for
 // each node where that starts. The nodes after it never run either. A
-// merge needs what one of its ways does.
+// transform with a line into it needs what one of its ways does.
 func needs(nodes []Node, in [][]edgeRef, order []int) ([]route, []conflict) {
 	need := make([]route, len(nodes))
 	var conflicts []conflict
 	for _, u := range order {
-		if nodes[u].Kind == NodeKindMerge {
+		if nodes[u].Kind == NodeKindTransform && len(in[u]) > 0 {
 			need[u] = mergeOf(in[u], need)
 			continue
 		}
@@ -111,7 +106,7 @@ func joinOf(u int, in []edgeRef, need []route) (route, *conflict) {
 	return r, nil
 }
 
-// mergeOf is a merge's route, from the edges into it: each way's, what its
+// mergeOf is a transform's route, from the edges into it: each way's, what its
 // node needs and that node answering through the edge, merged, as it runs
 // when any of them came. It allows a node what any way does, and notRun
 // where a way rules the node out; a way that does neither lets the node be
@@ -141,7 +136,7 @@ func mergeOf(in []edgeRef, need []route) route {
 	return r
 }
 
-// allowed is what a merge's ways allow node x: the outputs each needs of
+// allowed is what a transform's ways allow node x: the outputs each needs of
 // it, or notRun when the way rules x out. ok is false when a way allows x
 // anything. A node a way needs runs, so x has a route of its own.
 func allowed(x int, ways, need []route) (set []int, ok bool) {

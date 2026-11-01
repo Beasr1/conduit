@@ -13,7 +13,6 @@ import {
   leaveAnswer,
   mentions,
   move,
-  newWays,
   moveCase,
   NODE_ID,
   outputToStep,
@@ -29,11 +28,11 @@ import {
   setField,
   setStepUnhandled,
   setUnhandled,
-  toSwitch,
+  setCaseStatus,
+  toCases,
   updateCase,
   updateEdge,
   updateNode,
-  updateOtherwise,
 } from "@/features/editor/edits";
 import { UNHANDLED } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
@@ -170,7 +169,7 @@ test("a line drawn into an answer that has one is refused, saying from where", (
   expect(refusal(joined, "orders", 0)).toBeUndefined();
 });
 
-test("a transform joined to a second answer picks between them, with cases", () => {
+test("a transform joined to a second answer picks between them with cases, each answer on its own case's exit", () => {
   const respond = answering.nodes.length - 1;
   const first = joinAnswer(answering, 0, "respond");
   expect(first.nodes[respond]).toEqual(answering.nodes[respond]);
@@ -179,19 +178,24 @@ test("a transform joined to a second answer picks between them, with cases", () 
     id: "respond",
     kind: "transform",
     switch: {
-      cases: [{ when: "", status: 404 }],
-      otherwise: { status: 200, body: "nodes.crm.body" },
+      cases: [
+        { when: "", status: 200, body: "nodes.crm.body" },
+        { when: "", status: 404 },
+      ],
     },
   });
-  // A switch joined to an answer it gives keeps its cases as they are.
-  const again = joinAnswer(leaveAnswer(second, 1), 1, "respond");
-  expect(again.nodes[respond]).toEqual(second.nodes[respond]);
-  // And gets a case for one it doesn't.
-  const third = joinAnswer(addAnswer(second, 409), 2, "respond");
-  expect(third.nodes[respond]?.switch?.cases).toEqual([
-    { when: "", status: 404 },
-    { when: "", status: 409 },
+  expect(second.response?.answers).toEqual([
+    { status: 200, from: "respond", on: 200 },
+    { status: 404, from: "respond", on: 404 },
   ]);
+  // One with cases is joined from an exit, and its cases stay as they are.
+  const third = joinAnswer(addAnswer(second, 409), 2, "respond", 404);
+  expect(third.nodes[respond]).toEqual(second.nodes[respond]);
+  expect(third.response?.answers?.[2]).toEqual({
+    status: 409,
+    from: "respond",
+    on: 404,
+  });
 });
 
 test("leaving an answer takes its line; the answer stays", () => {
@@ -271,36 +275,60 @@ test("answers' lines go with their step, and with its outputs", () => {
   ]);
 });
 
-test("a switch's cases are added, changed, moved and removed", () => {
+test("a switch's cases are added, changed, moved and removed, their lines going along", () => {
   const respond = answering.nodes.length - 1;
-  const cased = updateNode(answering, respond, (n) => toSwitch(n, 200));
+  const cased = toCases(answering, respond, 200);
   expect(cased.nodes[respond]).toEqual({
     id: "respond",
     kind: "transform",
-    switch: { otherwise: { status: 200, body: "nodes.crm.body" } },
+    switch: { cases: [{ when: "", status: 200, body: "nodes.crm.body" }] },
   });
-  const two = addCase(addCase(cased, respond, 404), respond, 409);
-  const changed = updateCase(two, respond, 1, (c) => ({
+  // A step's lines leave the first case's exit once it has cases.
+  const next = connect(answering, "respond", "orders");
+  expect(toCases(next, respond, 201).edges?.at(-1)).toEqual({
+    from: "respond",
+    to: "orders",
+    on: 201,
+  });
+  const two = addCase(addCase(cased, respond, 404, "missing"), respond, 409);
+  expect(two.nodes[respond]?.switch?.cases?.[1]).toEqual({
+    name: "missing",
+    when: "",
+    status: 404,
+  });
+  // A case's status changed takes the lines leaving its exit along; one it
+  // has already changes nothing.
+  const joined = joinAnswer(two, 1, "respond", 404);
+  const renumbered = setCaseStatus(joined, respond, 1, 410);
+  expect(renumbered.nodes[respond]?.switch?.cases?.[1]?.status).toBe(410);
+  expect(renumbered.response?.answers?.[1]).toEqual({
+    status: 404,
+    from: "respond",
+    on: 410,
+  });
+  expect(setCaseStatus(joined, respond, 1, 404)).toBe(joined);
+  // Removed, a case takes the lines leaving its exit.
+  expect(removeCase(renumbered, respond, 1).response?.answers?.[1]).toEqual({
+    status: 404,
+  });
+  const changed = updateCase(two, respond, 2, (c) => ({
     ...c,
     when: "nodes.crm.status = 409",
   }));
-  expect(changed.nodes[respond]?.switch?.cases).toEqual([
-    { when: "", status: 404 },
+  expect(changed.nodes[respond]?.switch?.cases?.slice(1)).toEqual([
+    { name: "missing", when: "", status: 404 },
     { when: "nodes.crm.status = 409", status: 409 },
   ]);
-  const moved = moveCase(changed, respond, 1, 0);
+  const moved = moveCase(changed, respond, 2, 0);
   expect(moved.nodes[respond]?.switch?.cases?.map((c) => c.status)).toEqual([
-    409, 404,
+    409, 200, 404,
   ]);
   expect(moveCase(changed, respond, 0, 5)).toBe(changed);
-  expect(removeCase(moved, respond, 0).nodes[respond]?.switch?.cases).toEqual([
-    { when: "", status: 404 },
-  ]);
   expect(
-    updateOtherwise(moved, respond, (o) => ({ ...o, status: 201 })).nodes[
-      respond
-    ]?.switch?.otherwise,
-  ).toEqual({ status: 201, body: "nodes.crm.body" });
+    removeCase(moved, respond, 0).nodes[respond]?.switch?.cases?.map(
+      (c) => c.status,
+    ),
+  ).toEqual([200, 404]);
   // A step without cases has none to change.
   expect(addCase(answering, respond, 404)).toBe(answering);
 });
@@ -494,44 +522,6 @@ test("mentions finds every place that still reads a node by its id", () => {
   ]);
   expect(mentions(draft, "merge")).toEqual(["the workflow's output"]);
   expect(mentions(draft, "a(b")).toEqual([]);
-});
-
-// prefs answers 2xx or 400, and fallback follows its 400; prefs_ok, a
-// Merge, takes prefs' 2xx, and greet follows it.
-const merged: Definition = {
-  nodes: [
-    {
-      id: "prefs",
-      kind: "http",
-      request: { method: "GET", url: "https://prefs.example.com/v1" },
-      outputs: [{ status: 400 }],
-    },
-    { id: "fallback", kind: "transform", expr: "1" },
-    { id: "prefs_ok", kind: "merge", expr: "nodes.prefs.body" },
-    { id: "greet", kind: "transform", expr: "2" },
-  ],
-  edges: [
-    { from: "prefs", to: "prefs_ok" },
-    { from: "prefs", to: "fallback", on: 400 },
-    { from: "prefs_ok", to: "greet" },
-  ],
-};
-
-test("a Merge step is offered each output that could join it as a way", () => {
-  // Not prefs' 2xx, joined already, nor greet's, which would close a
-  // loop, nor its own.
-  expect(newWays(merged, "prefs_ok")).toEqual([
-    { from: "prefs", on: 400 },
-    { from: "prefs", on: UNHANDLED },
-    { from: "fallback", on: undefined },
-    { from: "fallback", on: UNHANDLED },
-  ]);
-  const joined = connect(merged, "fallback", "prefs_ok");
-  expect(newWays(joined, "prefs_ok")).toEqual([
-    { from: "prefs", on: 400 },
-    { from: "prefs", on: UNHANDLED },
-    { from: "fallback", on: UNHANDLED },
-  ]);
 });
 
 test.each([

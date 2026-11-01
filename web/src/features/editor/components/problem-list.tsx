@@ -32,8 +32,6 @@ const fieldNames: Record<StepField, string> = {
   case_when: "When",
   case_status: "Status",
   case_body: "Body",
-  otherwise_status: "Otherwise · Status",
-  otherwise_body: "Otherwise · Body",
   unhandled_body: "Unhandled · Body",
 };
 
@@ -51,8 +49,6 @@ const fieldIds: Partial<Record<StepField, string>> = {
   sample: "step-sample-body",
   outputs: "step-output-status",
   expr: "step-expr",
-  otherwise_status: "step-otherwise-status",
-  otherwise_body: "step-otherwise-body",
   unhandled_body: "step-unhandled-body",
 };
 

@@ -25,7 +25,8 @@ type Preview = components["schemas"]["Preview"];
 // as it's typed; then the result. A step's request body, a transform's
 // value, a connection's condition and the workflow's output are each
 // written in one. reads picks what of the preview it reads, its reads but
-// for a step's Unhandled body.
+// for a step's Unhandled body, and by, when there's a choice, the run it
+// comes by.
 export function MappingField({
   id,
   label,
@@ -38,6 +39,7 @@ export function MappingField({
   open,
   result,
   reads = (p) => p.reads,
+  by,
 }: {
   id: string;
   label: string;
@@ -53,6 +55,7 @@ export function MappingField({
   open: (of: Definition) => string[];
   result: (preview: Preview) => ReactNode;
   reads?: (preview: Preview) => unknown;
+  by?: ReactNode;
 }) {
   const [text, setText] = useState(initial);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -88,6 +91,7 @@ export function MappingField({
         open={open}
         onPick={insert}
         reads={reads}
+        by={by}
       />
       <Field data-invalid={problems.length > 0}>
         <FieldLabel htmlFor={id}>{label}</FieldLabel>
@@ -122,19 +126,21 @@ export function MappingField({
 // Reads is what an expression reads, simulated over the samples: the run's
 // input, and what the steps before it got back, as a tree whose fields
 // give their path, which goes into what into names. The steps open names
-// start unfolded.
+// start unfolded. by, under the heading, picks the run it comes by.
 export function Reads({
   into,
   preview,
   open,
   onPick,
   reads = (p) => p.reads,
+  by,
 }: {
   into: string;
   preview: ReturnType<typeof usePreview>;
   open: (of: Definition) => string[];
   onPick: (path: string) => void;
   reads?: (preview: Preview) => unknown;
+  by?: ReactNode;
 }) {
   return (
     <section className="flex flex-col gap-1.5 text-sm">
@@ -143,6 +149,7 @@ export function Reads({
         What it reads: the run&apos;s input, and what the steps before it got
         back. Pick a field to put its path in {into}.
       </p>
+      {by}
       {preview.isPending ? (
         <Waiting />
       ) : preview.isError ? (

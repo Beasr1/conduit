@@ -34,8 +34,6 @@ export type StepField =
   | "case_when"
   | "case_status"
   | "case_body"
-  | "otherwise_status"
-  | "otherwise_body"
   | "unhandled_body";
 
 // The fields an HTTP step's Request tab holds: the call and its body.
@@ -138,7 +136,7 @@ const requestParts = new Map<string, StepField>([
 ]);
 
 // switchPlace is the place a pointer below a step's switch names: a case's
-// condition, status or body, otherwise's status or body, or the switch.
+// condition, status or body, or the switch.
 // The tokens after "switch" are sub, k and part: "cases", "1", "when".
 function switchPlace(
   index: number,
@@ -147,11 +145,6 @@ function switchPlace(
   part: string | undefined,
 ): Place {
   const step = { on: "step", index } as const;
-  if (sub === "otherwise")
-    return {
-      ...step,
-      field: k === "body" ? "otherwise_body" : "otherwise_status",
-    };
   if (sub !== "cases" || !isIndex(k)) return { ...step, field: "switch" };
   const field =
     part === "when"
@@ -201,6 +194,7 @@ export function stepPartOf(place: Place, draft: Definition): string {
   if (place.field === "sample") return "2xx";
   if (place.field === "outputs") return "add";
   if (place.field === "unhandled_body") return "unhandled";
+  if (place.case !== undefined) return `case:${place.case}`;
   return "request";
 }
 
@@ -307,10 +301,6 @@ function partOf(d: Definition, place: Place): unknown {
               ? c?.status
               : c?.body;
         }
-        case "otherwise_status":
-          return n?.switch?.otherwise.status;
-        case "otherwise_body":
-          return n?.switch?.otherwise.body;
         case "unhandled_body":
           return n?.unhandled?.body;
       }
@@ -357,12 +347,6 @@ export function say(problem: ProblemError, of: Definition): string {
   const place = placeOf(problem.pointer);
   switch (problem.code) {
     case "required":
-      if (
-        place.on === "step" &&
-        place.field === undefined &&
-        of.nodes[place.index]?.kind === "merge"
-      )
-        return "Draw a line into it from each step it follows: a Merge step runs if any of them comes.";
       return required(place) ?? sentence(problem.detail);
     case "invalid_id":
       return ID_RULE;
@@ -377,18 +361,10 @@ export function say(problem: ProblemError, of: Definition): string {
         return "A line leaves from one block: one of the step's responses, or its Unhandled.";
       if (place.on === "response") {
         const a = answerOf(place, of);
-        return responseNotAllowed(
-          place.field,
-          a?.unhandled === true,
-          kindOf(of, a?.from) === "merge",
-        );
+        return responseNotAllowed(place.field, a?.unhandled === true);
       }
       if (place.on === "connection")
-        return kindOf(of, of.edges?.[place.index]?.from) === "merge"
-          ? "A Merge step has no responses for a connection to leave from."
-          : "A transform step has no responses for a connection to leave from.";
-      if (place.on === "step" && of.nodes[place.index]?.kind === "merge")
-        return mergeNotAllowed(place.field);
+        return "A transform step has no responses for a connection to leave from.";
       if (place.on === "step" && place.field === "switch")
         return of.nodes[place.index]?.kind === "http"
           ? "An HTTP step sends a request, and has no cases."
@@ -415,35 +391,34 @@ export function say(problem: ProblemError, of: Definition): string {
         ? "A status from 300 to 599: 2xx is every HTTP step's."
         : "A status from 200 to 299: this is the 2xx response.";
     case "duplicate_output":
-      return "This step already has a response for that status.";
+      return place.on === "step" && place.field === "case_status"
+        ? "Another case of this step exits with this status: give this one its own, or join their conditions with or."
+        : "This step already has a response for that status.";
     case "duplicate_answer":
       return "Another answer already has this status.";
-    case "unknown_answer": {
-      const n = place.on === "step" ? of.nodes[place.index] : undefined;
-      const status =
-        place.on === "step" && place.field === "otherwise_status"
-          ? n?.switch?.otherwise.status
-          : n?.switch?.cases?.[place.on === "step" ? (place.case ?? -1) : -1]
-              ?.status;
-      return `${n?.id} isn't joined to a ${status} answer: join it to one on the response card, or pick a status it's joined to.`;
-    }
-    case "never_given": {
+    case "other_status": {
       const a = answerOf(place, of);
-      return `${a?.from} never gives ${a?.status}: add a case for it, or join another step to it.`;
+      return `${a?.from}'s case exits with ${a?.on}, so its line joins the ${a?.on} answer: draw it there instead.`;
     }
     case "overlap":
-      return sentence(problem.detail.replace(/one node$/, "one step"));
+      return sentence(problem.detail);
     case "never_runs":
       // It starts with the step's id, which stays as it's written.
-      return `${problem.detail}. A step runs only when every line into it is taken; to run it after whichever comes, join them to a Merge step first.`;
+      return `${problem.detail}. It runs only when every line into it is taken; to run it after whichever comes, join them to a transform first.`;
     case "unknown_output": {
-      if (place.on === "response") {
-        const a = answerOf(place, of);
-        return `${a?.from} has no ${a?.on} response. Join this answer from another of its points.`;
-      }
-      const edge =
-        place.on === "connection" ? of.edges?.[place.index] : undefined;
-      return `${edge?.from} has no ${edge?.on} response. Add one with + Add on the step, or draw the connection from another.`;
+      const line =
+        place.on === "response"
+          ? answerOf(place, of)
+          : place.on === "connection"
+            ? of.edges?.[place.index]
+            : undefined;
+      const cases = of.nodes.some((n) => n.id === line?.from && n.switch);
+      const has = cases
+        ? `${line?.from} has no case exiting with ${line?.on}.`
+        : `${line?.from} has no ${line?.on} response.`;
+      return place.on === "response"
+        ? `${has} Join this answer from another of its points.`
+        : `${has} Add one with ${cases ? "+ Case" : "+ Add"} on the step, or draw the connection from another.`;
     }
     case "invalid_method":
       return "Pick GET, HEAD, POST, PUT, PATCH or DELETE.";
@@ -486,39 +461,13 @@ function answerOf(place: Place, of: Definition) {
     : undefined;
 }
 
-// kindOf is the kind of the step with id, if one has it.
-function kindOf(of: Definition, id: string | undefined): string | undefined {
-  return of.nodes.find((n) => n.id === id)?.kind;
-}
-
-// mergeNotAllowed is what's wrong with a part of a Merge step that other
-// kinds have.
-function mergeNotAllowed(field: StepField | undefined): string {
-  switch (field) {
-    case "switch":
-      return "A Merge step has an expression, not cases.";
-    case "sample":
-      return "A Merge step's value comes from its expression, so it has no sample.";
-    case "outputs":
-      return "A Merge step gives one value, so it has no other responses.";
-    default:
-      return "A Merge step has an expression, and sends no request.";
-  }
-}
-
 // responseNotAllowed is what's wrong with the part of the response a
 // not_allowed problem is about, in an answer joined to a step's Unhandled
-// when unhandled says so, or to a Merge step when merge does.
-function responseNotAllowed(
-  field: ResponseField,
-  unhandled: boolean,
-  merge: boolean,
-): string {
+// when unhandled says so.
+function responseNotAllowed(field: ResponseField, unhandled: boolean): string {
   switch (field) {
     case "on":
-      return merge
-        ? "A Merge step has one point, so its line into an answer names no response."
-        : "A transform step has one point, so its line into an answer names no response.";
+      return "A transform step has one point, so its line into an answer names no response.";
     case "from":
       return unhandled
         ? "A step's Unhandled has no status to pick an answer with, so it gives one. To pick among several, join a transform step that does."
@@ -528,11 +477,19 @@ function responseNotAllowed(
   }
 }
 
+// A line from a step with cases leaves one of them.
+const FROM_A_CASE =
+  "A line from a step with cases leaves one of them: draw it from a case's point.";
+
 function required(place: Place): string | undefined {
   if (place.on === "connection")
-    return "A connection needs a step at each end.";
+    return place.field === "on"
+      ? FROM_A_CASE
+      : "A connection needs a step at each end.";
   if (place.on === "response")
     switch (place.field) {
+      case "on":
+        return FROM_A_CASE;
       case "from":
         return "Join a step to this answer: drag from the step's point to the answer's.";
       case "answers":
@@ -549,7 +506,7 @@ function required(place: Place): string | undefined {
     case "id":
       return "Give the step an id.";
     case "kind":
-      return "Give the step a kind: HTTP, transform or Merge.";
+      return "Give the step a kind: HTTP or transform.";
     case "request":
       return "An HTTP step needs a request.";
     case "expr":
@@ -567,8 +524,9 @@ function required(place: Place): string | undefined {
     case "case_when":
       return "Add a condition.";
     case "case_status":
-    case "otherwise_status":
       return "Give it a status.";
+    case "switch":
+      return "Add a case: a step with cases needs one.";
     default:
       return undefined;
   }

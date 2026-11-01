@@ -170,7 +170,7 @@ type (
 		Truncated bool              `json:"truncated,omitempty"`
 	}
 	responseDoc struct {
-		Status    int               `json:"status,omitempty"`    // http nodes
+		Status    int               `json:"status,omitempty"`    // http nodes, and a transform's case
 		Headers   map[string]string `json:"headers,omitempty"`   // http nodes
 		Body      json.RawMessage   `json:"body"`                // null when there was none
 		Gave      json.RawMessage   `json:"gave,omitempty"`      // what its Unhandled body gave

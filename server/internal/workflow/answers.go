@@ -65,17 +65,8 @@ func (v *validator) checkResponse(d *Definition, index map[string]int, need []ro
 			v.add(p+"/unhandled", "not_allowed", "a line leaves from one block: %s's %d output or its Unhandled", a.From, a.On)
 			continue
 		}
-		if a.On != 0 {
-			switch n := d.Nodes[from]; n.Kind {
-			case NodeKindHTTP:
-				if !slices.ContainsFunc(n.Outputs, func(o Output) bool { return o.Status == a.On }) {
-					v.add(p+"/on", "unknown_output", "%s has no %d output", a.From, a.On)
-					continue
-				}
-			case NodeKindTransform, NodeKindMerge:
-				v.add(p+"/on", "not_allowed", "a %s node has one output, so a line from it names none", n.Kind)
-				continue
-			}
+		if !v.checkOn(p+"/on", d.Nodes[from], a.Output(), "a line") {
+			continue
 		}
 		on := a.Output()
 		i := slices.IndexFunc(groups, func(g group) bool { return g.from == from && g.on == on })
@@ -96,8 +87,8 @@ func (v *validator) checkResponse(d *Definition, index map[string]int, need []ro
 // checkGroup checks the answers joined to one output of one node. An http
 // node's result is the response it got, so it gives one answer, and so does
 // a node's Unhandled block, as a failure has no status of the node's own to
-// pick with. A switch gives the answers it's joined to: each of its
-// statuses is one, and each one is among its statuses.
+// pick with. A case of a switch exits with its own status, so it gives the
+// answer of that status.
 func (v *validator) checkGroup(d *Definition, g group) {
 	n, answers := d.Nodes[g.from], d.Response.Answers
 	statuses := make([]int, len(g.answers))
@@ -117,35 +108,23 @@ func (v *validator) checkGroup(d *Definition, g group) {
 			"%s's %s output is joined to %s: an http node's result is the response it got, so it gives one answer; to pick among several, join a transform that does",
 			n.ID, outputName(g.on), statusList(statuses))
 	}
-	s := n.Switch
-	if n.Kind != NodeKindTransform || s == nil {
+	if n.Kind != NodeKindTransform || n.Switch == nil {
 		return
 	}
-	p := fmt.Sprintf("/nodes/%d/switch", g.from)
-	gives := []int{s.Otherwise.Status}
-	for k, c := range s.Cases {
-		if c.Status != 0 && !slices.Contains(statuses, c.Status) {
-			v.add(fmt.Sprintf("%s/cases/%d/status", p, k), "unknown_answer", "%s isn't joined to a %d answer", n.ID, c.Status)
-		}
-		gives = append(gives, c.Status)
-	}
-	if o := s.Otherwise.Status; o != 0 && !slices.Contains(statuses, o) {
-		v.add(p+"/otherwise/status", "unknown_answer", "%s isn't joined to a %d answer", n.ID, o)
-	}
 	for _, k := range g.answers {
-		if status := answers[k].Status; !slices.Contains(gives, status) {
-			v.add(fmt.Sprintf("/response/answers/%d/from", k), "never_given",
-				"%s never gives %d: add a case for it, or join another node to it", n.ID, status)
+		if answers[k].Status != g.on {
+			v.add(fmt.Sprintf("/response/answers/%d/from", k), "other_status",
+				"%s's case giving %d exits with it, so it joins the %d answer", n.ID, g.on, g.on)
 		}
 	}
 }
 
 // checkReach reports two outputs joined to answers that one run could both
 // take. A run takes a line only when its node runs and answers through its
-// output, and a node runs only when every line into it was taken, a merge
-// when any was, so two lines rest apart only when they need outputs of one
-// node that share none. Conditions aren't read: lines only
-// they keep apart are reported too, as a switch can pick among answers.
+// output, and an http node runs only when every line into it was taken, a
+// transform when any was, so two lines rest apart only when they need
+// outputs of one node that share none. Conditions aren't read: lines only
+// they keep apart are reported too, as a transform can pick among answers.
 // A line from a node that never runs is that node's problem.
 func (v *validator) checkReach(d *Definition, groups []group, need []route) {
 	answers := d.Response.Answers
@@ -159,7 +138,7 @@ func (v *validator) checkReach(d *Definition, groups []group, need []route) {
 			}
 			ka, kb := a.answers[0], b.answers[0]
 			v.add(fmt.Sprintf("/response/answers/%d/from", kb), "overlap",
-				"%d (%s) and %d (%s) can both be reached in one run: merge them into one node",
+				"%d (%s) and %d (%s) can both be reached in one run: join both to one transform, which picks the answer",
 				answers[ka].Status, d.Nodes[a.from].ID, answers[kb].Status, d.Nodes[b.from].ID)
 		}
 	}

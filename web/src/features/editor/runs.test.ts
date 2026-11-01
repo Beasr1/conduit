@@ -59,7 +59,7 @@ test("a step the server hasn't recorded goes by its last event", () => {
   ).toEqual({ state: "succeeded", status: 201, attempts: 1 });
 });
 
-test("a Merge step says which ways it came by, recorded or streamed", () => {
+test("a transform says which ways it came by, recorded or streamed", () => {
   const came = [{ from: "prefs", on: 400 }, { from: "crm" }];
   expect(
     stepRunOf(ended({ attempts: 0, ways: came }), undefined, "succeeded"),
@@ -126,6 +126,13 @@ test("a line is taken when its step answered its way and the next step ran", () 
   expect(takenOf(undefined, { state: "failed", attempts: 1 }, skipped)).toBe(
     false,
   );
+  // A transform with cases exits by the status of the case that held, a
+  // 2xx one among them, not by 2xx.
+  expect(takenOf(200, ok, ran, true)).toBe(true);
+  expect(takenOf(201, ok, ran, true)).toBe(false);
+  expect(takenOf(undefined, ok, ran, true)).toBe(false);
+  expect(wayOf(ok, true)).toBe(200);
+  expect(wayOf(ok)).toBe(0);
 });
 
 test.each([

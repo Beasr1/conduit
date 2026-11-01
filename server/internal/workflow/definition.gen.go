@@ -40,7 +40,6 @@ func (e HTTPRequestMethod) Valid() bool {
 // Defines values for NodeKind.
 const (
 	NodeKindHTTP      NodeKind = "http"
-	NodeKindMerge     NodeKind = "merge"
 	NodeKindTransform NodeKind = "transform"
 )
 
@@ -48,8 +47,6 @@ const (
 func (e NodeKind) Valid() bool {
 	switch e {
 	case NodeKindHTTP:
-		return true
-	case NodeKindMerge:
 		return true
 	case NodeKindTransform:
 		return true
@@ -60,10 +57,10 @@ func (e NodeKind) Valid() bool {
 
 // Answer defines model for Answer.
 type Answer struct {
-	// From The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs.
+	// From The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform with an expr, whose result is {status, body}, the status one of theirs. A transform's case is joined to the answer of its own status.
 	From string `json:"from,omitempty"`
 
-	// On The output of from that the line leaves from, as an edge's. Absent means 2xx, and the only output of a transform or a merge, or the Unhandled block when unhandled is set.
+	// On The output of from that the line leaves from, as an edge's. Absent means an http node's 2xx, the only output of a transform with an expr, or the Unhandled block when unhandled is set.
 	On int `json:"on,omitempty"`
 
 	// Schema A JSON Schema (2020-12) the body is promised to match. Checked when saved, not enforced on runs yet.
@@ -79,14 +76,17 @@ type Answer struct {
 // Case defines model for Case.
 type Case struct {
 	// Body JSONata whose value is the body. Absent means none.
-	Body   string `json:"body,omitempty"`
+	Body string `json:"body,omitempty"`
+
+	// Name What the editor calls the case, on its exit and its tab. Absent, it's Case and its place.
+	Name   string `json:"name,omitempty"`
 	Status int    `json:"status"`
 
 	// When JSONata, cast to a boolean as an edge's condition is.
 	When string `json:"when,omitempty"`
 }
 
-// Definition A workflow. A node runs once its parents have finished, if every edge into it was taken; a merge node runs if any was. Otherwise it's skipped.
+// Definition A workflow. A node runs once its parents have finished, an http node if every edge into it was taken and a transform node if any was. Otherwise it's skipped.
 type Definition struct {
 	Edges []Edge `json:"edges,omitempty"`
 
@@ -114,7 +114,7 @@ type Definition struct {
 type Edge struct {
 	From string `json:"from"`
 
-	// On The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and the only output of a transform or a merge, or the Unhandled block when unhandled is set.
+	// On The output of its source the edge leaves from, by status, one an http node lists or one a transform's case gives. Absent means an http node's 2xx, the only output of a transform with an expr, or the Unhandled block when unhandled is set.
 	On int    `json:"on,omitempty"`
 	To string `json:"to"`
 
@@ -152,13 +152,13 @@ type HTTPRequestMethod string
 
 // Node defines model for Node.
 type Node struct {
-	// Expr A transform or merge node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch, and a merge node an expr.
+	// Expr A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch.
 	Expr string `json:"expr,omitempty"`
 
 	// ID Unique in the workflow. Expressions read the node's result as nodes.<id>.
 	ID string `json:"id"`
 
-	// Kind An http node calls an upstream, and a transform node gives what its JSONata does, if every edge into it was taken; a merge node gives what its JSONata does if any was, reading whatever came.
+	// Kind An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once any was, reading whichever nodes came; one with no edge into it runs first.
 	Kind NodeKind `json:"kind"`
 
 	// Outputs An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node, and its Unhandled block takes that as it takes every failure of the node's.
@@ -177,20 +177,13 @@ type Node struct {
 	Unhandled *NodeUnhandled `json:"unhandled,omitempty"`
 }
 
-// NodeKind An http node calls an upstream, and a transform node gives what its JSONata does, if every edge into it was taken; a merge node gives what its JSONata does if any was, reading whatever came.
+// NodeKind An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once any was, reading whichever nodes came; one with no edge into it runs first.
 type NodeKind string
 
 // NodeUnhandled What a node gives through its Unhandled block, once the block takes its failure. Without it, the node gives what an http node got back, if anything.
 type NodeUnhandled struct {
 	// Body JSONata over what the node read and its own failure, nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer. Its value is what the nodes after read as nodes.<id>.body, error, status and headers staying as they are, and the body of an answer joined straight to the block. One that fails fails the run.
 	Body string `json:"body"`
-}
-
-// Otherwise What a switch gives when no case holds.
-type Otherwise struct {
-	// Body JSONata whose value is the body. Absent means none.
-	Body   string `json:"body,omitempty"`
-	Status int    `json:"status"`
 }
 
 // Output defines model for Output.
@@ -238,12 +231,9 @@ type Sample struct {
 	Status int `json:"status,omitempty"`
 }
 
-// Switch A transform node's cases, in place of an expr. The first case whose condition holds gives its status and body, else otherwise does, so the node's value is {status, body}.
+// Switch A transform node's cases, in place of an expr. The first case whose condition holds gives its status and body, as an http node's answer would, so the nodes after read them as nodes.<id>.status and nodes.<id>.body. Each case is an exit of the node, named by its status, so a switch gives a status once, and a run takes the lines from the exit it took. When none holds, the node fails, and its Unhandled block takes that as it takes any failure.
 type Switch struct {
-	Cases []Case `json:"cases,omitempty"`
-
-	// Otherwise What a switch gives when no case holds.
-	Otherwise Otherwise `json:"otherwise"`
+	Cases []Case `json:"cases"`
 }
 
 // UI defines model for UI.
