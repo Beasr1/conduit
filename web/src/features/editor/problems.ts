@@ -79,7 +79,7 @@ export type Place =
       output?: number;
       case?: number;
     }
-  | { on: "connection"; index: number; field?: "when" | "on" | "body" }
+  | { on: "connection"; index: number; field?: "when" | "on" }
   | { on: "response"; field: ResponseField; answer?: number }
   | { on: "settings"; field: "input_schema" | "sample_input" }
   | { on: "workflow" };
@@ -98,11 +98,13 @@ export function placeOf(pointer: string): Place {
   if (top === "nodes" && isIndex(i)) return stepPlace(Number(i), rest);
   // The block a line leaves from is its on, or its Unhandled.
   if (top === "edges" && isIndex(i))
-    return rest[0] === "when" || rest[0] === "body"
-      ? { on: "connection", index: Number(i), field: rest[0] }
-      : rest[0] === "on" || rest[0] === "unhandled"
-        ? { on: "connection", index: Number(i), field: "on" }
-        : { on: "connection", index: Number(i) };
+    return rest[0] === "when" || rest[0] === "on" || rest[0] === "unhandled"
+      ? {
+          on: "connection",
+          index: Number(i),
+          field: rest[0] === "when" ? "when" : "on",
+        }
+      : { on: "connection", index: Number(i) };
   if (top === "output" || top === "output_schema")
     return { on: "response", field: top };
   if (top === "response" && i === "unhandled")
@@ -358,9 +360,9 @@ export function say(problem: ProblemError, of: Definition): string {
       if (
         place.on === "step" &&
         place.field === undefined &&
-        of.nodes[place.index]?.kind === "either"
+        of.nodes[place.index]?.kind === "merge"
       )
-        return "Draw a line into it from each step it follows: an Either step runs after whichever comes.";
+        return "Draw a line into it from each step it follows: a Merge step runs if any of them comes.";
       return required(place) ?? sentence(problem.detail);
     case "invalid_id":
       return ID_RULE;
@@ -378,17 +380,15 @@ export function say(problem: ProblemError, of: Definition): string {
         return responseNotAllowed(
           place.field,
           a?.unhandled === true,
-          kindOf(of, a?.from) === "either",
+          kindOf(of, a?.from) === "merge",
         );
       }
-      if (place.on === "connection" && place.field === "body")
-        return "Only a connection into an Either step gives a body.";
       if (place.on === "connection")
-        return kindOf(of, of.edges?.[place.index]?.from) === "either"
-          ? "An Either step has no responses for a connection to leave from."
+        return kindOf(of, of.edges?.[place.index]?.from) === "merge"
+          ? "A Merge step has no responses for a connection to leave from."
           : "A transform step has no responses for a connection to leave from.";
-      if (place.on === "step" && of.nodes[place.index]?.kind === "either")
-        return eitherNotAllowed(place.field);
+      if (place.on === "step" && of.nodes[place.index]?.kind === "merge")
+        return mergeNotAllowed(place.field);
       if (place.on === "step" && place.field === "switch")
         return of.nodes[place.index]?.kind === "http"
           ? "An HTTP step sends a request, and has no cases."
@@ -432,14 +432,10 @@ export function say(problem: ProblemError, of: Definition): string {
       return `${a?.from} never gives ${a?.status}: add a case for it, or join another step to it.`;
     }
     case "overlap":
-      return sentence(
-        problem.detail
-          .replace(/one node$/, "one step")
-          .replace(/an either takes one$/, "an Either step takes one"),
-      );
+      return sentence(problem.detail.replace(/one node$/, "one step"));
     case "never_runs":
       // It starts with the step's id, which stays as it's written.
-      return `${problem.detail}. A step runs only when every line into it is taken; to run it after whichever comes, join them to an Either step first.`;
+      return `${problem.detail}. A step runs only when every line into it is taken; to run it after whichever comes, join them to a Merge step first.`;
     case "unknown_output": {
       if (place.on === "response") {
         const a = answerOf(place, of);
@@ -495,40 +491,38 @@ function kindOf(of: Definition, id: string | undefined): string | undefined {
   return of.nodes.find((n) => n.id === id)?.kind;
 }
 
-// eitherNotAllowed is what's wrong with a part of an Either step that other
+// mergeNotAllowed is what's wrong with a part of a Merge step that other
 // kinds have.
-function eitherNotAllowed(field: StepField | undefined): string {
-  const has: Partial<Record<StepField, string>> = {
-    request: "sends no request",
-    expr: "has no expression",
-    switch: "has no cases",
-    sample: "has no sample",
-  };
-  const what = field === undefined ? undefined : has[field];
-  return what === undefined
-    ? "An Either step gives one value, so it has no other responses."
-    : `An Either step gives what the way that came gives, so it ${what}.`;
+function mergeNotAllowed(field: StepField | undefined): string {
+  switch (field) {
+    case "switch":
+      return "A Merge step has an expression, not cases.";
+    case "sample":
+      return "A Merge step's value comes from its expression, so it has no sample.";
+    case "outputs":
+      return "A Merge step gives one value, so it has no other responses.";
+    default:
+      return "A Merge step has an expression, and sends no request.";
+  }
 }
 
 // responseNotAllowed is what's wrong with the part of the response a
 // not_allowed problem is about, in an answer joined to a step's Unhandled
-// when unhandled says so, or to an Either step when either does.
+// when unhandled says so, or to a Merge step when merge does.
 function responseNotAllowed(
   field: ResponseField,
   unhandled: boolean,
-  either: boolean,
+  merge: boolean,
 ): string {
   switch (field) {
     case "on":
-      return either
-        ? "An Either step has one point, so its line into an answer names no response."
+      return merge
+        ? "A Merge step has one point, so its line into an answer names no response."
         : "A transform step has one point, so its line into an answer names no response.";
     case "from":
       return unhandled
         ? "A step's Unhandled has no status to pick an answer with, so it gives one. To pick among several, join a transform step that does."
-        : either
-          ? "An Either step gives what the way that came gives, so it gives one answer. To pick among several, join a transform step that does."
-          : "An HTTP step's response is what it got, so each of its responses gives one answer. To pick among several, join a transform step that does.";
+        : "An HTTP step's response is what it got, so each of its responses gives one answer. To pick among several, join a transform step that does.";
     default:
       return "A workflow with a response has no output: the steps joined to its answers give them.";
   }
@@ -555,7 +549,7 @@ function required(place: Place): string | undefined {
     case "id":
       return "Give the step an id.";
     case "kind":
-      return "Give the step a kind: HTTP, transform or Either.";
+      return "Give the step a kind: HTTP, transform or Merge.";
     case "request":
       return "An HTTP step needs a request.";
     case "expr":

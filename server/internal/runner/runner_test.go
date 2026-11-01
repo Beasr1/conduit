@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -349,20 +350,21 @@ func TestServe_ATransformsUnhandledBodyIsRecorded(t *testing.T) {
 	}
 }
 
-// An either is recorded with the way it ran with, as the definition writes
-// that edge; other steps have none.
-func TestServe_AnEithersWayIsRecorded(t *testing.T) {
+// A merge is recorded with the ways that came, as the definition writes
+// those edges; other steps have none.
+func TestServe_AMergesWaysAreRecorded(t *testing.T) {
 	t.Parallel()
 	r := newRunner(t, Options{})
-	w := saveWorkflow(t, "", `{"nodes": [{"id": "count", "kind": "transform", "expr": "$number(input.n)"}, {"id": "e", "kind": "either"}],
-	  "edges": [{"from": "count", "to": "e"}, {"from": "count", "to": "e", "unhandled": true, "body": "0"}],
+	w := saveWorkflow(t, "", `{"nodes": [{"id": "count", "kind": "transform", "expr": "$number(input.n)"},
+	    {"id": "e", "kind": "merge", "expr": "$exists(nodes.count.error) ? 0 : nodes.count.body"}],
+	  "edges": [{"from": "count", "to": "e"}, {"from": "count", "to": "e", "unhandled": true}],
 	  "response": {"answers": [{"status": 200, "from": "e"}]}}`)
 	for input, want := range map[string]struct {
 		output string
-		way    Way
+		ways   []Way
 	}{
-		`{"n": "2"}`:   {"2", Way{From: "count"}},
-		`{"n": "two"}`: {"0", Way{From: "count", Unhandled: true}},
+		`{"n": "2"}`:   {"2", []Way{{From: "count"}}},
+		`{"n": "two"}`: {"0", []Way{{From: "count", Unhandled: true}}},
 	} {
 		out, err := r.Serve(t.Context(), w.Slug, json.RawMessage(input))
 		if err != nil {
@@ -375,8 +377,8 @@ func TestServe_AnEithersWayIsRecorded(t *testing.T) {
 		if err != nil || len(nodes) != 2 {
 			t.Fatalf("%s: NodeRuns() = %+v, %v", input, nodes, err)
 		}
-		if nodes[0].Way != nil || decode[Way](t, nodes[1].Way) != want.way {
-			t.Errorf("%s: count's way %s, e's %s", input, nodes[0].Way, nodes[1].Way)
+		if nodes[0].Ways != nil || !slices.Equal(decode[[]Way](t, nodes[1].Ways), want.ways) {
+			t.Errorf("%s: count's ways %s, e's %s", input, nodes[0].Ways, nodes[1].Ways)
 		}
 	}
 }

@@ -121,7 +121,7 @@ export function connect(
   return { ...d, edges: [...(d.edges ?? []), edge] };
 }
 
-// newWays is the outputs that could join the Either step with id as a
+// newWays is the outputs that could join the Merge step with id as a
 // way: each other step's, its Unhandled among them, but those joined to it
 // already, and any that would close a loop. A step whose id is missing or
 // shared can't be named by one.
@@ -137,23 +137,6 @@ export function newWays(
     return outputs
       .filter((on) => canConnect(d, n.id, id, on))
       .map((on) => ({ from: n.id, on }));
-  });
-}
-
-// setWayBody gives the edge at index, a way into an Either step, the body
-// the Either gives when it's the way that comes; undefined removes it, so
-// the Either gives the body of the way's step. A body it already has gives
-// back the draft itself.
-export function setWayBody(
-  d: Definition,
-  index: number,
-  body: string | undefined,
-): Definition {
-  return updateEdge(d, index, (e) => {
-    const next = { ...e };
-    if (body === undefined) delete next.body;
-    else next.body = body;
-    return next;
   });
 }
 
@@ -607,7 +590,6 @@ export function mentions(d: Definition, id: string): string[] {
   }
   for (const e of d.edges ?? []) {
     check(`the condition on the edge from ${e.from} to ${e.to}`, e.when);
-    check(`the body on the edge from ${e.from} to ${e.to}`, e.body);
   }
   check("the workflow's output", d.output);
   return found;

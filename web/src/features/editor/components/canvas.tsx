@@ -82,9 +82,9 @@ export function Canvas() {
   // dashed, and its name says whether the run took it. A line into an
   // answer is taken once the run answered with it: gave is that status, or
   // -1 while the run goes on. A run that failed took none, even one the
-  // response's Unhandled answered. A line into an Either is taken when
-  // it's the way the Either says it came by. Until a run says, a way into an
-  // Either is dashed too, as it may not be taken; so is one the run is still
+  // response's Unhandled answered. A line into a Merge is taken when it's
+  // among the ways the Merge says it came by. Until a run says, a way into a
+  // Merge is dashed too, as it may not be taken; so is one the run is still
   // to decide.
   const troubled = useProblems((p) => p.on === "connection");
   const steps = useRunSteps();
@@ -133,7 +133,7 @@ export function Canvas() {
       const to = line && !answer ? steps?.(line.to) : undefined;
       const taken =
         line && to?.came
-          ? wayHandle(to.came) === wayHandle(line)
+          ? to.came.some((w) => wayHandle(w) === wayHandle(line))
           : steps && line
             ? takenOf(line.on, steps(line.from), into())
             : undefined;
@@ -266,7 +266,7 @@ export function Canvas() {
       <Panel position="top-left" className="nokey flex gap-2">
         <AddNodeDialog kind="http" />
         <AddNodeDialog kind="transform" />
-        <AddNodeDialog kind="either" />
+        <AddNodeDialog kind="merge" />
         <Button
           variant="outline"
           size="sm"

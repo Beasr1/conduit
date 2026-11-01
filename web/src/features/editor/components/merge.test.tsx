@@ -25,8 +25,8 @@ const prefs = {
 } satisfies Definition["nodes"][number];
 
 // prefs answers 2xx or 400; on 400, fallback gets them another way.
-// prefs_ok, an Either, takes either, and greet follows it.
-const eithered: Definition = {
+// prefs_ok, a Merge, takes whichever came, and greet follows it.
+const merged: Definition = {
   nodes: [
     prefs,
     {
@@ -34,20 +34,27 @@ const eithered: Definition = {
       kind: "http",
       request: { method: "GET", url: "https://prefs.example.com/v1/defaults" },
     },
-    { id: "prefs_ok", kind: "either" },
+    {
+      id: "prefs_ok",
+      kind: "merge",
+      expr: "$exists(nodes.fallback) ? nodes.fallback.body.data : nodes.prefs.body",
+    },
     { id: "greet", kind: "transform", expr: "nodes.prefs_ok.body.theme" },
   ],
   edges: [
     { from: "prefs", to: "prefs_ok" },
     { from: "prefs", to: "fallback", on: 400 },
-    { from: "fallback", to: "prefs_ok", body: "nodes.fallback.body.data" },
+    { from: "fallback", to: "prefs_ok" },
     { from: "prefs_ok", to: "greet" },
   ],
 };
 
-// blocks is what a card's blocks say, in order.
-const blocks = (card: HTMLElement) =>
-  [...card.querySelectorAll("[data-part]")].map((b) => b.textContent);
+// ways is what a Merge card's blocks on its left say, its ways then + Add:
+// each holds a point.
+const ways = (card: HTMLElement) =>
+  [...card.querySelectorAll(".block-point")].map(
+    (point) => point.parentElement?.textContent,
+  );
 
 // options opens a select from the keyboard, as a screen reader would, and
 // gives what it offers.
@@ -71,45 +78,40 @@ async function choose(label: string, option: string) {
   fireEvent.keyDown(document.activeElement ?? document.body, { key: "Enter" });
 }
 
-// selected is the name of the tab open in panel.
-const selected = (panel: HTMLElement) =>
-  within(panel)
-    .getAllByRole("tab")
-    .find((t) => t.getAttribute("aria-selected") === "true")?.textContent;
-
-test("an Either step is added with + Add for its ways, and opens on adding one", async () => {
+test("a Merge step is added with + Add for its ways and an expression to write", async () => {
   renderEditor({ nodes: [prefs] });
   fireEvent.click(
-    await screen.findByRole("button", { name: "Add Either step" }),
+    await screen.findByRole("button", { name: "Add Merge step" }),
   );
   fireEvent.change(screen.getByLabelText("Id"), {
     target: { value: "prefs_ok" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   const card = await screen.findByTestId("rf__node-prefs_ok");
-  expect(blocks(card)).toEqual(["+ Add", "Unhandled · fails the run"]);
-  expect(within(card).getByText("Either")).toBeTruthy();
-
-  // Picked, with no way yet, it opens on adding one.
-  fireEvent.click(within(card).getByText("Either"));
-  const panel = await screen.findByRole("complementary", {
-    name: "Either step",
-  });
-  expect(selected(panel)).toBe("+ Way");
-  await choose("Add a way from", "prefs · 2xx");
-  await waitFor(() =>
-    expect(blocks(card)).toEqual([
-      "prefs · 2xx",
-      "+ Add",
-      "Unhandled · fails the run",
-    ]),
+  expect(ways(card)).toEqual(["+ Add"]);
+  expect(within(card).getByText("Merge")).toBeTruthy();
+  expect(card.querySelector('[data-part="unhandled"]')?.textContent).toBe(
+    "Unhandled · fails the run",
   );
+
+  fireEvent.click(within(card).getByText("Merge"));
+  const panel = await screen.findByRole("complementary", {
+    name: "Merge step",
+  });
+  expect(within(panel).getByText(/^None yet: add one below/)).toBeTruthy();
+  expect(
+    within(panel).getByRole("textbox", { name: "Expression" }),
+  ).toHaveProperty("value", "");
+  await choose("Add a way from", "prefs · 2xx");
+  await waitFor(() => expect(ways(card)).toEqual(["prefs · 2xx", "+ Add"]));
   expect(await screen.findByTestId("rf__edge-prefs->prefs_ok")).toBeTruthy();
-  expect(selected(panel)).toBe("prefs · 2xx");
+  expect(
+    within(panel).getByRole("button", { name: "Way from prefs · 2xx always" }),
+  ).toBeTruthy();
 });
 
-test("each way is a block that opens its tab, where the value it gives is written", async () => {
-  renderEditor(eithered);
+test("its expression makes its value from whatever came, previewed over the samples", async () => {
+  renderEditor(merged);
   const asked: PreviewRequest[] = [];
   server.use(
     http.post<PathParams, PreviewRequest, Preview>(
@@ -119,12 +121,9 @@ test("each way is a block that opens its tab, where the value it gives is writte
         return HttpResponse.json<Preview>({
           reads: {
             input: null,
-            nodes: {
-              fallback: { status: 200, body: { data: { theme: "light" } } },
-            },
+            nodes: { prefs: { status: 200, body: { theme: "dark" } } },
           },
-          taken: true,
-          gives: { theme: "light" },
+          gives: { theme: "dark" },
           skipped: false,
           problems: [],
         });
@@ -138,68 +137,42 @@ test("each way is a block that opens its tab, where the value it gives is writte
       async ({ request }) => {
         const draft = await request.json();
         saved.push(draft);
-        const { revision } = workflowRevision("wf-1", "Either", draft);
+        const { revision } = workflowRevision("wf-1", "Merge", draft);
         return HttpResponse.json<Revision>({ ...revision, revision: 2 });
       },
     ),
   );
   const card = await screen.findByTestId("rf__node-prefs_ok");
-  expect(blocks(card)).toEqual([
-    "prefs · 2xx",
-    "fallback · 2xx",
-    "+ Add",
-    "Unhandled · fails the run",
-  ]);
+  expect(ways(card)).toEqual(["prefs · 2xx", "fallback · 2xx", "+ Add"]);
 
-  fireEvent.click(within(card).getByText("fallback · 2xx"));
+  fireEvent.click(within(card).getByText("Merge"));
   const panel = await screen.findByRole("complementary", {
-    name: "Either step",
+    name: "Merge step",
   });
-  expect(selected(panel)).toBe("fallback · 2xx");
-  const value = within(panel).getByRole("textbox", { name: "Value" });
-  expect(value).toHaveProperty("value", "nodes.fallback.body.data");
-  // What it gives over the samples is the way's connection's preview, in
-  // the tab open: the others stay mounted.
-  const open = within(panel).getByRole("tabpanel");
-  expect(await within(open).findByText("It gives")).toBeTruthy();
-  expect(within(open).getByText(/"theme": "light"/)).toBeTruthy();
-  expect(asked.at(-1)?.edge).toBe(2);
+  const expr = within(panel).getByRole("textbox", { name: "Expression" });
+  expect(expr).toHaveProperty("value", merged.nodes[2]?.expr);
+  expect(await within(panel).findByText("It gives")).toBeTruthy();
+  expect(within(panel).getByText(/"theme": "dark"/)).toBeTruthy();
+  expect(asked.at(-1)?.node).toBe("prefs_ok");
 
-  fireEvent.change(value, { target: { value: "nodes.fallback.body.prefs" } });
-  // prefs' way gives prefs' body as it is, having no value of its own.
-  fireEvent.click(within(panel).getByRole("tab", { name: "prefs · 2xx" }));
-  expect(within(panel).getByRole("textbox", { name: "Value" })).toHaveProperty(
-    "value",
-    "",
-  );
+  fireEvent.change(expr, { target: { value: "nodes.prefs.body" } });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(saved).toHaveLength(1));
-  expect(saved[0]?.edges?.[2]).toEqual({
-    from: "fallback",
-    to: "prefs_ok",
-    body: "nodes.fallback.body.prefs",
+  expect(saved[0]?.nodes[2]).toEqual({
+    id: "prefs_ok",
+    kind: "merge",
+    expr: "nodes.prefs.body",
   });
 });
 
-test("a way is dashed, as it may not be taken; a line into any other step isn't", async () => {
-  renderEditor(eithered);
-  const way = await screen.findByTestId("rf__edge-prefs->prefs_ok");
-  expect(way.classList.contains("way")).toBe(true);
-  expect(way.getAttribute("aria-label")).toBe(
-    "Connection from prefs to prefs_ok, one of its ways",
+test("its ways each open their line, and + Way offers what could join it", async () => {
+  renderEditor(merged);
+  fireEvent.click(
+    within(await screen.findByTestId("rf__node-prefs_ok")).getByText("Merge"),
   );
-  const needed = screen.getByTestId("rf__edge-prefs_ok->greet");
-  expect(needed.classList.contains("way")).toBe(false);
-});
-
-test("+ Way offers each response that could join it, and opens the one picked", async () => {
-  renderEditor(eithered);
-  const card = await screen.findByTestId("rf__node-prefs_ok");
-  fireEvent.click(within(card).getByText("+ Add"));
   const panel = await screen.findByRole("complementary", {
-    name: "Either step",
+    name: "Merge step",
   });
-  expect(selected(panel)).toBe("+ Way");
   // Not the ways it has, nor greet, which follows it.
   expect(await options("Add a way from")).toEqual([
     "prefs · 400",
@@ -207,55 +180,31 @@ test("+ Way offers each response that could join it, and opens the one picked", 
     "fallback · Unhandled",
   ]);
   fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
-  await choose("Add a way from", "fallback · Unhandled");
-  expect(
-    await screen.findByTestId("rf__edge-fallback->prefs_ok#1"),
-  ).toBeTruthy();
-  await waitFor(() => expect(selected(panel)).toBe("fallback · Unhandled"));
-});
 
-test("a way's connection says it's one, and opens the value it gives", async () => {
-  renderEditor(eithered);
-  fireEvent.click(await screen.findByTestId("rf__edge-fallback->prefs_ok"));
+  fireEvent.click(
+    within(panel).getByRole("button", {
+      name: "Way from fallback · 2xx always",
+    }),
+  );
   const connection = await screen.findByRole("complementary", {
     name: "Connection",
   });
   expect(
-    within(connection).getByText(/^It's a way into prefs_ok, an Either step/),
+    within(connection).getByText(
+      /prefs_ok, a Merge step, runs if any of its ways is taken, once all have ended/,
+    ),
   ).toBeTruthy();
-  fireEvent.click(
-    within(connection).getByRole("button", { name: "Edit the value it gives" }),
-  );
-  const panel = await screen.findByRole("complementary", {
-    name: "Either step",
-  });
-  expect(selected(panel)).toBe("fallback · 2xx");
 });
 
-test("a problem with a way's value marks its tab, and opens it from the list", async () => {
-  renderEditor(eithered, [
-    {
-      pointer: "/edges/2/body",
-      code: "invalid_expression",
-      detail: "JSONata error S0201: syntax error",
-    },
-  ]);
-  fireEvent.click(await screen.findByRole("button", { name: "1 problem" }));
-  const list = await screen.findByRole("complementary", { name: "Problems" });
-  fireEvent.click(
-    within(list).getByRole("button", {
-      name: /^Connection fallback → prefs_ok · Value/,
-    }),
+test("a way is dashed, as it may not be taken; a line into any other step isn't", async () => {
+  renderEditor(merged);
+  const way = await screen.findByTestId("rf__edge-prefs->prefs_ok");
+  expect(way.classList.contains("way")).toBe(true);
+  expect(way.getAttribute("aria-label")).toBe(
+    "Connection from prefs to prefs_ok, one of its ways",
   );
-  const panel = await screen.findByRole("complementary", {
-    name: "Either step",
-  });
-  expect(selected(panel)).toBe("fallback · 2xx (1 problem)");
-  await waitFor(() =>
-    expect(document.activeElement).toBe(
-      within(panel).getByRole("textbox", { name: "Value" }),
-    ),
-  );
+  const needed = screen.getByTestId("rf__edge-prefs_ok->greet");
+  expect(needed.classList.contains("way")).toBe(false);
 });
 
 const at = (ms: number) =>
@@ -292,7 +241,7 @@ const ran: Run = {
       attempts: 0,
       ended_at: at(170),
       response: { body: { theme: "light" } },
-      way: { from: "fallback" },
+      ways: [{ from: "fallback" }],
     },
     {
       node: "greet",
@@ -312,7 +261,7 @@ function serveRun() {
     kind: n.status,
     attempt: n.attempts,
     at: n.ended_at,
-    ...(n.way ? { way: n.way } : {}),
+    ...(n.ways ? { ways: n.ways } : {}),
   }));
   const encoder = new TextEncoder();
   const text = [
@@ -342,8 +291,8 @@ function serveRun() {
   );
 }
 
-test("a run marks the way that came, and the line it came by", async () => {
-  renderEditor(eithered);
+test("a run marks each way that came, and draws the lines they came by", async () => {
+  renderEditor(merged);
   serveRun();
   fireEvent.click(await screen.findByRole("button", { name: "Run" }));
   const dialog = await screen.findByRole("dialog", { name: "Run" });
@@ -351,12 +300,11 @@ test("a run marks the way that came, and the line it came by", async () => {
 
   const card = await screen.findByTestId("rf__node-prefs_ok");
   await waitFor(() =>
-    expect(
-      card.querySelector('[data-part="way:fallback:0"]')?.textContent,
-    ).toBe("fallback · 2xx, the way that came"),
-  );
-  expect(card.querySelector('[data-part="way:prefs:0"]')?.textContent).toBe(
-    "prefs · 2xx",
+    expect(ways(card)).toEqual([
+      "prefs · 2xx",
+      "fallback · 2xx, a way that came",
+      "+ Add",
+    ]),
   );
   // The way that came is drawn solid; the other is dashed as not taken.
   const came = screen.getByTestId("rf__edge-fallback->prefs_ok");
@@ -372,9 +320,9 @@ test("a run marks the way that came, and the line it came by", async () => {
   );
   expect(other.classList.contains("untaken")).toBe(true);
 
-  fireEvent.click(within(card).getByText("prefs · 2xx"));
+  fireEvent.click(within(card).getByText("prefs_ok"));
   const panel = await screen.findByRole("complementary", {
-    name: "Either step",
+    name: "Merge step",
   });
   expect(
     await within(panel).findByText(

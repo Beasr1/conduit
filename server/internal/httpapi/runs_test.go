@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -36,11 +37,11 @@ const greetDef = `{
 }`
 
 // answersDef answers 200 with the user, or 404 when the users API has none:
-// respond follows user either way, through an either.
+// respond follows user either way, through a merge.
 const answersDef = `{
   "nodes": [
     {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}, "outputs": [{"status": 404}]},
-    {"id": "answered", "kind": "either"},
+    {"id": "answered", "kind": "merge", "expr": "nodes.user.status"},
     {"id": "respond", "kind": "transform",
      "expr": "nodes.user.status = 404 ? { 'status': 404, 'body': { 'error': 'no such user' } } : { 'status': 200, 'body': nodes.user.body }"}
   ],
@@ -175,24 +176,24 @@ func TestRuns_ACaughtFailure(t *testing.T) {
 	}
 }
 
-// An either says which way it ran with, live and on the run's record.
-func TestRuns_AnEithersWay(t *testing.T) {
+// A merge says which ways came, live and on the run's record.
+func TestRuns_AMergesWays(t *testing.T) {
 	t.Parallel()
 	wr := create(t, strings.ReplaceAll(`{"nodes": [
 	    {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}, "outputs": [{"status": 404}]},
-	    {"id": "found", "kind": "either"}],
-	  "edges": [{"from": "user", "to": "found"}, {"from": "user", "to": "found", "on": 404, "body": "null"}]}`, "BASE", usersUpstream(t).URL))
+	    {"id": "found", "kind": "merge", "expr": "nodes.user.body"}],
+	  "edges": [{"from": "user", "to": "found"}, {"from": "user", "to": "found", "on": 404}]}`, "BASE", usersUpstream(t).URL))
 	run := startRun(t, wr.Workflow.ID, `{"input": {"user_id": "7"}}`)
 	events := readEvents(t, bytes.NewReader(call(t, http.MethodGet, "/v1/runs/"+run.ID+"/events", "").body))
 	if got, want := eventList(t, events), "1 user started, 2 user succeeded, 3 found started, 4 found succeeded, end run succeeded"; got != want {
 		t.Fatalf("events: %s\nwant:   %s", got, want)
 	}
-	if n := strict[gen.NodeEvent](t, []byte(events[3].data)); n.Way != (gen.Way{From: "user"}) {
+	if n := strict[gen.NodeEvent](t, []byte(events[3].data)); !slices.Equal(n.Ways, []gen.Way{{From: "user"}}) {
 		t.Errorf("found's end = %s", events[3].data)
 	}
 	got := strict[gen.Run](t, call(t, http.MethodGet, "/v1/runs/"+run.ID, "").body)
-	if user, found := got.Nodes[0], got.Nodes[1]; user.Way != (gen.Way{}) || found.Way != (gen.Way{From: "user"}) {
-		t.Errorf("user's way %+v, found's %+v", user.Way, found.Way)
+	if user, found := got.Nodes[0], got.Nodes[1]; user.Ways != nil || !slices.Equal(found.Ways, []gen.Way{{From: "user"}}) {
+		t.Errorf("user's ways %+v, found's %+v", user.Ways, found.Ways)
 	}
 }
 

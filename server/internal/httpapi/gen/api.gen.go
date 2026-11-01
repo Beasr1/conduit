@@ -189,7 +189,7 @@ func (e RunSummaryTrigger) Valid() bool {
 
 // CreateWorkflow defines model for CreateWorkflow.
 type CreateWorkflow struct {
-	// Definition A workflow. A node runs once its parents have finished, if every edge into it was taken; an either node runs if one was, and two fail it. Otherwise it's skipped.
+	// Definition A workflow. A node runs once its parents have finished, if every edge into it was taken; a merge node runs if any was. Otherwise it's skipped.
 	Definition externalRef0.Definition `json:"definition"`
 	Name       string                  `json:"name"`
 	Slug       string                  `json:"slug"`
@@ -215,8 +215,8 @@ type NodeEvent struct {
 	Kind       NodeEventKind `json:"kind"`
 	Node       string        `json:"node"`
 
-	// Way The edge an either node ran with, the one into it that was taken, as the definition writes it.
-	Way Way `json:"way,omitempty,omitzero"`
+	// Ways On the event that ends a merge node that ran, the edges into it that were taken.
+	Ways []Way `json:"ways,omitempty,omitzero"`
 }
 
 // NodeEventKind defines model for NodeEvent.Kind.
@@ -234,7 +234,7 @@ type NodeRequest struct {
 	URL       string            `json:"url"`
 }
 
-// NodeResponse What an http node got back, or a transform or either node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
+// NodeResponse What an http node got back, or a transform or merge node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
 type NodeResponse struct {
 	// Body null when there was none, or it wasn't JSON.
 	Body json.RawMessage `json:"body"`
@@ -265,15 +265,15 @@ type NodeRun struct {
 	// Request What an http node sent. Secrets aren't kept. The values of the Authorization, Proxy-Authorization, Cookie and Set-Cookie headers are [redacted], as are those of any header or query parameter whose name contains key, token, secret or password, and a password in the URL.
 	Request NodeRequest `json:"request,omitempty,omitzero"`
 
-	// Response What an http node got back, or a transform or either node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
+	// Response What an http node got back, or a transform or merge node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
 	Response NodeResponse `json:"response,omitempty,omitzero"`
 
 	// StartedAt Absent if the node never started.
 	StartedAt time.Time     `json:"started_at,omitempty,omitzero"`
 	Status    NodeRunStatus `json:"status"`
 
-	// Way The edge an either node ran with, the one into it that was taken, as the definition writes it.
-	Way Way `json:"way,omitempty,omitzero"`
+	// Ways A merge node's, the edges into it that were taken, in the definition's order.
+	Ways []Way `json:"ways,omitempty,omitzero"`
 }
 
 // NodeRunStatus defines model for NodeRun.Status.
@@ -281,7 +281,7 @@ type NodeRunStatus string
 
 // Preview defines model for Preview.
 type Preview struct {
-	// Gives A transform or either step's value, or the workflow's output; for a connection into an either, what the either gives when it's the one taken. Absent when it gave none.
+	// Gives A transform or merge step's value, or the workflow's output. Absent when it gave none.
 	Gives json.RawMessage `json:"gives,omitempty,omitzero"`
 
 	// Problems What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
@@ -293,7 +293,7 @@ type Preview struct {
 	// Sends An http step's request, as a run would send it. A part that didn't render is left out, and its problem says why.
 	Sends RenderedRequest `json:"sends,omitempty,omitzero"`
 
-	// Skipped A run would skip the step, or a connection's source, with these samples, as a step joined to it takes no connection into it, or none into an either is taken.
+	// Skipped A run would skip the step, or a connection's source, with these samples, as a step joined to it takes no connection into it, or none into a merge is taken.
 	Skipped bool `json:"skipped"`
 
 	// Taken A connection's preview only, whether a run would take it with these samples.
@@ -305,7 +305,7 @@ type Preview struct {
 
 // PreviewRequest defines model for PreviewRequest.
 type PreviewRequest struct {
-	// Definition A workflow. A node runs once its parents have finished, if every edge into it was taken; an either node runs if one was, and two fail it. Otherwise it's skipped.
+	// Definition A workflow. A node runs once its parents have finished, if every edge into it was taken; a merge node runs if any was. Otherwise it's skipped.
 	Definition externalRef0.Definition `json:"definition"`
 
 	// Edge The connection to preview, by its place in the definition's edges. Not with node.
@@ -370,7 +370,7 @@ type RenderedRequest struct {
 type Revision struct {
 	CreatedAt time.Time `json:"created_at"`
 
-	// Definition A workflow. A node runs once its parents have finished, if every edge into it was taken; an either node runs if one was, and two fail it. Otherwise it's skipped.
+	// Definition A workflow. A node runs once its parents have finished, if every edge into it was taken; a merge node runs if any was. Otherwise it's skipped.
 	Definition externalRef0.Definition `json:"definition"`
 
 	// Problems Everything wrong with the definition. Empty when it can be published.
@@ -517,11 +517,11 @@ type Validation struct {
 	Problems []ProblemError `json:"problems"`
 }
 
-// Way The edge an either node ran with, the one into it that was taken, as the definition writes it.
+// Way An edge into a merge node that was taken, as the definition writes it.
 type Way struct {
 	From string `json:"from"`
 
-	// On The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform or an either.
+	// On The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform or a merge.
 	On int `json:"on,omitempty,omitzero"`
 
 	// Unhandled It left from's Unhandled block, and on is absent.

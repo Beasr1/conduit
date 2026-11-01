@@ -11,7 +11,7 @@ paths: {}
 components:
   schemas:
     Definition:
-      description: A workflow. A node runs once its parents have finished, if every edge into it was taken; an either node runs if one was, and two fail it. Otherwise it's skipped.
+      description: A workflow. A node runs once its parents have finished, if every edge into it was taken; a merge node runs if any was. Otherwise it's skipped.
       type: object
       required: [nodes]
       additionalProperties: false
@@ -88,7 +88,7 @@ components:
           x-go-type-skip-optional-pointer: false
         expr:
           type: string
-          description: A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch.
+          description: A transform or merge node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch, and a merge node an expr.
         switch:
           $ref: "#/components/schemas/Switch"
           description: A transform node's cases, in place of an expr.
@@ -108,8 +108,8 @@ components:
 
     NodeKind:
       type: string
-      enum: [http, transform, either]
-      description: An http node calls an upstream, a transform node gives what its JSONata does, and an either node gives what the one edge into it that was taken gives; two taken fail it.
+      enum: [http, transform, merge]
+      description: An http node calls an upstream, and a transform node gives what its JSONata does, if every edge into it was taken; a merge node gives what its JSONata does if any was, reading whatever came.
 
     Output:
       type: object
@@ -223,7 +223,7 @@ components:
           description: The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs.
         on:
           type: integer
-          description: The output of from that the line leaves from, as an edge's. Absent means 2xx, and the only output of a transform or an either, or the Unhandled block when unhandled is set.
+          description: The output of from that the line leaves from, as an edge's. Absent means 2xx, and the only output of a transform or a merge, or the Unhandled block when unhandled is set.
         unhandled:
           type: boolean
           description: The line leaves from from's Unhandled block, as an edge can, and on is absent. The answer's body is then from's body, what an http node got back with a status it doesn't list, else none. A node's Unhandled block is joined to one answer at most.
@@ -307,13 +307,10 @@ components:
           type: string
         on:
           type: integer
-          description: The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and the only output of a transform or an either, or the Unhandled block when unhandled is set.
+          description: The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and the only output of a transform or a merge, or the Unhandled block when unhandled is set.
         unhandled:
           type: boolean
           description: The edge leaves from its source's Unhandled block, and on is absent. Every node has one. It takes what the node's other outputs don't, a failure of its own, a status it doesn't list among them, so a run goes on down the edges from it, its node failed; with no line from it, the failure fails the run. Steps after it read the failure as nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer.
         when:
           type: string
           description: A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source answered through the edge's output, or failed into its Unhandled block, and this is true. Absent means true.
-        body:
-          type: string
-          description: Only on an edge into an either node. JSONata whose value the either gives when this edge is the one taken; it reads what the condition does, the nodes before the source and the source. Absent, the either gives the source's body as it is.

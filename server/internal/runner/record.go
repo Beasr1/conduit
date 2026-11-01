@@ -53,23 +53,28 @@ type Failure struct {
 	Caught bool `json:"caught,omitempty"`
 }
 
-// Way is the edge an either ran with, as the definition writes it, and as
-// it's recorded and streamed.
+// Way is an edge into a merge that was taken, as the definition writes it,
+// and as it's recorded and streamed.
 type Way struct {
 	From      string `json:"from"`
 	On        int    `json:"on,omitempty"`
 	Unhandled bool   `json:"unhandled,omitempty"`
 }
 
-// wayOf is the engine's way of an either that ran, nil for any other node.
-func wayOf(w *engine.Way) *Way {
-	switch {
-	case w == nil:
+// waysOf is the engine's ways of a merge that ran, nil for any other node.
+func waysOf(ws []engine.Way) []Way {
+	if len(ws) == 0 {
 		return nil
-	case w.On == workflow.OnUnhandled:
-		return &Way{From: w.From, Unhandled: true}
 	}
-	return &Way{From: w.From, On: w.On}
+	out := make([]Way, len(ws))
+	for i, w := range ws {
+		if w.On == workflow.OnUnhandled {
+			out[i] = Way{From: w.From, Unhandled: true}
+		} else {
+			out[i] = Way{From: w.From, On: w.On}
+		}
+	}
+	return out
 }
 
 // maxStored caps each body as stored (answer 4). The engine itself works
@@ -220,9 +225,9 @@ func nodeRecord(runID string, n nodeEnd) (store.NodeRun, error) {
 			return rec, fmt.Errorf("encode the error: %w", err)
 		}
 	}
-	if w := wayOf(res.Way); w != nil {
-		if rec.Way, err = json.Marshal(w); err != nil {
-			return rec, fmt.Errorf("encode the way: %w", err)
+	if ws := waysOf(res.Ways); ws != nil {
+		if rec.Ways, err = json.Marshal(ws); err != nil {
+			return rec, fmt.Errorf("encode the ways: %w", err)
 		}
 	}
 	return rec, nil

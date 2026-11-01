@@ -1,8 +1,6 @@
-import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
 import { MappingField } from "@/features/editor/components/mapping-field";
 import { updateEdge } from "@/features/editor/edits";
-import { toFlow, wayHandle } from "@/features/editor/flow";
 import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
 import { usePreview } from "@/features/editor/hooks/use-preview";
 import { useEditor, useEditorStore } from "@/features/editor/store";
@@ -15,22 +13,20 @@ type Preview = components["schemas"]["Preview"];
 // its step and the steps before it got back, its step answering with the
 // response the connection leaves from; the condition, which goes into the
 // draft as it's typed; then whether it's taken. No text means it's taken
-// whenever its step answers that way. One into an Either is one of its
-// ways, whose value the Either's panel edits.
+// whenever its step answers that way. One into a Merge is one of its ways.
 export function ConnectionForm({ index }: { index: number }) {
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
-  const show = useEditor((s) => s.show);
   const edge = useEditor((s) => s.draft.edges?.[index]);
   const http = useEditor(
     (s) =>
       s.draft.nodes.find((n) => n.id === s.draft.edges?.[index]?.from)?.kind ===
       "http",
   );
-  const either = useEditor(
+  const merge = useEditor(
     (s) =>
       s.draft.nodes.find((n) => n.id === s.draft.edges?.[index]?.to)?.kind ===
-      "either",
+      "merge",
   );
   const preview = usePreview({ edge: index });
   const found = useProblems((p) => p.on === "connection" && p.index === index);
@@ -50,29 +46,6 @@ export function ConnectionForm({ index }: { index: number }) {
         )}{" "}
         to <span className="font-mono">{edge.to}</span>.
       </p>
-      {either && (
-        <section className="flex flex-col gap-1.5 text-sm">
-          <p className="text-muted-foreground">
-            It's a way into {edge.to}, an Either step, which gives a value of
-            its own when this way comes.
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="self-start"
-            onClick={() => {
-              // The canvas names a step by its key, which toFlow gives it.
-              const d = editor.getState().draft;
-              const key = toFlow(d).nodes.find(
-                (n) => d.nodes[n.data.index]?.id === edge.to,
-              )?.id;
-              if (key) show("nodes", key, wayHandle(edge));
-            }}
-          >
-            Edit the value it gives
-          </Button>
-        </section>
-      )}
       <FieldError errors={asErrors(found.filter((f) => !when.includes(f)))} />
       <MappingField
         id="connection-when"
@@ -80,8 +53,8 @@ export function ConnectionForm({ index }: { index: number }) {
         description={
           <>
             JSONata over what {edge.from} and the steps before it got back.{" "}
-            {either
-              ? `${edge.to} runs after whichever of its ways is taken, so this way comes only when this is true`
+            {merge
+              ? `${edge.to}, a Merge step, runs if any of its ways is taken, once all have ended, and this way is taken only when this is true`
               : `${edge.to} runs only when this is true and its other connections are taken`}
             ; empty means always. A step that doesn't run is skipped, and so are
             the steps after it that need it.
@@ -101,7 +74,7 @@ export function ConnectionForm({ index }: { index: number }) {
         preview={preview}
         open={(of) => [of.edges?.[index]?.from ?? ""]}
         result={(p) => (
-          <Taken preview={p} from={edge.from} to={edge.to} either={either} />
+          <Taken preview={p} from={edge.from} to={edge.to} merge={merge} />
         )}
       />
     </>
@@ -113,12 +86,12 @@ function Taken({
   preview,
   from,
   to,
-  either,
+  merge,
 }: {
   preview: Preview;
   from: string;
   to: string;
-  either: boolean;
+  merge: boolean;
 }) {
   return (
     <>
@@ -129,11 +102,11 @@ function Taken({
           : preview.taken === undefined
             ? "It can't tell yet: the problems above say why."
             : preview.taken
-              ? either
-                ? `Taken, so ${to} comes by this way.`
+              ? merge
+                ? `Taken, so ${to} runs, with this way among those that came.`
                 : `Taken, so ${to} runs once its other connections are.`
-              : either
-                ? `Not taken. ${to} runs only if another of its ways is.`
+              : merge
+                ? `Not taken. ${to} runs if another of its ways is.`
                 : `Not taken, so ${to} is skipped: it needs every connection into it.`}
       </p>
     </>

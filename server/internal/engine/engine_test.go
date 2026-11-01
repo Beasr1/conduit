@@ -626,9 +626,9 @@ func TestRun_AnswersThroughTheLineTaken(t *testing.T) {
 	// Each of user's outputs answers on its own, with what user got.
 	direct := program(t, srv.URL, `{"nodes": [`+user+`],
 	  "response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "on": 404}]}}`)
-	// A merger reads either answer user gives, through an either, and picks
-	// the status.
-	picked := program(t, srv.URL, `{"nodes": [`+user+`, {"id": "answered", "kind": "either"},
+	// A merger reads either answer user gives, through a merge, and picks the
+	// status.
+	picked := program(t, srv.URL, `{"nodes": [`+user+`, {"id": "answered", "kind": "merge", "expr": "nodes.user.status"},
 	    {"id": "respond", "kind": "transform", "expr": "nodes.user.status = 404 ? { 'status': 404, 'body': { 'error': nodes.user.body.error } } : { 'status': 200, 'body': nodes.user.body }"}],
 	  "edges": [{"from": "user", "to": "answered"}, {"from": "user", "to": "answered", "on": 404}, {"from": "answered", "to": "respond"}],
 	  "response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}]}}`)

@@ -337,7 +337,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 			started[ev.Node] = ev.At
 		}
 		if nr := ev.Result; nr != nil {
-			ne.HTTPStatus, ne.Way = nr.HTTPStatus, wayOf(nr.Way)
+			ne.HTTPStatus, ne.Ways = nr.HTTPStatus, waysOf(nr.Ways)
 			if nr.Status == engine.StatusFailed {
 				ne.Failure = r.failure(ctx, run.ID, ev.Node, nr.Err)
 				ne.Failure.Caught = nr.Caught

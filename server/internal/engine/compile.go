@@ -68,8 +68,8 @@ type node struct {
 	catches   bool
 	unhandled *transform.Expr
 
-	// transform nodes: an expr, or a switch, whose otherwise is never nil.
-	// whole says every expression in it compiled.
+	// transform nodes: an expr, or a switch, whose otherwise is never nil;
+	// merge nodes: an expr. whole says every expression in it compiled.
 	expr      *transform.Expr
 	cases     []switchCase
 	otherwise *switchCase
@@ -97,7 +97,6 @@ type edge struct {
 	from, to int
 	on       int                  // the output of from it leaves from: a status, 0 for 2xx, or workflow.OnUnhandled
 	when     *transform.Condition // nil: always taken
-	body     *transform.Expr      // into an either: what it gives through this edge; nil: from's body
 }
 
 // Compile checks d and compiles every expression in it. The error, when
@@ -141,7 +140,7 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 			}
 		case n.Kind == workflow.NodeKindTransform && n.Switch != nil:
 			pn.cases, pn.otherwise, pn.whole = c.cases(ptr+"/switch", n.Switch)
-		case n.Kind == workflow.NodeKindTransform && n.Expr != "":
+		case (n.Kind == workflow.NodeKindTransform || n.Kind == workflow.NodeKindMerge) && n.Expr != "":
 			pn.expr = c.expr(ptr+"/expr", n.Expr)
 			pn.whole = pn.expr != nil
 		}
@@ -155,9 +154,6 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 			when, err := transform.CompileCondition(e.When)
 			c.check(fmt.Sprintf("/edges/%d/when", k), err)
 			p.edges[k].when = when
-		}
-		if e.Body != "" {
-			p.edges[k].body = c.expr(fmt.Sprintf("/edges/%d/body", k), e.Body)
 		}
 	}
 	if d.Output != "" {

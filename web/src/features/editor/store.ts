@@ -13,7 +13,6 @@ import {
   RESPONSE,
   toFlow,
   UNHANDLED_HANDLE,
-  waysInto,
 } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 
@@ -168,8 +167,8 @@ export function createEditorStore(opened: Definition): EditorStore {
 
 // kept is the part of a selection the draft still has: a deleted node drops
 // out of it, and so does an edge whose end was renamed. The response card is
-// always there. A step whose open response, or way, was removed opens on its
-// request; its Unhandled is always there too.
+// always there. A step whose open response was removed opens on its request;
+// its Unhandled is always there too.
 function kept(
   { selected, part }: Pick<EditorState, "selected" | "part">,
   draft: Definition,
@@ -188,8 +187,7 @@ function kept(
     part === "request" ||
     part === "add" ||
     part === UNHANDLED_HANDLE ||
-    handlesOf(node).includes(part) ||
-    waysInto(draft, node.id).some((w) => w.handle === part)
+    handlesOf(node).includes(part)
       ? part
       : "request";
   if (

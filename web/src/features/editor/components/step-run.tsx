@@ -166,14 +166,16 @@ export function RunGot({
   );
 }
 
-// RunGave is what a transform or Either step gave in the run shown, and
-// the way an Either came by. One whose Unhandled block took its failure
+// RunGave is what a transform or Merge step gave in the run shown, and
+// the ways a Merge came by. One whose Unhandled block took its failure
 // gave nothing of its own: its Unhandled says what the block did.
 export function RunGave({ index }: { index: number }) {
   const step = useEditor((s) => s.draft.nodes[index]?.id ?? "");
   const run = useStepRun(step);
   const came = useEditor((s) =>
-    run?.came ? wayLabel(s.draft, run.came.from, outputOf(run.came)) : "",
+    (run?.came ?? [])
+      .map((w) => wayLabel(s.draft, w.from, outputOf(w)))
+      .join(", "),
   );
   const gave = useRecorded(step)?.response;
   if (!run) return null;

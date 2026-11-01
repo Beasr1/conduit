@@ -195,7 +195,7 @@ func TestRun_FollowsANodeEitherWay(t *testing.T) {
 	p := program(t, srv.URL, `{
 	  "nodes": [
 	    {"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/{{ input.path }}"}},
-	    {"id": "either_way", "kind": "either"},
+	    {"id": "either_way", "kind": "merge", "expr": "nodes.a"},
 	    {"id": "next", "kind": "transform", "expr": "$exists(nodes.a.error) ? 'missed' : 'got ' & nodes.a.body.n"}
 	  ],
 	  "edges": [{"from": "a", "to": "either_way"}, {"from": "a", "to": "either_way", "unhandled": true}, {"from": "either_way", "to": "next"}],
@@ -289,9 +289,9 @@ func TestSimulate_FailsIntoUnhandled(t *testing.T) {
 		t.Errorf("after: skipped %v, gives %s, problems %s", pv.Skipped, pv.Gives, problemCodes(pv))
 	}
 	// An output leading there too comes first: user's 2xx and Unhandled into
-	// an either that fallback follows.
+	// a merge that fallback follows.
 	pv = previewOf(t, failing, "fallback", func(d *workflow.Definition) {
-		d.Nodes = append(d.Nodes, workflow.Node{ID: "either_way", Kind: workflow.NodeKindEither})
+		d.Nodes = append(d.Nodes, workflow.Node{ID: "either_way", Kind: workflow.NodeKindMerge, Expr: "nodes.user"})
 		d.Edges[0] = workflow.Edge{From: "user", To: "either_way", Unhandled: true}
 		d.Edges = append(d.Edges, workflow.Edge{From: "user", To: "either_way"}, workflow.Edge{From: "either_way", To: "fallback"})
 	})
@@ -312,7 +312,7 @@ func TestRun_UnhandledBodyGivesAFallback(t *testing.T) {
 	p := program(t, "", `{
 	  "nodes": [
 	    {"id": "count", "kind": "transform", "expr": "$number(input.n)", "unhandled": {"body": "0"}},
-	    {"id": "either_way", "kind": "either"},
+	    {"id": "either_way", "kind": "merge", "expr": "nodes.count"},
 	    {"id": "next", "kind": "transform", "expr": "nodes.count.body + 1"}
 	  ],
 	  "edges": [{"from": "count", "to": "either_way"}, {"from": "count", "to": "either_way", "unhandled": true}, {"from": "either_way", "to": "next"}],

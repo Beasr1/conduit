@@ -220,13 +220,13 @@ function casesLine(s: Switch): string {
   ].join(" · ");
 }
 
-// An Either step runs after whichever of its ways comes: each way is a
-// block on its left, named for the step and response it comes from, with
-// the point its line arrives at, then + Add, where a new line is let go;
-// each point covers its block. Its value goes on from its point on the
+// A Merge step runs if any of its ways came, once all have ended: each way
+// is a block on its left, named for the step and response it comes from,
+// with the point its line arrives at, then + Add, where a new line is let
+// go; each point covers its block. Its value goes on from its point on the
 // right, and its Unhandled strip runs along the bottom. While a run is
-// shown, the way that came is marked.
-const EitherNode = memo(function EitherNode({ id, data }: NodeProps<FlowNode>) {
+// shown, each way that came is marked.
+const MergeNode = memo(function MergeNode({ id, data }: NodeProps<FlowNode>) {
   const node = useEditor((s) => s.draft.nodes[data.index]);
   const step = node?.id ?? "";
   const handles = useEditor(
@@ -239,7 +239,7 @@ const EitherNode = memo(function EitherNode({ id, data }: NodeProps<FlowNode>) {
   );
   const problems = useProblemCount(atStep(data.index));
   const run = useStepRun(step);
-  const came = run?.came && wayHandle(run.came);
+  const came = new Set((run?.came ?? []).map(wayHandle));
   // It grows with its ways, each with its point.
   const update = useUpdateNodeInternals();
   const points = handles.join(" ");
@@ -251,7 +251,6 @@ const EitherNode = memo(function EitherNode({ id, data }: NodeProps<FlowNode>) {
         {handles.map((h, k) => (
           <div
             key={k}
-            data-part={h}
             className="relative flex flex-1 items-center gap-1 border-b px-2.5 [&_svg]:size-3 [&_svg]:shrink-0"
           >
             <Handle
@@ -261,18 +260,15 @@ const EitherNode = memo(function EitherNode({ id, data }: NodeProps<FlowNode>) {
               className="block-point"
             />
             <span className="truncate">{labels[k]}</span>
-            {h === came && (
+            {came.has(h) && (
               <>
                 <CheckIcon aria-hidden />
-                <span className="sr-only">, the way that came</span>
+                <span className="sr-only">, a way that came</span>
               </>
             )}
           </div>
         ))}
-        <div
-          data-part="add"
-          className="relative flex flex-1 items-center px-2.5 text-muted-foreground"
-        >
+        <div className="relative flex flex-1 items-center px-2.5 text-muted-foreground">
           <Handle
             type="target"
             position={Position.Left}
@@ -290,7 +286,7 @@ const EitherNode = memo(function EitherNode({ id, data }: NodeProps<FlowNode>) {
           {problems > 0 && <ProblemMark count={problems} />}
         </span>
         <span className="truncate text-xs text-muted-foreground [&_svg]:size-3 [&_svg]:shrink-0">
-          {run ? <RunMark run={run} /> : "Either"}
+          {run ? <RunMark run={run} /> : "Merge"}
         </span>
       </div>
       <Handle type="source" position={Position.Right} id="out" />
@@ -456,7 +452,7 @@ function Refusal({ refused: { step, answer } }: { refused: Refused }) {
 export const nodeTypes = {
   http: HttpNode,
   transform: TransformNode,
-  either: EitherNode,
+  merge: MergeNode,
   unknown: UnknownNode,
   response: ResponseNode,
 };

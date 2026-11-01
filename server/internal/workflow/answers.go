@@ -72,11 +72,8 @@ func (v *validator) checkResponse(d *Definition, index map[string]int, need []ro
 					v.add(p+"/on", "unknown_output", "%s has no %d output", a.From, a.On)
 					continue
 				}
-			case NodeKindTransform:
-				v.add(p+"/on", "not_allowed", "a transform node has one output, so a line from it names none")
-				continue
-			case NodeKindEither:
-				v.add(p+"/on", "not_allowed", "an either node has one output, so a line from it names none")
+			case NodeKindTransform, NodeKindMerge:
+				v.add(p+"/on", "not_allowed", "a %s node has one output, so a line from it names none", n.Kind)
 				continue
 			}
 		}
@@ -115,15 +112,10 @@ func (v *validator) checkGroup(d *Definition, g group) {
 		}
 		return
 	}
-	switch {
-	case n.Kind == NodeKindHTTP && len(statuses) > 1:
+	if n.Kind == NodeKindHTTP && len(statuses) > 1 {
 		v.add(fmt.Sprintf("/response/answers/%d/from", g.answers[1]), "not_allowed",
 			"%s's %s output is joined to %s: an http node's result is the response it got, so it gives one answer; to pick among several, join a transform that does",
 			n.ID, outputName(g.on), statusList(statuses))
-	case n.Kind == NodeKindEither && len(statuses) > 1:
-		v.add(fmt.Sprintf("/response/answers/%d/from", g.answers[1]), "not_allowed",
-			"%s is joined to %s: an either node gives what the edge taken into it gives, so it gives one answer; to pick among several, join a transform that does",
-			n.ID, statusList(statuses))
 	}
 	s := n.Switch
 	if n.Kind != NodeKindTransform || s == nil {
@@ -150,8 +142,8 @@ func (v *validator) checkGroup(d *Definition, g group) {
 
 // checkReach reports two outputs joined to answers that one run could both
 // take. A run takes a line only when its node runs and answers through its
-// output, and a node runs only when every line into it was taken, an either
-// when one was, so two lines rest apart only when they need outputs of one
+// output, and a node runs only when every line into it was taken, a merge
+// when any was, so two lines rest apart only when they need outputs of one
 // node that share none. Conditions aren't read: lines only
 // they keep apart are reported too, as a switch can pick among answers.
 // A line from a node that never runs is that node's problem.

@@ -59,15 +59,15 @@ test("a step the server hasn't recorded goes by its last event", () => {
   ).toEqual({ state: "succeeded", status: 201, attempts: 1 });
 });
 
-test("an Either step says which way it came by, recorded or streamed", () => {
-  const came = { from: "prefs", on: 400 };
+test("a Merge step says which ways it came by, recorded or streamed", () => {
+  const came = [{ from: "prefs", on: 400 }, { from: "crm" }];
   expect(
-    stepRunOf(ended({ attempts: 0, way: came }), undefined, "succeeded"),
+    stepRunOf(ended({ attempts: 0, ways: came }), undefined, "succeeded"),
   ).toEqual({ state: "succeeded", attempts: 0, ms: 82, came });
   expect(
     stepRunOf(
       undefined,
-      event({ kind: "succeeded", attempt: 0, way: came }),
+      event({ kind: "succeeded", attempt: 0, ways: came }),
       "running",
     ),
   ).toEqual({ state: "succeeded", attempts: 0, came });

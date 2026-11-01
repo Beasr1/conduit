@@ -54,8 +54,8 @@ export function StepUnhandled({ index }: { index: number }) {
         <p className="text-muted-foreground">
           {http
             ? "It takes what the step's responses don't: a status none of them is for, the connection or a timeout after its retries, a body over the cap or a 2xx body that isn't JSON, an address it may not call, or its JSONata failing."
-            : kind === "either"
-              ? "It takes the step failing: the value of the way that came failing, or two ways coming in one run."
+            : kind === "merge"
+              ? "It takes the step's JSONata failing: its expression."
               : "It takes the step's JSONata failing: its expression, or a case's condition or body."}{" "}
           Joined, the run goes on down the lines from here. With none, the
           failure fails the run, and the response&apos;s Unhandled answers it.

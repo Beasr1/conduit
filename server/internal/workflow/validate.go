@@ -103,7 +103,7 @@ func (v *validator) add(pointer, code, format string, args ...any) {
 func (v *validator) checkNode(p string, n Node) {
 	switch n.Kind {
 	case "":
-		v.add(p+"/kind", "required", "a node needs a kind: http, transform or either")
+		v.add(p+"/kind", "required", "a node needs a kind: http, transform or merge")
 	case NodeKindHTTP:
 		if n.Request == nil {
 			v.add(p+"/request", "required", "an http node needs a request")
@@ -128,37 +128,32 @@ func (v *validator) checkNode(p string, n Node) {
 		case n.Expr == "":
 			v.add(p+"/expr", "required", "a transform node needs an expr, or a switch")
 		}
-	case NodeKindEither:
-		const gives = "an either node gives what the edge taken into it gives, so it has no %s"
+	case NodeKindMerge:
 		if n.Request != nil {
-			v.add(p+"/request", "not_allowed", gives, "request")
-		}
-		if n.Expr != "" {
-			v.add(p+"/expr", "not_allowed", gives, "expr")
+			v.add(p+"/request", "not_allowed", "a merge node has an expr, not a request")
 		}
 		if n.Switch != nil {
-			v.add(p+"/switch", "not_allowed", gives, "switch")
+			v.add(p+"/switch", "not_allowed", "a merge node has an expr, not a switch")
+		}
+		if n.Expr == "" {
+			v.add(p+"/expr", "required", "a merge node needs an expr, which reads whatever came into it")
 		}
 	default:
-		v.add(p+"/kind", "invalid_kind", "the kind %q isn't http, transform or either", n.Kind)
+		v.add(p+"/kind", "invalid_kind", "the kind %q isn't http, transform or merge", n.Kind)
 	}
 	switch {
 	case n.Sample == nil:
 	case n.Kind == NodeKindHTTP:
 		v.checkSample(p+"/sample", n.Sample, false)
-	case n.Kind == NodeKindTransform:
-		v.add(p+"/sample", "not_allowed", "a transform node's value comes from its expr, so it has no sample")
-	case n.Kind == NodeKindEither:
-		v.add(p+"/sample", "not_allowed", "an either node's value comes from the edge taken into it, so it has no sample")
+	case n.Kind == NodeKindTransform, n.Kind == NodeKindMerge:
+		v.add(p+"/sample", "not_allowed", "a %s node's value comes from its expr, so it has no sample", n.Kind)
 	}
 	switch {
 	case len(n.Outputs) == 0:
 	case n.Kind == NodeKindHTTP:
 		v.checkOutputs(p+"/outputs", n.Outputs)
-	case n.Kind == NodeKindTransform:
-		v.add(p+"/outputs", "not_allowed", "a transform node has one output, so it lists none")
-	case n.Kind == NodeKindEither:
-		v.add(p+"/outputs", "not_allowed", "an either node has one output, so it lists none")
+	case n.Kind == NodeKindTransform, n.Kind == NodeKindMerge:
+		v.add(p+"/outputs", "not_allowed", "a %s node has one output, so it lists none", n.Kind)
 	}
 	if n.Unhandled != nil && strings.TrimSpace(n.Unhandled.Body) == "" {
 		v.add(p+"/unhandled/body", "required", "an Unhandled body needs JSONata: write it, or remove it")
@@ -391,14 +386,9 @@ func (v *validator) checkEdges(edges []Edge, nodes []Node, index map[string]int)
 				if !slices.ContainsFunc(n.Outputs, func(o Output) bool { return o.Status == e.On }) {
 					v.add(p+"/on", "unknown_output", "%s has no %d output", e.From, e.On)
 				}
-			case NodeKindTransform:
-				v.add(p+"/on", "not_allowed", "a transform node has one output, so an edge from it names none")
-			case NodeKindEither:
-				v.add(p+"/on", "not_allowed", "an either node has one output, so an edge from it names none")
+			case NodeKindTransform, NodeKindMerge:
+				v.add(p+"/on", "not_allowed", "a %s node has one output, so an edge from it names none", n.Kind)
 			}
-		}
-		if e.Body != "" && nodes[to].Kind != NodeKindEither {
-			v.add(p+"/body", "not_allowed", "only an edge into an either node gives a body, and %s isn't one", e.To)
 		}
 		key := [3]int{from, to, e.Output()}
 		if j, dup := seen[key]; dup {

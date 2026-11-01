@@ -46,9 +46,9 @@ const kinds = {
     label: "transform step",
     fresh: (id: string): Node => ({ id, kind: "transform", expr: "" }),
   },
-  either: {
-    label: "Either step",
-    fresh: (id: string): Node => ({ id, kind: "either" }),
+  merge: {
+    label: "Merge step",
+    fresh: (id: string): Node => ({ id, kind: "merge", expr: "" }),
   },
 };
 

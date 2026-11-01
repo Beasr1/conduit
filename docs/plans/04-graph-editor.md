@@ -7,9 +7,10 @@ came before C: its samples, previews, outputs by status and a step's blocks
 are committed (f9e7484, e98e50a, 2026-10-30), and so is Phase C, runs
 (ad89609, 2026-10-30), and D's API's answers, after C (8cbc5b1,
 2026-11-01), and a step's Unhandled block (80d55d4), its body (4fb0aec)
-and strict joins (e898238). Either, a step type that follows whichever of
-its lines comes, is built (2026-11-01); Phase E, the browser test, comes
-after.
+and strict joins (e898238). Merge, a step that runs if any of its lines
+came, once all have ended, is built (2026-11-01): first as Either
+(4877f7a), then reworked.
+Phase E, the browser test, comes after.
 Building Phase A raised question 8, since answered.
 
 ## Goal
@@ -908,7 +909,8 @@ Strict joins, decided with you on 2026-11-01:
 - [x] The editor names that problem, "success_200 can never run: it needs
       prefs to answer 400 and 2xx"; the roadmap's rule and plan 02 change.
 
-**Phase D: Either** (2026-11-01, your call, built before Phase E)
+**Phase D: Either** (2026-11-01, your call, built before Phase E;
+committed as 4877f7a, then reworked into the Merge below the same day)
 
 Strict joins left your success_200 no way to follow prefs' 2xx and, through
 test_400, its 400 ("we might need to fix it"). Decided with you on
@@ -977,6 +979,14 @@ Decided with you while building (2026-11-01), from your Fixes check:
 - **An Either waits for every line into it to end** (your point), taken,
   skipped or failed into Unhandled, before it runs, so it never runs on
   the first that comes. That was built so from the start.
+- **Both kinds stay** (asked again): an Either can't do an ordinary
+  step's job. Both wait for every line, and any step reads every earlier
+  one by name; what differs is a line that doesn't come. An ordinary step
+  then doesn't run, so crm never calls with prefs missing; an Either runs
+  with what came. Only Either-style joins, the rule before strict joins,
+  and one kind of step with an "after all" or "after any" setting, as
+  Airflow's trigger_rule, were the other options. The Merge below keeps
+  the two.
 - **Dashed means may, or didn't**: while building, a way into an Either is
   dashed, as it may not be taken, and every other line is solid. While a
   run is shown, a line is solid when the run took it and dashed when not,
@@ -998,6 +1008,36 @@ Decided with you while building (2026-11-01), from your Fixes check:
 - [x] Failing tests first; mutation checks; Chromium through nginx.
 - [x] Docs: the roadmap's D13 and rule, plan 02, CLAUDE.md, web.md,
       sources.md.
+
+**Phase D: Merge, the Either reworked** (2026-11-01, your call, after the
+Either was committed in 4877f7a)
+
+You asked whether a join that accepts whatever comes, its JSONata handling
+it, would be simpler than the Either. Decided with you on 2026-11-01:
+- **One merge step, Merge, that accepts whatever comes.** It waits for every
+  line into it to end, as every step does, and runs if any came; it's
+  skipped if none did. One JSONata expression, as a transform's, reads
+  every step before it by name and makes its value from what came; a step
+  that didn't run is missing. Two coming is fine: the expression decides.
+  It's a transform that runs when any of its lines came rather than all.
+  BPMN's inclusive join and Airflow's `none_failed_min_one_success` work
+  this way (sources.md). The exclusive Either as committed, one way at a
+  time with a value per way, and a value per way given together as one
+  object, were the other options.
+- **Ordinary steps keep needing all their lines**: that's no merger step,
+  just how a step works, and what stops crm running with prefs missing.
+- **Named Merge**: Either promised one or the other, which it no longer is,
+  and Make and n8n both call bringing branches back together Merge.
+- **What goes**: a way's own value (`body` on an edge), the check of two
+  ways one run could both bring, the run failing when two come, and a way
+  reading its own slice of the run. **What stays**: waiting for every line,
+  dashed ways, + Way, the route check for answers. A run records every way
+  that came, so `way` becomes `ways`, a list (a migration).
+- [x] Schema, validation, the engine, previews, runs and the editor: Either
+      becomes Merge.
+- [x] Failing tests first; mutation checks; Chromium through nginx.
+- [x] Docs: the roadmap's D13 and rule, plan 02, CLAUDE.md, web.md,
+      sources.md, and this plan as built.
 
 **Phase E: the browser test**
 - [ ] Playwright, against the test upstream (built in C), and the Done flow.
@@ -1879,9 +1919,60 @@ were committed (80d55d4, 4fb0aec). Decided while building:
   saying it can never run, and why. No CSP violations and no console
   problems.
 
+## Merge, as built
+
+Reworked from the Either on 2026-11-01, after it was committed (4877f7a).
+Decided while building:
+- **A merge is a transform that joins differently.** It compiles its expr
+  and runs it as a transform's, over every finished step before it; only
+  its join differs: once every edge into it has ended, it runs if any was
+  taken. The engine passes it the edges taken, and a run records them as
+  `ways`, in the definition's order, on its node's run and on the event
+  that ends it (`node_runs.way` renamed `ways`, a list, in migration
+  20261101130000, which turns what the Either recorded into lists).
+- **Gone with the Either**: `body` on an edge and its checks; the problem
+  for two ways one run could both bring, and the run failing when they do;
+  each way reading what its line's condition read; a line into it
+  previewing a value. A merge joined to several answers picks one as a
+  transform does without a switch: its expr gives `{status, body}`.
+- **Kept from the Either**: its route, merging its ways' with notRun; a
+  merge no line comes into is a problem; its card, a block per way with its
+  point and + Add, its ways dashed until a run says; adding a way from the
+  panel, now Add a way from, under the list of its ways, each of which
+  opens its line.
+- **Its panel**: how it went in the run shown, with the ways it came by;
+  its ways and Add a way from; its expression, with what it reads and gives
+  over the samples, as a transform's; then what follows it, and its
+  Unhandled. No tabs: one value, one expression.
+- **The words**: "Merge step"; its card's second line says "Merge", or how
+  it went in a run; a never-runs problem ends "to run it after whichever
+  comes, join them to a Merge step first".
+- **Divergence**: revisions saved with an either node, your Fixes check's
+  30 and 31 and the pw-either test workflows, now name a kind the server
+  doesn't know. Your Fixes check gets a revision with a merge instead.
+- **The words, after the browser**: the connection panel said a merge
+  "runs once any of its ways is taken", which reads as the first; it, the
+  problem for a merge with no line in, the schema and the comments now say
+  it runs if any is, once all have ended.
+- **Checked**: `just check` with everything staged: Go tests under
+  `-race` with the coverage floors (runner 92.2%, engine 96.3%, workflow
+  97.2%); web format, lint, typecheck, 396 tests and build. 23 Go mutations in
+  validation, routes, the engine, previews, the runner and the API, each
+  caught. Chromium through nginx (`just up`, migration applied: the two
+  ways the Either recorded became lists), light and dark: a workflow with
+  a Merge (its card, its ways dashed and the line on solid, its panel's
+  ways, its expression previewed over the samples, Add a way from by
+  pointer and keyboard drawing a new way, a way opening its line); a run
+  in which a step failed into Unhandled (that way marked and solid, the
+  other dashed, "It came by count · Unhandled." and what it gave); your
+  Fixes check at revision 32, no problems; a workflow saved with an
+  Either, naming its kind as unknown and saying its step can never run.
+  No CSP violations and no console problems.
+
 ## Either, as built
 
-Built on 2026-11-01, after strict joins were committed (e898238). Decided
+Built on 2026-11-01, after strict joins were committed (e898238), and
+reworked into the Merge above the same day; kept as it was built. Decided
 while building:
 - **An Either is the engine's third kind.** It joins once every edge into
   it has ended, as any node does, and runs if one was taken. The scheduler

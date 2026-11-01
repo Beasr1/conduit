@@ -8,12 +8,12 @@ import (
 )
 
 // route is what a node runs only after: for each node it needs, the outputs
-// that node may answer through, sorted, notRun among them where an either
+// that node may answer through, sorted, notRun among them where a merge
 // lets the node not run. A nil route is a node that never runs.
 type route map[int][]int
 
-// notRun is a node not running, counted beside its outputs: an either's
-// route allows it of a node that one of its ways rules out.
+// notRun is a node not running, counted beside its outputs: a merge's route
+// allows it of a node that one of its ways rules out.
 const notRun = -2
 
 // conflict is why a node never runs: it needs node of to answer through
@@ -24,19 +24,18 @@ type conflict struct {
 }
 
 // checkJoins works out what each node runs only after, and reports each
-// node that can never run, where that starts: a node runs once every line
-// into it was taken (plan 04, strict joins), and an either once one was. It
-// checks each either's ways too. edges have no cycle.
+// node that can never run, where that starts: a node runs only if every
+// line into it was taken (plan 04, strict joins), and a merge if any was,
+// so a merge no line comes into never runs. edges have no cycle.
 func (v *validator) checkJoins(d *Definition, edges []edgeRef) []route {
 	in, order := graphOf(len(d.Nodes), edges)
 	need, conflicts := needs(d.Nodes, in, order)
 	for _, c := range conflicts {
 		v.add(fmt.Sprintf("/nodes/%d", c.node), "never_runs", "%s can never run: %s", d.Nodes[c.node].ID, c.words(d))
 	}
-	cond := conditioned(d, in, order)
 	for i, n := range d.Nodes {
-		if n.Kind == NodeKindEither {
-			v.checkWays(d, i, in[i], need, cond)
+		if n.Kind == NodeKindMerge && len(in[i]) == 0 {
+			v.add(fmt.Sprintf("/nodes/%d", i), "required", "a merge node needs an edge into it, as it runs if any of them was taken")
 		}
 	}
 	return need
@@ -72,14 +71,14 @@ func graphOf(n int, edges []edgeRef) (in [][]edgeRef, order []int) {
 // taken, so it needs each line's node to answer through the output the line
 // leaves from, and what that node needs. Two needs of one node sharing no
 // output leave it none: the node never runs, and conflicts says why, for
-// each node where that starts. The nodes after it never run either. An
-// either needs what one of its ways does.
+// each node where that starts. The nodes after it never run either. A
+// merge needs what one of its ways does.
 func needs(nodes []Node, in [][]edgeRef, order []int) ([]route, []conflict) {
 	need := make([]route, len(nodes))
 	var conflicts []conflict
 	for _, u := range order {
-		if nodes[u].Kind == NodeKindEither {
-			need[u] = eitherOf(in[u], need)
+		if nodes[u].Kind == NodeKindMerge {
+			need[u] = mergeOf(in[u], need)
 			continue
 		}
 		r, c := joinOf(u, in[u], need)
@@ -112,14 +111,14 @@ func joinOf(u int, in []edgeRef, need []route) (route, *conflict) {
 	return r, nil
 }
 
-// eitherOf is an either's route, from the edges into it: each way's, what
-// its node needs and that node answering through the edge, merged. It
-// allows a node what any way does, and notRun where a way rules the node
-// out; a way that does neither lets the node be anything, so the either
-// needs nothing of it. Ways that differ in two nodes are read as
-// independent, which allows more than one run can do. It's nil, never
-// running, when no way can be taken.
-func eitherOf(in []edgeRef, need []route) route {
+// mergeOf is a merge's route, from the edges into it: each way's, what its
+// node needs and that node answering through the edge, merged, as it runs
+// when any of them came. It allows a node what any way does, and notRun
+// where a way rules the node out; a way that does neither lets the node be
+// anything, so the merge needs nothing of it. Ways that differ in two nodes
+// are read as independent, which allows more than one run can do. It's nil,
+// never running, when no way can be taken.
+func mergeOf(in []edgeRef, need []route) route {
 	var ways []route
 	for _, e := range in {
 		if need[e.from] != nil {
@@ -142,7 +141,7 @@ func eitherOf(in []edgeRef, need []route) route {
 	return r
 }
 
-// allowed is what an either's ways allow node x: the outputs each needs of
+// allowed is what a merge's ways allow node x: the outputs each needs of
 // it, or notRun when the way rules x out. ok is false when a way allows x
 // anything. A node a way needs runs, so x has a route of its own.
 func allowed(x int, ways, need []route) (set []int, ok bool) {
@@ -159,45 +158,6 @@ func allowed(x int, ways, need []route) (set []int, ok bool) {
 	}
 	slices.Sort(set)
 	return slices.Compact(set), true
-}
-
-// conditioned says, of each node, whether a condition lies before it: on an
-// edge into it, or before a node with one into it.
-func conditioned(d *Definition, in [][]edgeRef, order []int) []bool {
-	cond := make([]bool, len(in))
-	for _, u := range order {
-		cond[u] = slices.ContainsFunc(in[u], func(e edgeRef) bool { return d.Edges[e.index].When != "" || cond[e.from] })
-	}
-	return cond
-}
-
-// checkWays checks the edges into either node i, its ways: it needs one, as
-// it runs after whichever is taken, and no two one run could both take,
-// judged from the graph alone. A condition on a way, or before one, may keep
-// two apart, which the check can't read, so it leaves those to the run.
-func (v *validator) checkWays(d *Definition, i int, ways []edgeRef, need []route, cond []bool) {
-	if len(ways) == 0 {
-		v.add(fmt.Sprintf("/nodes/%d", i), "required", "an either node needs an edge into it, as it runs after whichever is taken")
-		return
-	}
-	type way struct {
-		edgeRef
-		r route
-	}
-	var judged []way
-	for _, e := range ways {
-		if need[e.from] != nil && d.Edges[e.index].When == "" && !cond[e.from] {
-			judged = append(judged, way{e, with(need[e.from], group{from: e.from, on: e.on})})
-		}
-	}
-	for j, a := range judged {
-		for _, b := range judged[j+1:] {
-			if !apart(a.r, b.r) {
-				v.add(fmt.Sprintf("/edges/%d", b.index), "overlap", "two ways can come into %s in one run, from %s (%s) and %s (%s), and an either takes one",
-					d.Nodes[i].ID, d.Nodes[a.from].ID, outputName(a.on), d.Nodes[b.from].ID, outputName(b.on))
-			}
-		}
-	}
 }
 
 // narrow narrows what r needs of node x to the outputs it shares with set,
@@ -247,7 +207,7 @@ func intersect(a, b []int) []int {
 }
 
 // words is what a conflict needs, as a problem says it: "it needs a to
-// answer 404 and 2xx", or, where an either lets the node not run, "it needs
+// answer 404 and 2xx", or, where a merge lets the node not run, "it needs
 // t to answer 500, and to answer 2xx or be skipped". Only one of its sets
 // can hold notRun, as two that did would share it.
 func (c conflict) words(d *Definition) string {

@@ -251,7 +251,7 @@ test("a line from a step's Unhandled leaves from its strip", () => {
   expect(flow.undrawn).toEqual([2]);
 });
 
-test("an Either step's ways each come into a point of their own, and it grows to fit them", () => {
+test("a Merge step's ways each come into a point of their own, and it grows to fit them", () => {
   const flow = toFlow({
     nodes: [
       {
@@ -261,13 +261,13 @@ test("an Either step's ways each come into a point of their own, and it grows to
         outputs: [{ status: 400 }],
       },
       { id: "fallback", kind: "transform", expr: "1" },
-      { id: "prefs_ok", kind: "either" },
+      { id: "prefs_ok", kind: "merge", expr: "1" },
       { id: "greet", kind: "transform", expr: "2" },
     ],
     edges: [
       { from: "prefs", to: "prefs_ok" },
       { from: "prefs", to: "fallback", on: 400 },
-      { from: "fallback", to: "prefs_ok", body: "1" },
+      { from: "fallback", to: "prefs_ok" },
       { from: "fallback", to: "prefs_ok", unhandled: true },
       { from: "prefs_ok", to: "greet" },
     ],
@@ -284,13 +284,13 @@ test("an Either step's ways each come into a point of their own, and it grows to
   // Three ways and + Add, 24 px apiece, above its Unhandled strip; with
   // none, it's as tall as a transform.
   expect(flow.nodes.find((n) => n.id === "prefs_ok")).toMatchObject({
-    type: "either",
+    type: "merge",
     height: 120,
     measured: { height: 120 },
   });
   expect(
-    toFlow({ nodes: [{ id: "e", kind: "either" }] }).nodes[0],
-  ).toMatchObject({ type: "either", height: NODE_HEIGHT + 24 });
+    toFlow({ nodes: [{ id: "e", kind: "merge", expr: "1" }] }).nodes[0],
+  ).toMatchObject({ type: "merge", height: NODE_HEIGHT + 24 });
   expect(
     waysInto(
       {

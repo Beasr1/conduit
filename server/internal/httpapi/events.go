@@ -147,8 +147,8 @@ func nodeEventOut(e runner.NodeEvent) gen.NodeEvent {
 	if f := e.Failure; f != nil {
 		out.Error = gen.RunError{Code: gen.RunErrorCode(f.Code), Detail: f.Detail, Caught: f.Caught}
 	}
-	if w := e.Way; w != nil {
-		out.Way = gen.Way{From: w.From, On: w.On, Unhandled: w.Unhandled}
+	for _, w := range e.Ways {
+		out.Ways = append(out.Ways, gen.Way{From: w.From, On: w.On, Unhandled: w.Unhandled})
 	}
 	return out
 }

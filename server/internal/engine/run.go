@@ -47,7 +47,7 @@ type Status string
 const (
 	StatusSucceeded Status = "succeeded"
 	StatusFailed    Status = "failed"
-	StatusSkipped   Status = "skipped"   // nodes only: an edge into it went untaken, or, into an either, every one did
+	StatusSkipped   Status = "skipped"   // nodes only: an edge into it went untaken, or, into a merge, every one did
 	StatusCancelled Status = "cancelled" // stopped by a failure elsewhere, or by the caller
 )
 
@@ -71,7 +71,7 @@ type NodeResult struct {
 	// What an http node got back, even when it failed on the status.
 	HTTPStatus int
 	Header     http.Header
-	// The response body, or a transform node's value.
+	// The response body, or a transform or merge node's value.
 	Body json.RawMessage
 	Err  error
 	// Caught says a failed node's Unhandled block took Err, so the run went
@@ -82,13 +82,14 @@ type NodeResult struct {
 	// Request is what an http node sent, as built, once its URL, headers and
 	// body rendered. Nothing is redacted here; whoever stores it does that.
 	Request *SentRequest
-	// Way is the edge an either node ran with, the one into it that was taken.
-	Way *Way
+	// Ways is a merge node's: the edges into it that were taken, in the
+	// definition's order.
+	Ways []Way
 }
 
-// Way is an edge into an either: the node it comes from, and the output of
-// that node it leaves, a status, 0 for 2xx and the one output of a
-// transform or an either, or workflow.OnUnhandled.
+// Way is an edge into a merge that was taken: the node it comes from, and
+// the output of that node it leaves, a status, 0 for 2xx and the one output
+// of a transform or a merge, or workflow.OnUnhandled.
 type Way struct {
 	From string
 	On   int
@@ -199,8 +200,7 @@ type run struct {
 type nodeState struct {
 	ready, started bool
 	ended          bool
-	parentsDone    int       // edges in whose source has ended
-	reads          []docPart // what its expressions read, once it started
+	parentsDone    int // edges in whose source has ended
 	entry          json.RawMessage
 	result         NodeResult
 }
@@ -282,16 +282,14 @@ func (r *run) startReady() {
 		n.started = true
 		r.inFlight++
 		r.emit(i, EventStarted, 1, nil)
-		came := r.came(i)
-		n.reads = r.reads(i, came)
-		go r.exec(i, n.reads, came)
+		go r.exec(i, r.parts(i), r.came(i))
 	}
 }
 
-// came is the edges taken into node i, an either, in the definition's
-// order; nil for any other node.
+// came is the edges taken into node i, a merge, in the definition's order;
+// nil for any other node.
 func (r *run) came(i int) []int {
-	if r.p.nodes[i].kind != workflow.NodeKindEither {
+	if r.p.nodes[i].kind != workflow.NodeKindMerge {
 		return nil
 	}
 	var out []int
@@ -303,19 +301,7 @@ func (r *run) came(i int) []int {
 	return out
 }
 
-// reads is what node i's expressions see: its finished ancestors, or, for
-// an either one way came into, what that edge's condition read, what the
-// node it came from read and that node.
-func (r *run) reads(i int, came []int) []docPart {
-	if len(came) != 1 {
-		return r.parts(i)
-	}
-	from := r.p.edges[came[0]].from
-	s := &r.nodes[from]
-	return append(s.reads[:len(s.reads):len(s.reads)], docPart{id: r.p.nodes[from].id, entry: s.entry})
-}
-
-// parts is node i's finished ancestors.
+// parts is what node i's expressions may see: the finished ancestors.
 func (r *run) parts(i int) []docPart {
 	var out []docPart
 	for _, a := range r.p.nodes[i].ancestors {
@@ -376,11 +362,11 @@ func (r *run) lineEnded(k int, taken bool) {
 }
 
 // joined says whether node i runs, now that every edge into it has ended:
-// an either when one was taken, any other node when every one was (plan 04,
+// a merge when any was taken, any other node when every one was (plan 04,
 // strict joins).
 func (r *run) joined(i int) bool {
 	in := r.p.nodes[i].in
-	if r.p.nodes[i].kind == workflow.NodeKindEither {
+	if r.p.nodes[i].kind == workflow.NodeKindMerge {
 		return slices.ContainsFunc(in, func(k int) bool { return r.taken[k] })
 	}
 	return !slices.ContainsFunc(in, func(k int) bool { return !r.taken[k] })
