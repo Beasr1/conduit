@@ -131,7 +131,8 @@ types into `server/internal/workflow/definition.gen.go`.
    - *succeeded*: a 2xx response, a status the node lists as an output
      (plan 04, 2026-10-30), or a transform that evaluated.
    - *failed*: anything else, after retries.
-   - *skipped*: every parent ended and no edge in was taken. Skips cascade.
+   - *skipped*: every parent ended, and one of them took no edge in (plan
+     04, strict joins, 2026-11-01). Skips cascade.
    - *cancelled*: stopped by another node's failure or by the caller, or
      never started.
 4. **Fail-fast.**

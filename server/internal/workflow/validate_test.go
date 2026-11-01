@@ -121,9 +121,9 @@ func TestValidate_AcceptsResponses(t *testing.T) {
 }
 
 // Whether two answers' lines can be taken in one run is read from the
-// graph: a node runs once any line into it is taken, so only one node's
-// different outputs keep two lines apart. crm runs after orders or prefs;
-// prefs' 400 leads to test_400.
+// graph: a node runs once each node with a line into it took one of them,
+// so only one node's outputs that share none keep two lines apart. crm runs
+// after orders and prefs; prefs' 400 leads to test_400.
 func TestValidate_TwoAnswersInOneRun(t *testing.T) {
 	t.Parallel()
 	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
@@ -138,17 +138,17 @@ func TestValidate_TwoAnswersInOneRun(t *testing.T) {
 	}{
 		// crm's 2xx and 400 keep transform and bad_400 apart.
 		{"kept apart by crm", edges, ""},
-		// prefs answering 400 runs test_400, then transform, and crm still
-		// runs after orders: crm's 400 runs bad_400 too.
+		// transform needs crm, which needs prefs' 2xx, and test_400, which
+		// needs its 400: it never runs, and its answer is no overlap.
 		{
-			"both reached when prefs answers 400", edges + `, {"from": "prefs", "to": "test_400", "on": 400}, {"from": "test_400", "to": "transform"}`,
-			"/response/answers/1/from overlap: 200 (transform) and 400 (bad_400) can both be reached in one run: merge them into one node",
+			"never reached when transform needs both of prefs' outputs", edges + `, {"from": "prefs", "to": "test_400", "on": 400}, {"from": "test_400", "to": "transform"}`,
+			"/nodes/5 never_runs: transform can never run: it needs prefs to answer 2xx and 400",
 		},
 		// crm's Unhandled is one more output, kept apart from its 2xx and 400.
 		{"kept apart by crm's Unhandled", edges + `, {"from": "crm", "to": "test_400", "unhandled": true}`, ""},
 		{
-			"both reached when transform reads crm's Unhandled too", edges + `, {"from": "crm", "to": "test_400", "unhandled": true}, {"from": "test_400", "to": "transform"}`,
-			"/response/answers/1/from overlap: 200 (transform) and 400 (bad_400) can both be reached in one run: merge them into one node",
+			"never reached when transform needs crm's 2xx and its Unhandled", edges + `, {"from": "crm", "to": "test_400", "unhandled": true}, {"from": "test_400", "to": "transform"}`,
+			"/nodes/5 never_runs: transform can never run: it needs crm to answer 2xx and Unhandled",
 		},
 		// transform runs on either of crm's outputs, so its 2xx keeps nothing
 		// apart.
@@ -580,5 +580,35 @@ func TestProblems_Error(t *testing.T) {
 	ps := Problems{{Pointer: "/nodes/0/id", Code: "required", Detail: "a node needs an id"}, {Pointer: "/edges/0", Code: "cycle", Detail: "a loop"}}
 	if got := ps.Error(); got != "invalid workflow: /nodes/0/id: a node needs an id; /edges/0: a loop" {
 		t.Errorf("Error() = %q", got)
+	}
+}
+
+// A step whose lines need outputs of one step that share none can never
+// run, and says so, whichever line it finds that on; the steps after it
+// can't either, aren't named again, and their answers are no overlap. One
+// step's lines into another are alternatives.
+func TestValidate_NeverRuns(t *testing.T) {
+	t.Parallel()
+	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
+	step := func(id string) string { return `{"id": "` + id + `", "kind": "transform", "expr": "1"}` }
+	ps := Validate(decode(t, `{"nodes": [{"id": "a", "kind": "http", `+get+`, "outputs": [{"status": 404}, {"status": 409}]},
+		`+step("b")+`, `+step("c")+`, `+step("d")+`, `+step("either")+`, `+step("later")+`, `+step("conflicted")+`, `+step("f")+`],
+	  "edges": [
+	    {"from": "a", "to": "b"}, {"from": "a", "to": "c", "on": 404}, {"from": "b", "to": "c"}, {"from": "c", "to": "d"},
+	    {"from": "a", "to": "either"}, {"from": "a", "to": "either", "on": 404}, {"from": "a", "to": "either", "unhandled": true},
+	    {"from": "b", "to": "later"}, {"from": "a", "to": "later", "on": 409},
+	    {"from": "a", "to": "f", "on": 409}, {"from": "a", "to": "conflicted", "on": 404}, {"from": "a", "to": "conflicted"}, {"from": "f", "to": "conflicted"}],
+	  "response": {"answers": [{"status": 201, "from": "b"}, {"status": 200, "from": "d"}]}}`))
+	var got []string
+	for _, p := range ps {
+		got = append(got, p.Pointer+" "+p.Code+": "+p.Detail)
+	}
+	want := []string{
+		"/nodes/2 never_runs: c can never run: it needs a to answer 404 and 2xx",
+		"/nodes/5 never_runs: later can never run: it needs a to answer 2xx and 409",
+		"/nodes/6 never_runs: conflicted can never run: it needs a to answer 2xx or 404 and 409",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

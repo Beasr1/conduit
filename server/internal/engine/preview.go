@@ -345,23 +345,23 @@ func (s *sim) runs(target int) bool {
 	return true
 }
 
-// reached says whether a run would start node i: it has no connections
-// into it, or one is taken. One from a step the preview couldn't run, for
-// want of a sample or a working expression, might be, so it counts.
+// reached says whether a run would start node i, as each step with a
+// connection into it takes one of them. One the preview couldn't run, for
+// want of a sample or a working expression, might, so it counts; one it
+// skipped takes none.
 func (s *sim) reached(i int) bool {
 	in := s.p.nodes[i].in
-	if len(in) == 0 {
-		return true
-	}
 	for _, k := range in {
 		from := s.p.edges[k].from
 		switch {
 		case s.skipped[from]:
-		case s.entry[from] == nil, s.taken[k]:
-			return true
+			return false
+		case s.entry[from] == nil:
+		case !slices.ContainsFunc(in, func(j int) bool { return s.p.edges[j].from == from && s.taken[j] }):
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // parts is what node i's expressions see: its ancestors that ran, as a

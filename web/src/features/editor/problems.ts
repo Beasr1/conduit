@@ -419,6 +419,9 @@ export function say(problem: ProblemError, of: Definition): string {
     }
     case "overlap":
       return sentence(problem.detail.replace(/one node$/, "one step"));
+    case "never_runs":
+      // It starts with the step's id, which stays as it's written.
+      return `${problem.detail}. A step runs only when each step with a line into it answers through one of them.`;
     case "unknown_output": {
       if (place.on === "response") {
         const a = answerOf(place, of);

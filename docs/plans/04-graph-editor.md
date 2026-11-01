@@ -6,9 +6,9 @@ is committed (69bb36e), and so is Phase B, its last step in eabb7b6. Phase D
 came before C: its samples, previews, outputs by status and a step's blocks
 are committed (f9e7484, e98e50a, 2026-10-30), and so is Phase C, runs
 (ad89609, 2026-10-30), and D's API's answers, after C (8cbc5b1,
-2026-11-01). A step's Unhandled block is built (2026-11-01); strict joins
-are next, then Phase E, the browser test. Building Phase A raised
-question 8, since answered.
+2026-11-01), and a step's Unhandled block (80d55d4), its body (4fb0aec)
+and strict joins (2026-11-01). Phase E, the browser test, is next.
+Building Phase A raised question 8, since answered.
 
 ## Goal
 
@@ -822,7 +822,7 @@ callers, built from the card (07); a Merge action, making one step of two
 that answer one status.
 
 **Phase D: Unhandled, then strict joins** (2026-11-01, your calls, in that
-order; Unhandled built the same day)
+order; both built the same day)
 
 Your "Fixes check" showed both. A failing step stops the run, with nowhere
 to map what it got back: "a 'failed' output" was left open (Phase D,
@@ -894,13 +894,13 @@ Strict joins, decided with you on 2026-11-01:
 - **What it costs**: a step can't follow both arms of a branch. Your
   success_200, after test_400 (prefs 400) and crm (prefs 2xx), can never
   run, and the editor will say so.
-- [ ] The engine: a step runs once each step with a line into it took
+- [x] The engine: a step runs once each step with a line into it took
       one of them.
-- [ ] Validation: a step's route is, for each step before it, the blocks
+- [x] Validation: a step's route is, for each step before it, the blocks
       it may answer through. A route that leaves a step no block can
       never run, a problem; two answers can both be reached only when
       their routes agree, which ends the false alarms (as built, below).
-- [ ] The editor names that problem, "success_200 can never run: it needs
+- [x] The editor names that problem, "success_200 can never run: it needs
       prefs to answer 400 and 2xx"; the roadmap's rule and plan 02 change.
 
 **Phase E: the browser test**
@@ -1742,6 +1742,46 @@ committed (8cbc5b1). Decided while building:
   `503 {"down":true,"why":"upstream_failed"}`; your Fixes check's crm
   opened, its tabs in two rows, nothing saved. No CSP violations and no
   console problems.
+
+## Strict joins, as built
+
+"Strict joins", built on 2026-11-01, after a step's Unhandled and its body
+were committed (80d55d4, 4fb0aec). Decided while building:
+- **The engine still waits for every line into a step to end**, then runs
+  the step when each step with a line into it took one of them. A step
+  could be skipped as soon as one of them took none, but nothing would end
+  sooner: the run waits for every step anyway.
+- **A route is, for each step a step needs, the outputs that step may
+  answer through.** One step's lines into another make one set, and two
+  needs of one step narrow to the outputs they share. With none left, the
+  step can never run, and says so at the step: "transform can never run:
+  it needs prefs to answer 2xx and 400". The steps after it can't run
+  either; they aren't named again, and an answer after them is no
+  overlap.
+- **Two answers overlap only when their routes agree**, so the check is
+  exact, conditions aside. A step has one route now, so the false alarm
+  its two routes raised before can't happen.
+- **Previews follow the rule**: a step with a connection from a step that
+  ran but took none of them is skipped. One from a step the preview
+  couldn't run, for want of a sample, still counts.
+- **The editor keeps the step's id as written** and says the rule after
+  the server's words: "… A step runs only when each step with a line into
+  it answers through one of them."
+- **What it costs, as decided**: your Fixes check's success_200 says it can
+  never run. A revision saved with an output moves it into a `respond`
+  joined to each step the output reads, so on a branch that skips one of
+  them, `respond` is skipped too, and the run gives no answer.
+- **Seen, not fixed**: `TestGuardrails` in the transform package fails
+  without `-race`. Endless recursion ends with the evaluator's depth
+  error, U1001, before the timeout the test expects, D1012; under `-race`,
+  as `just check` and CI run it, the timeout comes first. The guardrail
+  stops the expression either way.
+- **Checked**: `just check` (379 web tests), with the workflow package's
+  floor raised to 97. 15 Go mutations, each caught, three only after a
+  test was tightened. Chromium through nginx, light and dark: your Fixes
+  check opened, nothing saved, success_200 marked, and the problem list
+  saying it can never run, and why. No CSP violations and no console
+  problems.
 
 ## Out of scope
 

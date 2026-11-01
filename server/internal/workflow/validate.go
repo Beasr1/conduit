@@ -78,7 +78,11 @@ func Validate(d *Definition) Problems {
 	}
 
 	edges, cyclic := v.checkEdges(d.Edges, d.Nodes, index)
-	v.checkResponse(d, index, edges, cyclic)
+	var need []route // nil on a cycle, whose edges are its problem
+	if !cyclic {
+		need = v.checkJoins(d, edges)
+	}
+	v.checkResponse(d, index, need)
 	if len(d.SampleInput) > maxSample {
 		v.add("/sample_input", "too_large", "a sample input is at most %d KiB; this one is %d KiB", maxSample>>10, kib(len(d.SampleInput)))
 	}

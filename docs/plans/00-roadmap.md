@@ -180,9 +180,12 @@ Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
    truthy. `when` defaults to true. An http node's outputs are 2xx and each
    status it lists, which it then takes as an answer rather than a failure
    (plan 04, 2026-10-30).
-   - A node runs once all its parents have ended and at least one incoming
-     edge is active.
-   - If none are active, the node is skipped, and skips cascade.
+   - A node runs once all its parents have ended and, of each parent's
+     edges into it, one is active: one node's edges into another are
+     alternatives, and every parent's is needed (plan 04, strict joins,
+     2026-11-01). Following either of two parents waits for a step type of
+     its own.
+   - Otherwise the node is skipped, and skips cascade.
 5. **Failure:** the first failure fails the run. In-flight nodes are
    cancelled and the rest are marked cancelled. A node's Unhandled block
    takes its failure instead, once a line leaves it: the node ends failed,

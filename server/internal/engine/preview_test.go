@@ -197,10 +197,17 @@ func TestSimulate_FollowsConditions(t *testing.T) {
 	if pv := previewOf(t, sampled, "orders", notSeven); !pv.Skipped || pv.Sends != nil {
 		t.Errorf("orders: skipped %v, sends %+v", pv.Skipped, pv.Sends)
 	}
-	// crm still runs, as prefs's connection is taken, and doesn't read orders.
+	// crm needs orders as well as prefs, so it's skipped too, though prefs's
+	// connection is taken.
 	pv := previewOf(t, sampled, "crm", notSeven)
-	if pv.Skipped || pv.Sends == nil || pv.Sends.Header.Get("X-Orders") != "0" {
+	if !pv.Skipped || pv.Sends != nil {
 		t.Errorf("crm: skipped %v, sends %+v, problems %s", pv.Skipped, pv.Sends, problemCodes(pv))
+	}
+	// And a step that runs but takes no connection into crm keeps it from
+	// running, though orders's is taken.
+	prefsOff := func(d *workflow.Definition) { d.Edges[3].When = "false" }
+	if pv := previewOf(t, sampled, "crm", prefsOff); !pv.Skipped {
+		t.Errorf("crm without prefs's connection: skipped %v, problems %s", pv.Skipped, problemCodes(pv))
 	}
 }
 

@@ -189,7 +189,7 @@ func (e RunSummaryTrigger) Valid() bool {
 
 // CreateWorkflow defines model for CreateWorkflow.
 type CreateWorkflow struct {
-	// Definition A workflow. A node runs once its parents have finished and at least one edge into it was taken.
+	// Definition A workflow. A node runs once its parents have finished, if each of them took an edge into it; one parent's edges into it are alternatives. Otherwise it's skipped.
 	Definition externalRef0.Definition `json:"definition"`
 	Name       string                  `json:"name"`
 	Slug       string                  `json:"slug"`
@@ -299,7 +299,7 @@ type Preview struct {
 
 // PreviewRequest defines model for PreviewRequest.
 type PreviewRequest struct {
-	// Definition A workflow. A node runs once its parents have finished and at least one edge into it was taken.
+	// Definition A workflow. A node runs once its parents have finished, if each of them took an edge into it; one parent's edges into it are alternatives. Otherwise it's skipped.
 	Definition externalRef0.Definition `json:"definition"`
 
 	// Edge The connection to preview, by its place in the definition's edges. Not with node.
@@ -364,7 +364,7 @@ type RenderedRequest struct {
 type Revision struct {
 	CreatedAt time.Time `json:"created_at"`
 
-	// Definition A workflow. A node runs once its parents have finished and at least one edge into it was taken.
+	// Definition A workflow. A node runs once its parents have finished, if each of them took an edge into it; one parent's edges into it are alternatives. Otherwise it's skipped.
 	Definition externalRef0.Definition `json:"definition"`
 
 	// Problems Everything wrong with the definition. Empty when it can be published.

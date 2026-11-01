@@ -83,7 +83,7 @@ type Case struct {
 	When string `json:"when,omitempty"`
 }
 
-// Definition A workflow. A node runs once its parents have finished and at least one edge into it was taken.
+// Definition A workflow. A node runs once its parents have finished, if each of them took an edge into it; one parent's edges into it are alternatives. Otherwise it's skipped.
 type Definition struct {
 	Edges []Edge `json:"edges,omitempty"`
 

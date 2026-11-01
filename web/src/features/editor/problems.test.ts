@@ -548,6 +548,19 @@ test("the server's detail stands where it says what went wrong", () => {
   expect(
     say({ pointer: "", code: "a_new_code", detail: "something new" }, broken),
   ).toBe("Something new.");
+  // A step that can never run keeps its id as it is, and says why.
+  expect(
+    say(
+      {
+        pointer: "/nodes/0",
+        code: "never_runs",
+        detail: "a can never run: it needs b to answer 2xx and 404",
+      },
+      broken,
+    ),
+  ).toBe(
+    "a can never run: it needs b to answer 2xx and 404. A step runs only when each step with a line into it answers through one of them.",
+  );
 });
 
 // The schema compiler's report starts with the schema's made-up base URL; the

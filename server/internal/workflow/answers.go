@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"fmt"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,11 +18,12 @@ type group struct {
 // checkResponse checks what the workflow answers. Each answer has a status,
 // listed once, and one line, from a node and an output it has, its
 // Unhandled block among them. A node joined to several answers from one
-// output picks among them, so it's a transform; a switch gives the statuses of the answers it's joined to. Two
-// lines one run could both take are a problem, judged from the graph alone.
+// output picks among them, so it's a transform; a switch gives the
+// statuses of the answers it's joined to. Two lines one run could both
+// take are a problem, judged from the graph alone.
 // A definition answers through its response, or, kept for the revisions
 // saved with one, its output; not both.
-func (v *validator) checkResponse(d *Definition, index map[string]int, edges []edgeRef, cyclic bool) {
+func (v *validator) checkResponse(d *Definition, index map[string]int, need []route) {
 	r := d.Response
 	if r == nil {
 		return
@@ -88,8 +88,8 @@ func (v *validator) checkResponse(d *Definition, index map[string]int, edges []e
 	for _, g := range groups {
 		v.checkGroup(d, g)
 	}
-	if !cyclic {
-		v.checkReach(d, groups, edges)
+	if need != nil {
+		v.checkReach(d, groups, need)
 	}
 }
 
@@ -142,15 +142,18 @@ func (v *validator) checkGroup(d *Definition, g group) {
 
 // checkReach reports two outputs joined to answers that one run could both
 // take. A run takes a line only when its node runs and answers through its
-// output, and a node runs only when a line into it is taken, so two lines
-// rest apart only on different outputs of one node they both need.
-// Conditions aren't read: lines only they keep apart are reported too.
-func (v *validator) checkReach(d *Definition, groups []group, edges []edgeRef) {
-	need := needs(len(d.Nodes), edges)
+// output, and a node runs only when each node with a line into it took one,
+// so two lines rest apart only when they need outputs of one node that share
+// none. Conditions aren't read: lines only they keep apart are reported too.
+// A line from a node that never runs is that node's problem.
+func (v *validator) checkReach(d *Definition, groups []group, need []route) {
 	answers := d.Response.Answers
 	for i, a := range groups {
+		if need[a.from] == nil {
+			continue
+		}
 		for _, b := range groups[i+1:] {
-			if apart(with(need[a.from], a), with(need[b.from], b)) {
+			if need[b.from] == nil || apart(with(need[a.from], a), with(need[b.from], b)) {
 				continue
 			}
 			ka, kb := a.answers[0], b.answers[0]
@@ -161,77 +164,14 @@ func (v *validator) checkReach(d *Definition, groups []group, edges []edgeRef) {
 	}
 }
 
-// needs is, for each node, the outputs it runs only after, by node: a
-// status, 0 for 2xx and a transform's one output, or OnUnhandled. A node runs once a
-// line into it is taken, so it needs what every line into it needs: the
-// line's node, answering through the line's output, and what that node
-// needs. A node with no line into it needs nothing. edges have no cycle.
-func needs(n int, edges []edgeRef) []map[int]int {
-	in := make([][]edgeRef, n)
-	out := make([][]edgeRef, n)
-	waiting := make([]int, n)
-	for _, e := range edges {
-		in[e.to] = append(in[e.to], e)
-		out[e.from] = append(out[e.from], e)
-		waiting[e.to]++
-	}
-	// Each node after every node with a line into it.
-	var order []int
-	for i := range n {
-		if waiting[i] == 0 {
-			order = append(order, i)
-		}
-	}
-	for k := 0; k < len(order); k++ {
-		for _, e := range out[order[k]] {
-			if waiting[e.to]--; waiting[e.to] == 0 {
-				order = append(order, e.to)
-			}
-		}
-	}
-	need := make([]map[int]int, n)
-	for _, u := range order {
-		for j, e := range in[u] {
-			route := with(need[e.from], group{from: e.from, on: e.on})
-			if j == 0 {
-				need[u] = route
-				continue
-			}
-			maps.DeleteFunc(need[u], func(x, on int) bool {
-				o, ok := route[x]
-				return !ok || o != on
-			})
-		}
-	}
-	return need
-}
-
-// with is what a line from output g needs: what its node needs, and the
-// node answering through that output.
-func with(need map[int]int, g group) map[int]int {
-	out := maps.Clone(need)
-	if out == nil {
-		out = map[int]int{}
-	}
-	out[g.from] = g.on
-	return out
-}
-
-// apart says whether two lines can't both be taken in one run: they need
-// different outputs of one node.
-func apart(a, b map[int]int) bool {
-	for x, on := range a {
-		if o, ok := b[x]; ok && o != on {
-			return true
-		}
-	}
-	return false
-}
-
-// outputName is an output as a problem names it: "2xx", or its status.
+// outputName is an output as a problem names it: "2xx", "Unhandled", or its
+// status.
 func outputName(on int) string {
-	if on == 0 {
+	switch on {
+	case 0:
 		return "2xx"
+	case OnUnhandled:
+		return "Unhandled"
 	}
 	return strconv.Itoa(on)
 }

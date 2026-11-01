@@ -163,6 +163,7 @@ func (e *Engine) Run(ctx context.Context, p *Program, runID string, input json.R
 		e: e, p: p, id: runID, input: input, onEvent: onEvent,
 		ctx: ctx, stop: stop,
 		nodes: make([]nodeState, len(p.nodes)),
+		taken: make([]bool, len(p.edges)),
 		msgs:  make(chan message, len(p.nodes)),
 	}
 	return r.schedule(), nil
@@ -179,6 +180,7 @@ type run struct {
 	stop context.CancelCauseFunc
 
 	nodes    []nodeState
+	taken    []bool // by edge, once its source has ended
 	msgs     chan message
 	inFlight int
 	firstErr error // the failure that stopped the run
@@ -188,7 +190,6 @@ type nodeState struct {
 	ready, started bool
 	ended          bool
 	parentsDone    int // edges in whose source has ended
-	taken          int // edges in that were taken
 	entry          json.RawMessage
 	result         NodeResult
 }
@@ -299,7 +300,7 @@ func (r *run) finish(i int, o outcome) {
 		}
 		r.end(i, status, &o)
 		for j, k := range r.p.nodes[i].out {
-			r.parentEnded(r.p.edges[k].to, o.taken[j])
+			r.lineEnded(k, o.taken[j])
 		}
 	case !stopped:
 		r.firstErr = &NodeError{Node: r.p.nodes[i].id, Err: o.err}
@@ -312,26 +313,40 @@ func (r *run) finish(i int, o outcome) {
 	}
 }
 
-// parentEnded counts an edge into node i whose source has ended. Once all
-// have, i is ready if any was taken, and skipped if none was; a skip ends
-// i's own edges untaken, so skips cascade.
-func (r *run) parentEnded(i int, taken bool) {
+// lineEnded counts edge k, now that its source has ended, taking it or not.
+// Once every edge into its node has, the node is ready if each node with an
+// edge into it took one of them, and skipped if any took none; a skip ends
+// the node's own edges untaken, so skips cascade.
+func (r *run) lineEnded(k int, taken bool) {
+	r.taken[k] = taken
+	i := r.p.edges[k].to
 	n := &r.nodes[i]
 	n.parentsDone++
-	if taken {
-		n.taken++
-	}
 	if n.parentsDone < len(r.p.nodes[i].in) {
 		return
 	}
-	if n.taken > 0 {
+	if r.joined(i) {
 		n.ready = true
 		return
 	}
 	r.end(i, StatusSkipped, nil)
 	for _, k := range r.p.nodes[i].out {
-		r.parentEnded(r.p.edges[k].to, false)
+		r.lineEnded(k, false)
 	}
+}
+
+// joined says whether each node with an edge into node i took one of them:
+// a node's edges into one other are alternatives, and each node's is
+// needed (plan 04, strict joins).
+func (r *run) joined(i int) bool {
+	in := r.p.nodes[i].in
+	for _, k := range in {
+		from := r.p.edges[k].from
+		if !slices.ContainsFunc(in, func(j int) bool { return r.p.edges[j].from == from && r.taken[j] }) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *run) end(i int, s Status, o *outcome) {

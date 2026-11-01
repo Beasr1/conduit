@@ -698,7 +698,7 @@ export interface components {
                 [key: string]: components["schemas"]["Position"];
             };
         };
-        /** @description A workflow. A node runs once its parents have finished and at least one edge into it was taken. */
+        /** @description A workflow. A node runs once its parents have finished, if each of them took an edge into it; one parent's edges into it are alternatives. Otherwise it's skipped. */
         Definition: {
             nodes: components["schemas"]["Node"][];
             edges?: components["schemas"]["Edge"][];

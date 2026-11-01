@@ -210,29 +210,39 @@ func TestRun_SkipsCascade(t *testing.T) {
 	}
 }
 
-func TestRun_JoinRunsWhenAnyEdgeIsTaken(t *testing.T) {
+// A step runs only when each step with a line into it took one of them
+// (plan 04, strict joins): every step's is needed, and one step's lines are
+// alternatives.
+func TestRun_JoinsNeedEachStep(t *testing.T) {
 	t.Parallel()
-	srv := echo(t)
-	p := program(t, srv.URL, `{
+	p := program(t, "", `{
 	  "nodes": [
-	    {"id": "a", "kind": "transform", "expr": "1"},
-	    {"id": "b", "kind": "transform", "expr": "2"},
-	    {"id": "c", "kind": "transform", "expr": "{ 'from_a': nodes.a.body, 'b_seen': $exists(nodes.b) }"}
+	    {"id": "a", "kind": "transform", "expr": "input.a"},
+	    {"id": "b", "kind": "transform", "expr": "$number(input.b)"},
+	    {"id": "c", "kind": "transform", "expr": "'c'"},
+	    {"id": "d", "kind": "transform", "expr": "'d'"}
 	  ],
 	  "edges": [
-	    {"from": "a", "to": "c", "when": "true"},
-	    {"from": "b", "to": "c", "when": "false"}
-	  ],
-	  "output": "nodes.c.body"
+	    {"from": "a", "to": "c", "when": "nodes.a.body = 1"},
+	    {"from": "b", "to": "c", "when": "nodes.b.body = 1"},
+	    {"from": "b", "to": "c", "unhandled": true},
+	    {"from": "c", "to": "d"}
+	  ]
 	}`)
-	res, _ := execute(t, testEngine(Options{}), p, `{}`)
-	if res.Status != StatusSucceeded {
-		t.Fatalf("run %s: %v", res.Status, res.Err)
-	}
-	// b succeeded and is an ancestor, so c sees it even though b's edge
-	// wasn't taken.
-	if got, want := string(res.Output), `{"from_a":1,"b_seen":true}`; got != want {
-		t.Errorf("output = %s, want %s", got, want)
+	for input, want := range map[string]string{
+		`{"a": 1, "b": "1"}`: "a succeeded, b succeeded, c succeeded, d succeeded",
+		`{"a": 1, "b": "x"}`: "a succeeded, b failed, c succeeded, d succeeded", // b's other line
+		`{"a": 1, "b": "3"}`: "a succeeded, b succeeded, c skipped, d skipped",
+		`{"a": 2, "b": "1"}`: "a succeeded, b succeeded, c skipped, d skipped",
+	} {
+		res, rec := execute(t, testEngine(Options{}), p, input)
+		if res.Status != StatusSucceeded || statuses(res) != want {
+			t.Errorf("%s: run %s (%s), err %v; want %s", input, res.Status, statuses(res), res.Err, want)
+		}
+		// A skip cascades.
+		if skipped := rec.list(EventSkipped); strings.HasSuffix(want, "d skipped") && skipped != "c skipped, d skipped" {
+			t.Errorf("%s: skip events %s", input, skipped)
+		}
 	}
 }
 
