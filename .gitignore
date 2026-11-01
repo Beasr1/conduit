@@ -12,6 +12,10 @@ dist/
 coverage/
 *.out
 
+# the browser test's results and traces (just e2e)
+test-results/
+playwright-report/
+
 # os
 .DS_Store
 

@@ -38,10 +38,9 @@ type Preview struct {
 	Sends *SentRequest
 	// Gives is a transform step's value, or the workflow's output.
 	Gives json.RawMessage
-	// Ways is a transform step two or more of whose connections a run may
-	// not come by, not being required: what it gives in a run by each, in
-	// the definition's order. Reads is then what those runs read, merged,
-	// and Gives is nil.
+	// Ways is a transform step with two or more connections into it: what
+	// it gives in a run by each, in the definition's order. Reads is then
+	// what those runs read, merged, and Gives is nil.
 	Ways []WayPreview
 	// Taken says whether a run would take the connection previewed. It's
 	// nil for a step, and when the preview can't tell, as its problems say.
@@ -52,6 +51,10 @@ type Preview struct {
 	// Unhandled is a step with an Unhandled body failing into its block, an
 	// error made up: what the body reads, and what it gives.
 	Unhandled *UnhandledPreview
+	// Outcomes is, for a step or a connection's source, what each step
+	// before it may have done in a run that reaches it, by id, from the
+	// edges whatever the samples; nil when it never runs.
+	Outcomes map[string]workflow.Outcome
 	// Problems is what kept a part from rendering, each sample missing on
 	// the way, and what's wrong with the definition there, by pointer.
 	Problems workflow.Problems
@@ -64,8 +67,8 @@ type WayPreview struct {
 	Edge int
 	// Gives is the transform's value in that run.
 	Gives json.RawMessage
-	// Skipped says that run would skip the transform: the connection, or a
-	// required one, isn't taken.
+	// Skipped says no run comes by the connection: that run doesn't take it,
+	// or skips the transform, as a required one isn't taken.
 	Skipped bool
 }
 
@@ -77,7 +80,8 @@ type WayPreview struct {
 // an error made up. Previewing the output, every http step answers 2xx. The
 // required connections into each transform it runs come, the steps before
 // them answering through the outputs that lead to them, and a transform
-// with two or more connections that aren't is previewed in a run by each.
+// with two or more connections is previewed in a run by each, its required
+// ones coming first.
 // It works on a definition with problems, compiling what it can and
 // reporting what's in the way.
 func Simulate(ctx context.Context, d *workflow.Definition, id string) (pv *Preview, err error) {
@@ -90,22 +94,40 @@ func Simulate(ctx context.Context, d *workflow.Definition, id string) (pv *Previ
 	}
 	p, problems := build(d)
 	if ways := p.ways(target); len(ways) > 1 {
-		return simulateWays(ctx, p, d, target, problems, ways), nil
+		pv = simulateWays(ctx, p, d, target, problems, ways)
+	} else {
+		s := simOf(ctx, p, d)
+		var runs bool
+		pv, runs = s.simulate(target, problems)
+		if runs && target >= 0 && p.nodes[target].unhandled != nil {
+			s.unhandled(pv, target)
+		}
+		pv.Problems = s.problems
 	}
-	s := simOf(ctx, p, d)
-	pv, runs := s.simulate(target, problems)
-	if runs && target >= 0 && p.nodes[target].unhandled != nil {
-		s.unhandled(pv, target)
-	}
-	pv.Problems = s.problems
+	pv.Outcomes = outcomesOf(d, target)
 	return pv, nil
 }
 
-// simulateWays previews transform t by each of ways, connections into it
-// a run may not come by: a run that comes by it, and by the required ones,
-// gives a value. What t reads is what those runs read, merged, a step read
-// differently by two as the first read it, and its Unhandled body reads
-// that. A problem two runs have is listed once.
+// outcomesOf is workflow.Outcomes of node i, by the nodes' ids; nil for the
+// output, i -1.
+func outcomesOf(d *workflow.Definition, i int) map[string]workflow.Outcome {
+	out := workflow.Outcomes(d, i)
+	if out == nil {
+		return nil
+	}
+	byID := make(map[string]workflow.Outcome, len(out))
+	for x, o := range out {
+		byID[d.Nodes[x].ID] = o
+	}
+	return byID
+}
+
+// simulateWays previews transform t by each of ways, the connections into
+// it: a run that comes by the required ones, and then by it where they let
+// it, gives a value, unless it surely doesn't take that connection. What t
+// reads is what those runs read, merged, a step read differently by two as
+// the first read it, and its Unhandled body reads that. A problem two runs
+// have is listed once.
 func simulateWays(ctx context.Context, p *Program, d *workflow.Definition, t int, problems workflow.Problems, ways []int) *Preview {
 	pv := &Preview{Skipped: true}
 	merged := simOf(ctx, p, d)
@@ -113,7 +135,11 @@ func simulateWays(ctx context.Context, p *Program, d *workflow.Definition, t int
 	for _, k := range ways {
 		s := simOf(ctx, p, d)
 		way, runs := s.simulate(t, problems, k)
-		pv.Ways = append(pv.Ways, WayPreview{Edge: k, Gives: way.Gives, Skipped: way.Skipped})
+		if way.Skipped || !s.might(k) {
+			pv.Ways = append(pv.Ways, WayPreview{Edge: k, Skipped: true})
+		} else {
+			pv.Ways = append(pv.Ways, WayPreview{Edge: k, Gives: way.Gives})
+		}
 		pv.Skipped = pv.Skipped && way.Skipped
 		ran = ran || runs
 		for i, e := range s.entry {
@@ -137,13 +163,13 @@ func simulateWays(ctx context.Context, p *Program, d *workflow.Definition, t int
 	return pv
 }
 
-// ways is the connections into node t a run may not come by, not being
-// required, in the definition's order; nil but for a transform.
+// ways is the connections into node t, in the definition's order; nil but
+// for a transform.
 func (p *Program) ways(t int) []int {
 	if t < 0 || p.nodes[t].kind != workflow.NodeKindTransform {
 		return nil
 	}
-	return slices.DeleteFunc(slices.Clone(p.nodes[t].in), func(k int) bool { return p.edges[k].required })
+	return p.nodes[t].in
 }
 
 // simulate previews node target, or the output when it's -1, in a run that
@@ -188,6 +214,7 @@ func SimulateEdge(ctx context.Context, d *workflow.Definition, k int) (pv *Previ
 		return pv, nil
 	}
 	src := e.from
+	pv.Outcomes = outcomesOf(d, src)
 	s.aim(src, problems)
 	s.via[src] = e.on
 	if !s.runs(src) {
@@ -226,6 +253,15 @@ func SimulateEdge(ctx context.Context, d *workflow.Definition, k int) (pv *Previ
 	}
 	pv.Problems = s.problems
 	return pv, nil
+}
+
+// unnamed is an error give gave, without the field it names: a preview's
+// problem points at that field instead.
+func unnamed(err error) error {
+	if inner := errors.Unwrap(err); inner != nil {
+		return inner
+	}
+	return err
 }
 
 // catch turns a panic in a preview into its error.
@@ -285,14 +321,15 @@ func (s *sim) problem(pointer, code, format string, args ...any) {
 
 // aim points the preview at target, a node, or the output when it's -1:
 // the nodes it runs, the output each of them answers through, and the
-// problems in its way. A node's preview comes by the edges by into it, and
-// by each required edge into a transform it runs, so the transform does.
+// problems in its way. A node's preview comes by each required edge into a
+// transform it runs, so the transform does, and then by the edges by into
+// it, where the required ones leave the steps before free to.
 func (s *sim) aim(target int, problems workflow.Problems, by ...int) {
 	s.target = target
 	s.needed = s.need(target)
 	s.choose(target)
 	if target >= 0 {
-		s.steer(append(s.required(), by...))
+		s.steer(by, s.steer(s.required(), make([]bool, len(s.p.nodes))))
 	}
 	s.keep(problems)
 }
@@ -342,8 +379,10 @@ func (s *sim) choose(target int) {
 
 // steer has the preview come by the edges ks into its target: each edge's
 // source answers through the edge's output, and each node before them
-// through one leading on towards them.
-func (s *sim) steer(ks []int) {
+// through one leading on towards them, but for the nodes fixed, steered
+// already, which keep their outputs. It gives back the nodes it steered
+// towards.
+func (s *sim) steer(ks []int, fixed []bool) []bool {
 	toward := make([]bool, len(s.p.nodes))
 	for _, k := range ks {
 		for i, need := range s.need(s.p.edges[k].from) {
@@ -351,13 +390,16 @@ func (s *sim) steer(ks []int) {
 		}
 	}
 	for i := range s.p.nodes {
-		if toward[i] {
+		if toward[i] && !fixed[i] {
 			s.via[i] = s.lead(i, toward)
 		}
 	}
 	for _, k := range ks {
-		s.via[s.p.edges[k].from] = s.p.edges[k].on
+		if e := s.p.edges[k]; !fixed[e.from] {
+			s.via[e.from] = e.on
+		}
 	}
+	return toward
 }
 
 // lead is the output node i answers through to lead on towards the nodes
@@ -475,14 +517,17 @@ func (s *sim) runs(target int) bool {
 }
 
 // reached says whether a run would start node i, by the connections into
-// it that are taken, as a run joins them. One from a step the preview
-// couldn't run, for want of a sample or a working expression, might be, so
-// it counts; one from a step it skipped isn't.
+// it that might be taken, as a run joins them.
 func (s *sim) reached(i int) bool {
-	return s.p.joins(i, func(k int) bool {
-		from := s.p.edges[k].from
-		return s.taken[k] || !s.skipped[from] && s.entry[from] == nil
-	})
+	return s.p.joins(i, s.might)
+}
+
+// might says whether a run might take edge k: it does, or the preview
+// couldn't run its source, for want of a sample or a working expression,
+// so it can't tell. One from a step it skipped isn't taken.
+func (s *sim) might(k int) bool {
+	from := s.p.edges[k].from
+	return s.taken[k] || !s.skipped[from] && s.entry[from] == nil
 }
 
 // parts is what node i's expressions see: its ancestors that ran, as a
@@ -510,7 +555,7 @@ func (s *sim) run(i int) {
 	case s.via[i] == workflow.OnUnhandled:
 		entry, err := s.failed(i)
 		if err != nil {
-			s.problem("/nodes/"+strconv.Itoa(i)+"/unhandled/body", "evaluation_failed", "%s: %v", n.id, err)
+			s.problem("/nodes/"+strconv.Itoa(i)+"/unhandled/body", "evaluation_failed", "%v", err)
 			return
 		}
 		s.entry[i] = entry
@@ -529,7 +574,7 @@ func (s *sim) run(i int) {
 		}
 		entry, err := sampleEntry(sample, status)
 		if err != nil {
-			s.problem(ptr, "evaluation_failed", "%s's sample: %v", n.id, err)
+			s.problem(ptr, "evaluation_failed", "%v", err)
 			return
 		}
 		s.entry[i] = entry
@@ -542,7 +587,7 @@ func (s *sim) run(i int) {
 			status, v, part, err = n.give(s.ctx, doc)
 		}
 		if err != nil {
-			s.problem("/nodes/"+strconv.Itoa(i)+part, "evaluation_failed", "%s: %v", n.id, err)
+			s.problem("/nodes/"+strconv.Itoa(i)+part, "evaluation_failed", "%v", unnamed(err))
 			return
 		}
 		// A switch exits by the case that holds, wherever its lines lead.
@@ -600,7 +645,7 @@ func (s *sim) conditions(i int) {
 			}
 		}
 		s.taken[k] = true
-		s.problem("/edges/"+strconv.Itoa(k)+"/when", "evaluation_failed", "the condition from %s to %s: %v", n.id, s.p.nodes[e.to].id, err)
+		s.problem("/edges/"+strconv.Itoa(k)+"/when", "evaluation_failed", "%v", err)
 	}
 }
 
@@ -630,7 +675,7 @@ func (s *sim) step(pv *Preview, t int) bool {
 		status, body, part, err := n.give(s.ctx, doc)
 		switch {
 		case err != nil:
-			s.problem(ptr+part, "evaluation_failed", "%v", err)
+			s.problem(ptr+part, "evaluation_failed", "%v", unnamed(err))
 		case n.cases == nil:
 			pv.Gives = body
 		default:

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -522,5 +523,52 @@ func TestSimulate_ReportsOnlyWhatsInTheWay(t *testing.T) {
 	}
 	if got := problemCodes(previewOf(t, sampled, "", broken)); got != "/nodes/4/kind invalid_kind, /sample_input too_large, /output invalid_expression, /nodes/3/sample missing_sample" {
 		t.Errorf("output: problems %s", got)
+	}
+}
+
+// A preview's problem points at the field that failed, so its words say
+// only what went wrong there: a step's expression or Unhandled body before
+// the one previewed, a connection's condition, and a case's body.
+func TestSimulate_AProblemSaysWhatWentWrong(t *testing.T) {
+	t.Parallel()
+	pv := previewOf(t, `{
+	  "nodes": [
+	    {"id": "a", "kind": "transform", "expr": "1"},
+	    {"id": "b", "kind": "transform", "switch": {"cases": [{"when": "true", "status": 200, "body": "$error('bust')"}]}},
+	    {"id": "c", "kind": "transform", "expr": "$error('boom')"},
+	    {"id": "d", "kind": "transform", "expr": "$error('fell')", "unhandled": {"body": "$error('caught')"}}
+	  ],
+	  "edges": [{"from": "a", "to": "b", "when": "$error('nope')"}, {"from": "c", "to": "b"}, {"from": "d", "to": "b", "unhandled": true}]
+	}`, "b", nil)
+	var got []string
+	for _, p := range pv.Problems {
+		got = append(got, p.Pointer+" "+p.Detail)
+	}
+	want := []string{"/edges/0/when D3137: nope", "/nodes/2/expr D3137: boom", "/nodes/3/unhandled/body D3137: caught", "/nodes/1/switch/cases/0/body D3137: bust"}
+	if !slices.Equal(got, want) {
+		t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A preview says what each step before the one previewed may have done in a
+// run that reaches it, worked out from the lines whatever the samples, and
+// a connection's says it of its source's; the output's says nothing.
+func TestSimulate_Outcomes(t *testing.T) {
+	t.Parallel()
+	want := map[string]workflow.Outcome{
+		"prefs":    {Outputs: []int{0, 400}},
+		"fallback": {Outputs: []int{0}, Conditional: true},
+	}
+	if pv := previewOf(t, merged, "prefs_ok", nil); !reflect.DeepEqual(pv.Outcomes, want) {
+		t.Errorf("prefs_ok's outcomes = %+v, want %+v", pv.Outcomes, want)
+	}
+	if pv := edgePreviewOf(t, merged, 3, nil); !reflect.DeepEqual(pv.Outcomes, want) {
+		t.Errorf("the line from prefs_ok: outcomes = %+v, want %+v", pv.Outcomes, want)
+	}
+	if pv := previewOf(t, merged, "greet", nil); !pv.Outcomes["fallback"].Conditional || pv.Outcomes["prefs_ok"].Conditional {
+		t.Errorf("greet's outcomes = %+v", pv.Outcomes)
+	}
+	if pv := previewOf(t, merged, "", nil); pv.Outcomes != nil {
+		t.Errorf("the output's outcomes = %+v, want none", pv.Outcomes)
 	}
 }

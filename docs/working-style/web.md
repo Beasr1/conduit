@@ -27,7 +27,7 @@ it. Keep that guard on: pick a slightly older version instead.
 | Components | shadcn/ui on Base UI (shadcn's default since July 2026), Tailwind 4, lucide icons |
 | Toasts | shadcn's Toast, built on Base UI |
 | API client | openapi-fetch, typed from `src/gen` (openapi-typescript output from `schema/openapi.yaml`), behind `call` in `lib/api.ts` for timeouts and error kinds |
-| Tests | Vitest, Testing Library, MSW; Playwright for the editor's happy path |
+| Tests | Vitest, Testing Library, MSW; Playwright for plan 04's Done flow (`web/e2e`, `just e2e`) |
 | Lint and format | ESLint flat config + typescript-eslint + react-hooks; Prettier + tailwind plugin |
 | Package manager | pnpm, pinned via `packageManager` |
 
@@ -197,12 +197,19 @@ the API is `/api` on the page's own origin.
   its place (`case:<k>`), not its status, so typing a new status keeps the
   tab open; the store keeps those parts open across edits as it keeps an
   HTTP step's responses.
+- An Input tags each earlier step the preview's `outcomes` says a run may
+  come without, "conditional", or that may answer more than one way, "2xx
+  or 400" (`outcomeTag`, which names outputs as a way into a step is
+  named), with a note under the tree on what to check.
+- A run's lines into steps are taken as the steps' `took` says; lines into
+  answers, as the answer the run gave.
 - Each line into a transform with more than one is one of its ways
   (`data.way`), unless it's marked required: it's dashed until a run says
-  whether it came, as dashed means it may not be taken, or wasn't. Its
-  preview is a run by each, the server's `ways`, each named by the line at
-  its place in the draft previewed, so a result reads that draft (a
-  `MappingField`'s `result` gets it); its Input is what those runs read,
+  whether it came, as dashed means it may not be taken, or wasn't. A
+  transform's preview is a run by each line into it, required ones too,
+  the server's `ways`, each named by the line at its place in the draft
+  previewed, so a result reads that draft (a `MappingField`'s `result` gets
+  it), a required line marked so; its Input is what those runs read,
   merged.
 - An HTTP step is drawn as blocks, each saying which part of the step it
   is (`data-part`). The canvas reads the block a click lands in
@@ -235,5 +242,12 @@ the API is `/api` on the page's own origin.
 - Start the MSW server with `onUnhandledFrame: "error"`, so a request with no
   handler fails the test. MSW 3 renamed it from `onUnhandledRequest`, and
   the old name is silently ignored at run time.
-- Playwright covers one flow against the real server and Postgres: create a
-  workflow, connect two upstreams, run it, see the results.
+- Playwright covers plan 04's Done flow against the real server, Postgres
+  and the test upstream (`web/e2e/done.spec.ts`, `just e2e`, in `just
+  check`): build the spec example, save it with a problem and fix it, run
+  it and watch it, see what crm sent and got, publish it and call it; and
+  a definition with no layout opening laid out. The app is served as built,
+  by `vite preview`, whose proxy `CONDUIT_API_ORIGIN` points at the test's
+  server. It presses Fit View before clicking a card, as an open panel
+  narrows the canvas, and reads a card's run line as it streams ("200")
+  and once recorded ("200, 12 ms").

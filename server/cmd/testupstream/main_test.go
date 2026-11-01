@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHandler_AnswersKnownRequests(t *testing.T) {
@@ -74,5 +75,17 @@ func TestHandler_RefusesAStatusItCantSend(t *testing.T) {
 	handler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), "GET", "/status/42", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+// Preferences come after ?ms milliseconds, when it's given, so a run can be
+// watched while a step is still running.
+func TestHandler_PrefsWaitWhenAsked(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	rec := httptest.NewRecorder()
+	handler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), "GET", "/prefs/7?ms=50", nil))
+	if took := time.Since(start); rec.Code != http.StatusOK || took < 50*time.Millisecond {
+		t.Errorf("status %d after %s, want 200 after 50ms", rec.Code, took)
 	}
 }

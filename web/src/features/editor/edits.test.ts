@@ -518,10 +518,39 @@ test("mentions finds every place that still reads a node by its id", () => {
     "crm's URL",
     "crm's headers",
     "merge's expression",
-    "the condition on the edge from crm to merge",
+    "the condition on the connection from crm to merge",
   ]);
   expect(mentions(draft, "merge")).toEqual(["the workflow's output"]);
   expect(mentions(draft, "a(b")).toEqual([]);
+});
+
+test("mentions finds a step read in cases, and in an Unhandled body", () => {
+  const draft: Definition = {
+    nodes: [
+      {
+        id: "check",
+        kind: "transform",
+        switch: {
+          cases: [
+            { name: "found", when: "nodes.user.status = 200", status: 200 },
+            { when: "true", status: 404, body: "nodes.user.body.error" },
+            { when: "true", status: 500, body: "'none'" },
+          ],
+        },
+        unhandled: { body: "{ 'id': nodes.user.body.id }" },
+      },
+    ],
+    response: {
+      answers: [{ status: 200, from: "check", on: 200 }],
+      unhandled: { body: "nodes.user.body" },
+    },
+  };
+  expect(mentions(draft, "user")).toEqual([
+    "check's case found",
+    "check's Case 2",
+    "check's Unhandled body",
+    "the response's Unhandled body",
+  ]);
 });
 
 test.each([

@@ -385,8 +385,12 @@ export interface components {
         Preview: {
             /** @description The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples. For a transform with ways, what the run by each reads, merged, a node read differently by two as the first read it. */
             reads: unknown;
-            /** @description A transform two or more of whose edges aren't required, a result for a run that comes by each of those, in the definition's order. Each other step answers through the outputs that lead to that edge's source. */
+            /** @description A transform with two or more edges into it, a result for a run by each, in the definition's order. Each run comes by the transform's required edges first, and by its own where they let it; the steps before answer through the outputs that lead there. */
             ways?: components["schemas"]["WayPreview"][];
+            /** @description For a step, or a connection's source, what each step before it may have done in a run that reaches it, by id, worked out from the edges whatever the samples. Absent when it never runs, or the edges have a cycle. */
+            outcomes?: {
+                [key: string]: components["schemas"]["StepOutcome"];
+            };
             /** @description A connection's preview only, whether a run would take it with these samples. */
             taken?: boolean;
             sends?: components["schemas"]["RenderedRequest"];
@@ -398,13 +402,20 @@ export interface components {
             /** @description What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there. */
             problems: components["schemas"]["ProblemError"][];
         };
+        /** @description What a step may have done in a run that reaches a step after it. */
+        StepOutcome: {
+            /** @description The outputs it may have answered through, sorted. -1 is its Unhandled, 0 is 2xx and a transform's one value, and any other is a status, a case's among them. */
+            outputs: number[];
+            /** @description A run may reach the step after it without it, having skipped it. */
+            conditional: boolean;
+        };
         /** @description What a transform gives in a run that comes by one edge into it, over the samples. */
         WayPreview: {
             /** @description The edge, by its place in the definition's edges. */
             edge: number;
             /** @description The transform's value in that run. Absent when it gave none. */
             gives?: unknown;
-            /** @description That run would skip the transform, its required edges or that one not taken. */
+            /** @description No run comes by the edge, as that run doesn't take it, or skips the transform when a required edge isn't taken. */
             skipped: boolean;
         };
         /** @description A step with an Unhandled body, failing into the block with an error made up, as a preview calls nothing. */
@@ -530,8 +541,8 @@ export interface components {
             request?: components["schemas"]["NodeRequest"];
             response?: components["schemas"]["NodeResponse"];
             error?: components["schemas"]["RunError"];
-            /** @description A transform node's, the edges into it that were taken, in the definition's order. */
-            ways?: components["schemas"]["Way"][];
+            /** @description The lines the node's answer took, of those leaving the output it answered through, the ones whose condition held, in the definition's order. Absent for a node that took none. */
+            took?: components["schemas"]["Line"][];
             /**
              * Format: date-time
              * @description Absent if the node never started.
@@ -579,15 +590,15 @@ export interface components {
             /** @description On the event that ends an http node that got an answer, or a transform whose case gave it. */
             http_status?: number;
             error?: components["schemas"]["RunError"];
-            /** @description On the event that ends a transform node that ran, the edges into it that were taken. */
-            ways?: components["schemas"]["Way"][];
+            /** @description On the event that ends a node, the lines its answer took, as a node run has them. */
+            took?: components["schemas"]["Line"][];
         };
-        /** @description An edge into a transform node that was taken, as the definition writes it. */
-        Way: {
-            from: string;
-            /** @description The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform. */
+        /** @description An edge a node's answer took, as the definition writes it, from that node. */
+        Line: {
+            to: string;
+            /** @description The output it left, as an edge's. Absent means 2xx, and the only output of a transform. */
             on?: number;
-            /** @description It left from's Unhandled block, and on is absent. */
+            /** @description It left the node's Unhandled block, and on is absent. */
             unhandled?: boolean;
         };
         /**

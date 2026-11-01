@@ -62,7 +62,7 @@ const started: Run = {
 };
 
 // ended is the run as the server has it once it ended: user got 404, so
-// create_user ran and orders didn't.
+// it took its line to create_user, which ran, and orders didn't.
 const ended: Run = {
   ...started,
   status: "succeeded",
@@ -85,6 +85,7 @@ const ended: Run = {
         headers: { "content-type": "application/json" },
         body: { error: "not found" },
       },
+      took: [{ to: "create_user", on: 404 }],
     },
     { node: "orders", status: "skipped", attempts: 0, ended_at: at(82) },
     {
@@ -105,7 +106,14 @@ const ended: Run = {
 
 const events: NodeEvent[] = [
   { node: "user", kind: "started", attempt: 1, at: at(0) },
-  { node: "user", kind: "succeeded", attempt: 1, at: at(82), http_status: 404 },
+  {
+    node: "user",
+    kind: "succeeded",
+    attempt: 1,
+    at: at(82),
+    http_status: 404,
+    took: [{ to: "create_user", on: 404 }],
+  },
   { node: "orders", kind: "skipped", attempt: 0, at: at(82) },
   { node: "create_user", kind: "started", attempt: 1, at: at(90) },
 ];
@@ -490,6 +498,7 @@ const caught: Run = {
       ended_at: at(82),
       response: { status: 500, headers: {}, body: { error: "down" } },
       error: userFailed,
+      took: [{ to: "fallback", unhandled: true }],
     },
     { node: "orders", status: "skipped", attempts: 0, ended_at: at(82) },
     { node: "create_user", status: "skipped", attempts: 0, ended_at: at(82) },
@@ -515,6 +524,7 @@ test("a step whose Unhandled took its failure is marked so, and the run goes on 
       at: at(82),
       http_status: 500,
       error: userFailed,
+      took: [{ to: "fallback", unhandled: true }],
     },
   ]);
   await run();

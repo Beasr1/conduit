@@ -223,7 +223,10 @@ test("a transform joined to a second answer picks between them with cases", asyn
     "value",
     "404",
   );
-  expect(screen.getByTestId("rf__edge-respond->#response:1")).toBeTruthy();
+  // The line is drawn once the canvas has measured the new exit.
+  expect(
+    await screen.findByTestId("rf__edge-respond->#response:1"),
+  ).toBeTruthy();
   const exits = [
     ...screen
       .getByTestId("rf__node-respond")

@@ -6,7 +6,7 @@
 //	GET  /users/{id}     a user, 1 to 9; any other id is 404
 //	POST /users          201, the user created from the body
 //	GET  /orders         a user's orders, by ?user_id
-//	GET  /prefs/{id}     a user's preferences
+//	GET  /prefs/{id}     a user's preferences, after ?ms milliseconds if given
 //	POST /contacts       201, a contact created from the body
 //	GET  /slow           200 after ?ms milliseconds, at most 30000
 //	GET  /status/{code}  that status, 200 to 599
@@ -80,7 +80,9 @@ func handler() http.Handler {
 		}})
 	})
 	mux.HandleFunc("GET /prefs/{id}", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, http.StatusOK, map[string]any{"user_id": r.PathValue("id"), "newsletter": true, "language": "en"})
+		if _, ok := pause(r, 0); ok {
+			reply(w, http.StatusOK, map[string]any{"user_id": r.PathValue("id"), "newsletter": true, "language": "en"})
+		}
 	})
 	mux.HandleFunc("POST /contacts", func(w http.ResponseWriter, r *http.Request) {
 		created := map[string]any{}
@@ -89,15 +91,8 @@ func handler() http.Handler {
 		reply(w, http.StatusCreated, created)
 	})
 	mux.HandleFunc("GET /slow", func(w http.ResponseWriter, r *http.Request) {
-		ms, err := strconv.Atoi(r.URL.Query().Get("ms"))
-		if err != nil || ms < 0 || ms > 30000 {
-			ms = 2000
-		}
-		wait := time.Duration(ms) * time.Millisecond
-		select {
-		case <-time.After(wait):
+		if wait, ok := pause(r, 2*time.Second); ok {
 			reply(w, http.StatusOK, map[string]any{"slept": wait.String()})
-		case <-r.Context().Done():
 		}
 	})
 	mux.HandleFunc("GET /status/{code}", func(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +104,21 @@ func handler() http.Handler {
 		reply(w, code, map[string]any{"error": http.StatusText(code)})
 	})
 	return mux
+}
+
+// pause waits ?ms milliseconds, up to 30000, or fallback when that isn't
+// given or is out of range, and says whether the caller was still there.
+func pause(r *http.Request, fallback time.Duration) (time.Duration, bool) {
+	wait := fallback
+	if ms, err := strconv.Atoi(r.URL.Query().Get("ms")); err == nil && ms >= 0 && ms <= 30000 {
+		wait = time.Duration(ms) * time.Millisecond
+	}
+	select {
+	case <-time.After(wait):
+		return wait, true
+	case <-r.Context().Done():
+		return wait, false
+	}
 }
 
 func reply(w http.ResponseWriter, status int, body any) {

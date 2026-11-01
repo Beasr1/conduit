@@ -282,6 +282,26 @@ func TestValidate_RequiredLines(t *testing.T) {
 			"/response/answers/1/from overlap: 200 (t) and 404 (a) can both be reached in one run: join both to one transform, which picks the answer",
 		},
 		{
+			// t runs only after a's 2xx, so c, after a's 404, never comes to it.
+			"a line its required one rules out", `{"nodes": [` + nodes + `, {"id": "c", "kind": "transform", "expr": "3"}],
+			  "edges": [{"from": "a", "to": "c", "on": 404}, {"from": "a", "to": "t", "required": true}, {"from": "c", "to": "t"}]}`,
+			"/edges/2 never_taken: c's line to t can never be taken when t runs: it needs a to answer 2xx and 404",
+		},
+		{
+			// d follows a's 2xx too, so its line can come with the required one.
+			"a line that comes with its required one", `{"nodes": [` + nodes + `, {"id": "d", "kind": "transform", "expr": "3"}],
+			  "edges": [{"from": "a", "to": "d"}, {"from": "a", "to": "t", "required": true}, {"from": "d", "to": "t"}]}`,
+			"",
+		},
+		{
+			// h never runs, which is its problem; its line to t has none more.
+			"a line from a step that never runs", `{"nodes": [` + nodes + `, {"id": "c", "kind": "transform", "expr": "3"},
+			    {"id": "h", "kind": "http", ` + get + `}],
+			  "edges": [{"from": "a", "to": "c", "on": 404}, {"from": "a", "to": "h"}, {"from": "c", "to": "h"},
+			    {"from": "a", "to": "t", "required": true}, {"from": "h", "to": "t"}]}`,
+			"/nodes/4 never_runs: h can never run: it needs a to answer 2xx and 404",
+		},
+		{
 			"two required that never both come", `{"nodes": [` + nodes + `, {"id": "c", "kind": "transform", "expr": "3"}],
 			  "edges": [{"from": "a", "to": "c", "on": 404}, {"from": "a", "to": "t", "required": true}, {"from": "c", "to": "t", "required": true}]}`,
 			"/nodes/2 never_runs: t can never run: it needs a to answer 2xx and 404",

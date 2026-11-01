@@ -213,6 +213,12 @@ func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequ
 	for _, w := range pv.Ways {
 		out.Ways = append(out.Ways, gen.WayPreview{Edge: w.Edge, Gives: w.Gives, Skipped: w.Skipped})
 	}
+	if pv.Outcomes != nil {
+		out.Outcomes = make(map[string]gen.StepOutcome, len(pv.Outcomes))
+		for id, o := range pv.Outcomes {
+			out.Outcomes[id] = gen.StepOutcome{Outputs: append([]int{}, o.Outputs...), Conditional: o.Conditional}
+		}
+	}
 	if s := pv.Sends; s != nil {
 		headers := make(map[string]string, len(s.Header))
 		for name, values := range s.Header {

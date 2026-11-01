@@ -631,10 +631,18 @@ export function mentions(d: Definition, id: string): string[] {
     check(`${n.id}'s query`, ...Object.values(r?.query ?? {}));
     check(`${n.id}'s body`, r?.body);
     check(`${n.id}'s expression`, n.expr);
+    for (const [k, c] of (n.switch?.cases ?? []).entries())
+      check(
+        c.name ? `${n.id}'s case ${c.name}` : `${n.id}'s Case ${k + 1}`,
+        c.when,
+        c.body,
+      );
+    check(`${n.id}'s Unhandled body`, n.unhandled?.body);
   }
   for (const e of d.edges ?? []) {
-    check(`the condition on the edge from ${e.from} to ${e.to}`, e.when);
+    check(`the condition on the connection from ${e.from} to ${e.to}`, e.when);
   }
+  check("the response's Unhandled body", d.response?.unhandled?.body);
   check("the workflow's output", d.output);
   return found;
 }

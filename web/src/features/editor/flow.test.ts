@@ -8,6 +8,7 @@ import {
   NODE_HEIGHT,
   NODE_WIDTH,
   onOf,
+  outcomeTag,
   outputOf,
   responseCard,
   toFlow,
@@ -401,6 +402,25 @@ test("a way is named by its step and the response, case or Unhandled it leaves",
   // A transform's one value, and a case no longer there, need no name.
   expect(wayLabel(of, "count", undefined)).toBe("count");
   expect(wayLabel(of, "check", 500)).toBe("check");
+
+  // An Input tags a step a run may come without, or that may answer more
+  // than one way, naming each way as a way into a step is named.
+  const [user, check, count] = of.nodes;
+  expect(outcomeTag(user, { outputs: [0], conditional: false })).toBe(
+    undefined,
+  );
+  expect(outcomeTag(user, { outputs: [0], conditional: true })).toBe(
+    "conditional",
+  );
+  expect(outcomeTag(user, { outputs: [0, 404], conditional: false })).toBe(
+    "2xx or 404",
+  );
+  expect(outcomeTag(check, { outputs: [200, 404], conditional: true })).toBe(
+    "conditional · found or Case 2",
+  );
+  expect(
+    outcomeTag(count, { outputs: [UNHANDLED, 0], conditional: false }),
+  ).toBe("value or Unhandled");
 });
 
 test("the editor counts Unhandled beside a step's other outputs", () => {

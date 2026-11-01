@@ -12,8 +12,10 @@ once all have ended, was built as Either (4877f7a), reworked into Merge
 (4c8ef26), then folded into transform, which now merges its lines, and a
 transform's cases became its exits: "a step and a transform", parts 1 and
 2 (84fc8dd), then its lines its parameters, each required or not, and its
-preview a run by each way (2026-11-01). Phase E, the browser test, comes
-after.
+preview a run by each way (5adbc71). Then the finish (2026-11-01): an
+Input tags a conditional step, a run records the lines it took, two small
+fixes, and Phase E, the browser test. **Done**: the browser test passes in
+`just check`; the leftovers went to plan 07, and headers are held.
 Building Phase A raised question 8, since answered.
 
 ## Goal
@@ -203,7 +205,7 @@ a session cookie that scripts can't read (answer 1):
 |---|---|---|
 | Pure functions | `toFlow`, placing nodes that have no position, pointer → field, the stream parser | Vitest |
 | Components | the editor renders the spec example; adding a node; connecting two; a save that comes back with problems | Vitest, Testing Library, MSW handlers typed from `src/gen` |
-| The flow | Done, above | Playwright against `just dev`'s pieces: Postgres, the server, the built web app, and a small test upstream. The server runs with `CONDUIT_ALLOW_PRIVATE_NETWORKS=true`, so it can reach the test upstream on loopback |
+| The flow | Done, above | Playwright (`web/e2e`, `just e2e`, in `just check`) against `just dev`'s pieces, its own: a database made afresh, the server, the built web app (`vite preview`), and the test upstream, each on a port of its own. The server runs with `CONDUIT_ALLOW_PRIVATE_NETWORKS=true`, so it can reach the test upstream on loopback |
 
 ## Dependencies
 
@@ -347,10 +349,11 @@ it was after)
       as it's typed, like the check. A transform step and the response card
       have one field each, so they show what they read and what they give
       under it rather than in a tab.
-- [ ] After C: preview beside each expression field; an expression that
-      reads nothing in the samples, or the wrong type, marked under its
-      field (the inferred schema below); a run's real response kept as a
-      step's sample; fetching a sample from a GET.
+- [x] After C: preview beside each expression field (D), and a run's real
+      response kept as a step's sample (C). Moved to plan 07 (2026-11-01,
+      your call): an expression that reads nothing in the samples, or the
+      wrong type, marked under its field (the inferred schema below), and
+      fetching a sample from a GET.
 
 **Phase D: outputs by status** (2026-10-30, your call, before C; built)
 
@@ -564,7 +567,8 @@ Decided while drafting, yours to overrule:
    the step it leads to ran. The server doesn't say which lines it took,
    so a line whose condition failed, into a step another line took it to,
    shows as taken. Telling it exactly needs the engine to record taken
-   lines: a TODO, at `web/src/features/editor/runs.ts:96`.
+   lines: a TODO, at `web/src/features/editor/runs.ts:96`, done on
+   2026-11-01 (the lines a run took).
 3. **Keep as sample** copies the run's body and headers into that
    response's sample, and for 2xx its status too.
 4. **Runs lists the workflow's latest 50 runs**, newest first; more pages
@@ -708,7 +712,8 @@ did: in your "Fixes check", prefs answering 400 still answered
       it answers: it sends callers what the run read, upstream headers
       included.
 - [x] Failing tests first; mutation checks; Chromium through nginx.
-- [ ] Chromium through `just dev`, the test upstream answering.
+- [x] Chromium through `just dev`, the test upstream answering: Phase E's
+      browser test does it, in `just check`.
 
 Decided with you on 2026-10-30 (late night), from wireframes:
 - **The card shows every answer: yours, and Conduit's own.** Listing only
@@ -1211,9 +1216,85 @@ Mine, while planning, for you to veto:
 - [ ] Failing tests first; mutation checks; Chromium through nginx.
 - [ ] Docs: the roadmap, CLAUDE.md, web.md, and this plan as built.
 
-**Phase E: the browser test**
-- [ ] Playwright, against the test upstream (built in C), and the Done flow.
-- [ ] web.md corrected; CLAUDE.md, repo.md and the roadmap updated.
+**Phase D: conditional steps, told in the Input** (2026-11-01, your call,
+before Phase E)
+
+You asked for the preview to say when a step is conditional, so whoever
+configures a step knows to check for it, or to mark its line required.
+Decided with you on 2026-11-01:
+- **Tagged in every step's Input**, worked out from the lines rather than
+  the samples: each step before it that a run can reach it without is
+  "conditional", and one that may answer more than one way says which,
+  "2xx or 400". Tagging only what may be missing, or only what a
+  transform's runs by each line had, were the other options.
+
+Mine, while planning, for you to veto:
+- **How it's worked out**: from what validation knows of a step, the
+  outputs each step before it must answer through for it to run (its
+  route), and, for a step its route says nothing of, whether that step
+  always runs: a first step does, and so does one whose lines always come,
+  each without a condition, from a step that always runs and answers only
+  through that line's output. A step that may be skipped is conditional;
+  its outputs are the route's, or else every one it has. The samples don't
+  change it.
+- **The API**: a preview of a step or a connection gives `outcomes`, by
+  step id, for each step before it: the `outputs` it may answer through,
+  and whether it's `conditional`.
+- **The words**: a tag beside the step in the tree: "conditional", "2xx or
+  400", or both; a case's exits by name, Unhandled as Unhandled. Under the
+  tree, "fallback is conditional: a run can reach this step without it.
+  Check it with $exists(nodes.fallback), or mark its line required.", and
+  "prefs answers 2xx or 400: check nodes.prefs.status before reading its
+  body."
+- [x] workflow: the outcomes of the steps before a step.
+- [x] The engine and the API: `outcomes` on a preview.
+- [x] The editor: the tags and the notes in an Input.
+- [x] Failing tests first; mutation checks.
+
+**Phase D: the lines a run took** (2026-11-01, your call: plan 04's TODO,
+before Phase E)
+
+A run's canvas guessed which lines the run took: a line counted as taken
+when its step answered on its output and the step it leads to ran, so a
+skipped step's taken lines showed as not taken. A transform's came from
+`ways`, recorded on it. Decided with you on 2026-11-01:
+- **The engine records the lines each step's answer took**, `took`, on its
+  run and on the event that ends it: for each, the step it leads to and the
+  output it leaves. The canvas and It came by read it, and guess nothing.
+- **`ways` goes**, as a transform's ways are the lines into it some step
+  took. No data migration (your call: only you run it): a new migration
+  drops `node_runs.ways` and adds `took`, so older runs lose their ways.
+- [x] The engine, the runner, the store and the API: `took`; `ways` gone.
+- [x] The editor: a line taken as `took` says; It came by from it; the
+      TODO at `web/src/features/editor/runs.ts:103` gone.
+- [x] Failing tests first; mutation checks.
+
+**Phase D: two small fixes** (2026-11-01)
+- [x] Renaming a step warns of every place that reads it: cases'
+      conditions and bodies, a step's Unhandled body and the response's
+      Unhandled body too (`web/src/features/editor/edits.ts:619`).
+- [x] A preview's problem says its field once: under Case 1 · Body, "The
+      expression gave no value.", not "Case 1: body: the expression gave no
+      value."
+
+**Phase E: the browser test** (its flow brought up to date on 2026-11-01)
+
+The Done flow as the editor is now: a definition has answers, not an
+output, so the spec example joins crm to the 200 answer.
+
+Mine, while planning, for you to veto:
+- **`@playwright/test` 1.64.1** in `web/` (in the dependencies above), the
+  test in `web/e2e/`, Chromium only.
+- **Its own database and ports**, so it runs beside `just dev` and `just
+  up`: a database made afresh and migrated for each run; Playwright
+  starts the server (private networks and the upstream's port allowed),
+  the test upstream, and the built app (`vite preview`, /api proxied).
+- **`just e2e`**, which `just check` runs; CI installs Chromium.
+- [x] Playwright, against the test upstream (built in C), and the Done flow.
+- [x] web.md corrected; CLAUDE.md, repo.md and the roadmap updated.
+
+Moved to plan 07 (2026-11-01, your call): an expression that reads what
+its samples lack marked under its field, and fetching a sample from a GET.
 
 Each phase ends with `just check` green and is committed on its own.
 
@@ -1455,10 +1536,9 @@ overruling:
 - Deliberate TODO for plan 10's JSONata editor. Since phase D, one field
   edits a request body, a transform's expression, a connection's condition
   and the output, so one TODO covers all four:
-  - `web/src/features/editor/components/mapping-field.tsx:110`
+  - `web/src/features/editor/components/mapping-field.tsx:96`
 - Deliberate TODO for exact taken lines in a run (Phase C, decided while
-  drafting, 2):
-  - `web/src/features/editor/runs.ts:96`
+  drafting, 2), done on 2026-11-01: the engine records them.
 
 Found in Chromium while checking 3c, and fixed:
 - **Every edit blinked all the edges off.** React Flow keeps a node's
@@ -2090,6 +2170,112 @@ were committed (80d55d4, 4fb0aec). Decided while building:
   check opened, nothing saved, success_200 marked, and the problem list
   saying it can never run, and why. No CSP violations and no console
   problems.
+
+## The finish, as built
+
+Built on 2026-11-01 after 5adbc71: the four parts planned above, in one
+go, your call. Decided while building:
+- **Conditional, worked out**: `workflow.Outcomes` reads validation's route
+  of the step, and, for a step the route says nothing of, whether that step
+  always runs: a first step does, and so does one whose lines always come.
+  A line always comes when it has no condition and leaves a step that
+  always runs and answers only through that line's output. A merge needs
+  one such line, a transform with required lines each of those. A step the
+  route rules out in some way is conditional. Its outputs are the route's,
+  else every one it has: an HTTP step's 2xx and the statuses it lists, a
+  case's statuses, and Unhandled when a line or an answer leaves that.
+- **The tags and notes**: Unhandled comes last, a transform's one value is
+  "value". "Mark the line that brings it required", not "its line", as the
+  line to mark may be further back. A step that may fail into Unhandled is
+  checked with `$exists(nodes.x.error)` rather than its status. Several at
+  once: "a and b are conditional", "prefs and user answer more than one
+  way, as tagged".
+- **The lines a run took**: the engine records them where it decides them,
+  `Line{To, On}`; the store's `node_runs.took` (migration 20261101140000,
+  which drops `ways`, so older runs lose theirs); the API's `took` on a
+  node run and on the event that ends it, each a `Line`, `{to, on,
+  unhandled}`. `ways` went, and with it the engine's `came`. A line into a
+  step is taken when its step's `took` has it; a line into an answer is
+  taken as before, the only use `takenOf` has left. It came by is the
+  lines into the transform its steps took.
+- **The small fixes**: rename warnings name a case ("check's case found",
+  "check's Case 2"), a step's Unhandled body and the response's, and say
+  "connection", as the screen does. A preview's problem drops the field and
+  the step its pointer names, for an expression, a case, an Unhandled
+  body, a condition and a sample alike.
+- **Phase E**: `web/e2e/done.spec.ts` holds the Done flow and the
+  definition with no layout. `web/playwright.config.ts` starts the test
+  upstream (18090), the server (18080, private networks and the upstream's
+  port allowed) and `vite preview` (14173), whose proxy
+  `CONDUIT_API_ORIGIN` points at the server. `just e2e` makes `conduit_e2e`
+  afresh with the compose container's psql, migrates it, builds the app and
+  runs Playwright; `just check` runs it in place of its build, `just setup`
+  installs Chromium, and CI Chromium's libraries. Vitest skips `e2e/`,
+  `tsconfig.e2e.json` checks its types, and Prettier and ESLint skip its
+  results.
+- **The flow**: the test upstream's prefs answers after `?ms`, as `/slow`
+  does, so the run is seen as it goes: prefs running, user and orders 200,
+  crm waiting, then each with its time. Met while writing it: an open panel
+  narrows the canvas, so the test presses Fit View before clicking a card;
+  a card says "200" while a run streams and "200, 12 ms" once it's
+  recorded.
+- **Found and fixed**: a component test that looked for a line into an
+  answer before the canvas had drawn it passed alone and failed beside the
+  rest of its file; it waits for the line now (`response.test.tsx`). The
+  browser test called the served address once the header named it, which
+  it does before publishing too, so a slow publish answered 404; it waits
+  for "Revision 3 is served at" now.
+- **Divergence**: the Done flow joins crm to the 200 answer, as the editor
+  has answers rather than an output.
+- **Found after, in your Fixes check**: marking test_400's line into
+  merge_200 required, as the new note advises, took test_400 out of
+  merge_200's Input and showed the step skipped. Its preview ran once per
+  line that may not come, crm's 2xx and 500, each with the required line
+  too, and the steps before steered towards both at once: prefs answered
+  2xx for crm, so test_400, after prefs' 400, never ran. Now a
+  transform's preview runs once per line into it, required ones too, and a
+  run comes by the required lines first, the steps they need keeping
+  their answers, then by its own line where they let it. A line that
+  doesn't come in its run says so: "By crm · 2xx: no run comes this way
+  with these samples." A required line's run is marked "(required)". This
+  replaces "with fewer than two lines that may not come, one run", from
+  the lines as parameters, as built. A line whose step the preview
+  couldn't run, for want of a sample, still counts as one that might come,
+  as it does for a join. A condition that's false over the samples still
+  takes its step out of the Input, as no run reaches it. Checked: 11
+  mutations, each caught; Chromium through nginx, light and dark, on a copy
+  of your Fixes check with test_400 required: test_400 in merge_200's
+  Input, "By test_400 · 2xx (required)" answering 200, and crm's two lines
+  saying no run comes that way.
+- **Required is a promise and a gate** (your call, 2026-11-01, after the
+  fix above): a transform runs only once its required lines came, so its
+  expression reads their steps without checking. Marking test_400
+  required in your Fixes check shuts crm out of merge_200, as prefs answers
+  2xx or 400, never both, and crm vanished from its Input with no word why.
+  Now a line a transform's required lines shut out is a problem on that
+  line, `never_taken`: "crm's line to merge_200 can never be taken when
+  merge_200 runs: it needs prefs to answer 400 and 2xx. To run merge_200
+  after whichever line comes, mark none of its lines required; or remove
+  this one." The Required box says what it does, "A promise that test_400
+  is there whenever merge_200 runs, so its expression can read it without
+  checking: merge_200 runs only once this line came", and the Input's note
+  offers it "to run this step only when it comes". A promise without the
+  gate, the transform running once any line came and saving checking the
+  promise, was asked about and picked, then turned down for both. Checked:
+  7 mutations, 5 caught, and the 2 conditions they survived were dead, so
+  they went.
+- **Checked**: `just check` with everything staged: Go tests under `-race`
+  with the coverage floors (workflow 97.8%, engine 96.2%, runner 92.2%),
+  golangci-lint, web format, lint, typecheck and 416 tests, the browser
+  test (2 tests) on a build, and the generated code. 50 mutations, 28 in
+  the server (outcomes, steering, `took` from the engine to the API, the
+  wording, the test upstream's wait) and 22 in the editor, each caught,
+  one only after a test was added: a transform whose required line may
+  not come. Chromium through nginx, light and dark: prefs_ok's Input
+  tagging prefs "2xx or 400" and fallback "conditional", with both notes;
+  renaming fallback naming pick's case light; a run in which t was skipped
+  for want of its required line, b's line to it taken. No CSP violations
+  and no console problems.
 
 ## A transform's lines as its parameters, as built
 

@@ -34,7 +34,43 @@ func (v *validator) checkJoins(d *Definition, edges []edgeRef) []route {
 	for _, c := range conflicts {
 		v.add(fmt.Sprintf("/nodes/%d", c.node), "never_runs", "%s can never run: %s", d.Nodes[c.node].ID, c.words(d))
 	}
+	v.checkTaken(d, in, need)
 	return need
+}
+
+// checkTaken reports each line into a transform that can never be taken
+// when the transform runs: the transform's required lines need a node to
+// answer one way, and the line another. A required line is part of what the
+// transform needs, so it never clashes with it, nor does a line into an http
+// node, which needs all of them.
+func (v *validator) checkTaken(d *Definition, in [][]edgeRef, need []route) {
+	required := func(e edgeRef) bool { return e.required }
+	for u, lines := range in {
+		if need[u] == nil || !slices.ContainsFunc(lines, required) {
+			continue
+		}
+		for _, e := range lines {
+			if need[e.from] == nil {
+				continue // a node that never runs has a problem of its own
+			}
+			if c := clash(u, need[u], with(need[e.from], group{from: e.from, on: e.on})); c != nil {
+				v.add(fmt.Sprintf("/edges/%d", e.index), "never_taken", "%s's line to %s can never be taken when %s runs: %s",
+					d.Nodes[e.from].ID, d.Nodes[u].ID, d.Nodes[u].ID, c.words(d))
+			}
+		}
+	}
+}
+
+// clash is the first node, by place, that routes a and b need to answer
+// through outputs sharing none, as a conflict of node u's; nil when both
+// can hold in one run.
+func clash(u int, a, b route) *conflict {
+	for _, x := range slices.Sorted(maps.Keys(a)) {
+		if bs, ok := b[x]; ok && len(intersect(a[x], bs)) == 0 {
+			return &conflict{node: u, of: x, a: a[x], b: bs}
+		}
+	}
+	return nil
 }
 
 // graphOf is the edges into each node, and an order in which each node

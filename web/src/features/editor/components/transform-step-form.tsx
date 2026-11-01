@@ -57,9 +57,9 @@ const MAX_STATUS = 599;
 // TransformStepForm edits a transform step: one expression between the data
 // it reads and what it gives, simulated over the samples, then what follows
 // it and its Unhandled; or its cases, a tab each, each with what it reads.
-// With two or more lines into it that may not come, not being required, the
-// preview is of a run by each: the step reads what those runs read, merged,
-// and what it gives in each is shown by the line.
+// With two or more lines into it, the preview is of a run by each: the step
+// reads what those runs read, merged, and what it gives in each is shown by
+// the line.
 export function TransformStepForm({ index }: { index: number }) {
   const cases = useEditor((s) => s.draft.nodes[index]?.switch !== undefined);
   return (
@@ -78,9 +78,9 @@ export function TransformStepForm({ index }: { index: number }) {
   );
 }
 
-// ByWays is what a transform does in a run by each line into it that may
-// not come, over the samples: each line by its name, then what each shows
-// of what the step gives in that run, or that the run skips the step.
+// ByWays is what a transform does in a run by each line into it, over the
+// samples: each line by its name, a required one marked so, then what each
+// shows of what the step gives in that run, or that no run comes that way.
 function ByWays({
   ways,
   of,
@@ -99,8 +99,8 @@ function ByWays({
           <span className="font-mono">
             {e ? wayLabel(of, e.from, outputOf(e)) : `connection ${w.edge + 1}`}
           </span>
-          {w.skipped &&
-            ", a run would skip this step: a connection it needs isn't taken."}
+          {e?.required && " (required)"}
+          {w.skipped && ": no run comes this way with these samples."}
         </p>
         {!w.skipped && each(w.gives)}
       </div>

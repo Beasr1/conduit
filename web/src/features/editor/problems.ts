@@ -407,6 +407,12 @@ export function say(problem: ProblemError, of: Definition): string {
       return place.on === "step" && of.nodes[place.index]?.kind === "transform"
         ? `${problem.detail}. It runs only when every line into it marked required is taken; to run it after whichever comes, mark none of them required.`
         : `${problem.detail}. It runs only when every line into it is taken; to run it after whichever comes, join them to a transform first.`;
+    case "never_taken": {
+      // It starts with the step's id, which stays as it's written.
+      const to =
+        place.on === "connection" ? of.edges?.[place.index]?.to : undefined;
+      return `${problem.detail}. To run ${to} after whichever line comes, mark none of its lines required; or remove this one.`;
+    }
     case "unknown_output": {
       const line =
         place.on === "response"

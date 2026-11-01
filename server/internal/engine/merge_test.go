@@ -45,12 +45,18 @@ func TestRun_ATransformMergesItsLines(t *testing.T) {
 	  ],
 	  "response": {"answers": [{"status": 200, "from": "greet"}]}
 	}`)
+	// prefs answering 2xx takes its line to prefs_ok; answering 400, its line
+	// to fallback, which takes its own to prefs_ok.
 	tests := []struct {
 		id, nodes, output string
-		ways              []Way
+		prefs, fallback   []Line
 	}{
-		{"7", "prefs succeeded, fallback skipped, prefs_ok succeeded, greet succeeded", `"theme: dark"`, []Way{{From: "prefs"}}},
-		{"new", "prefs succeeded, fallback succeeded, prefs_ok succeeded, greet succeeded", `"theme: light"`, []Way{{From: "fallback"}}},
+		{"7", "prefs succeeded, fallback skipped, prefs_ok succeeded, greet succeeded", `"theme: dark"`, []Line{{To: "prefs_ok"}}, nil},
+		{
+			"new", "prefs succeeded, fallback succeeded, prefs_ok succeeded, greet succeeded", `"theme: light"`,
+			[]Line{{To: "fallback", On: 400}},
+			[]Line{{To: "prefs_ok"}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
@@ -60,13 +66,13 @@ func TestRun_ATransformMergesItsLines(t *testing.T) {
 				t.Errorf("run %s (%s), answer %d %s, err %v; want succeeded (%s), 200 %s",
 					res.Status, statuses(res), res.Answer, res.Output, res.Err, tt.nodes, tt.output)
 			}
-			if w := res.Nodes[2].Ways; !slices.Equal(w, tt.ways) {
-				t.Errorf("prefs_ok's ways = %v, want %v", w, tt.ways)
+			if p, f := res.Nodes[0].Took, res.Nodes[1].Took; !slices.Equal(p, tt.prefs) || !slices.Equal(f, tt.fallback) {
+				t.Errorf("prefs took %v, fallback %v; want %v, %v", p, f, tt.prefs, tt.fallback)
 			}
-			// The event that ends it carries them too.
+			// The event that ends prefs carries them too.
 			for _, e := range rec.events {
-				if e.Node == "prefs_ok" && e.Kind == EventSucceeded && !slices.Equal(e.Result.Ways, tt.ways) {
-					t.Errorf("prefs_ok's last event carries the ways %v, want %v", e.Result.Ways, tt.ways)
+				if e.Node == "prefs" && e.Kind == EventSucceeded && !slices.Equal(e.Result.Took, tt.prefs) {
+					t.Errorf("prefs's last event carries %v, want %v", e.Result.Took, tt.prefs)
 				}
 			}
 		})
@@ -75,8 +81,9 @@ func TestRun_ATransformMergesItsLines(t *testing.T) {
 
 // Every way that came counts, two at once among them; the expr reads the
 // steps before it by name, and a step that didn't run is missing. With none,
-// the transform is skipped, and so are the steps after it. One no line comes
-// into runs first, and comes by none.
+// the transform is skipped, and so are the steps after it. The ways it came
+// by are the lines into it the steps before it took, as their conditions
+// held.
 func TestRun_ATransformTakesWhateverCame(t *testing.T) {
 	t.Parallel()
 	p := program(t, "", `{
@@ -97,27 +104,48 @@ func TestRun_ATransformTakesWhateverCame(t *testing.T) {
 	}`)
 	tests := []struct {
 		input, nodes, output string
-		ways                 []Way
+		in                   []Line
+		came                 []string
 	}{
-		{`{"a": true, "b": true}`, "in succeeded, a succeeded, b succeeded, e succeeded, after succeeded", `{"after":{"a":"a","b":"b"}}`, []Way{{From: "a"}, {From: "b"}}},
-		{`{"a": false, "b": true}`, "in succeeded, a skipped, b succeeded, e succeeded, after succeeded", `{"after":{"b":"b"}}`, []Way{{From: "b"}}},
-		{`{"a": false, "b": false}`, "in succeeded, a skipped, b skipped, e skipped, after skipped", `{}`, nil},
+		{
+			`{"a": true, "b": true}`, "in succeeded, a succeeded, b succeeded, e succeeded, after succeeded", `{"after":{"a":"a","b":"b"}}`,
+			[]Line{{To: "a"}, {To: "b"}},
+			[]string{"a", "b"},
+		},
+		{
+			`{"a": false, "b": true}`, "in succeeded, a skipped, b succeeded, e succeeded, after succeeded", `{"after":{"b":"b"}}`,
+			[]Line{{To: "b"}},
+			[]string{"b"},
+		},
+		{`{"a": false, "b": false}`, "in succeeded, a skipped, b skipped, e skipped, after skipped", `{}`, nil, nil},
 	}
 	for _, tt := range tests {
 		res, _ := execute(t, testEngine(Options{}), p, tt.input)
-		if res.Status != StatusSucceeded || statuses(res) != tt.nodes || string(res.Output) != tt.output || !slices.Equal(res.Nodes[3].Ways, tt.ways) {
-			t.Errorf("%s: run %s (%s), output %s, ways %v, err %v; want %s, %s, %v",
-				tt.input, res.Status, statuses(res), res.Output, res.Nodes[3].Ways, res.Err, tt.nodes, tt.output, tt.ways)
-		}
-		if w := res.Nodes[0].Ways; w != nil {
-			t.Errorf("%s: in, with no line into it, came by %v", tt.input, w)
+		if res.Status != StatusSucceeded || statuses(res) != tt.nodes || string(res.Output) != tt.output ||
+			!slices.Equal(res.Nodes[0].Took, tt.in) || !slices.Equal(cameBy(res, "e"), tt.came) {
+			t.Errorf("%s: run %s (%s), output %s, in took %v, e came by %v, err %v; want %s, %s, %v, %v",
+				tt.input, res.Status, statuses(res), res.Output, res.Nodes[0].Took, cameBy(res, "e"), res.Err, tt.nodes, tt.output, tt.in, tt.came)
 		}
 	}
 }
 
+// cameBy is the nodes whose answers took a line to node id, in the order
+// they're declared.
+func cameBy(res *Result, id string) []string {
+	var out []string
+	for _, n := range res.Nodes {
+		for _, l := range n.Took {
+			if l.To == id {
+				out = append(out, n.ID)
+			}
+		}
+	}
+	return out
+}
+
 // A transform's expr failing fails it, and its Unhandled block takes that,
-// as it takes any node's failure; the ways that came are recorded all the
-// same.
+// as it takes any node's failure; the line it came by is recorded all the
+// same, and so is the one from its Unhandled that it took.
 func TestRun_ATransformsExprThatFails(t *testing.T) {
 	t.Parallel()
 	p := program(t, "", `{
@@ -133,14 +161,15 @@ func TestRun_ATransformsExprThatFails(t *testing.T) {
 	if res.Status != StatusSucceeded || !strings.HasPrefix(string(res.Output), `{"code":"workflow_error","detail":"expr: `) {
 		t.Errorf("run %s (%s), output %s, err %v", res.Status, statuses(res), res.Output, res.Err)
 	}
-	if e := res.Nodes[1]; e.Status != StatusFailed || !e.Caught || !slices.Equal(e.Ways, []Way{{From: "a"}}) {
-		t.Errorf("e %s, caught %v, ways %v", e.Status, e.Caught, e.Ways)
+	if a, e := res.Nodes[0], res.Nodes[1]; e.Status != StatusFailed || !e.Caught || !slices.Equal(a.Took, []Line{{To: "e"}}) ||
+		!slices.Equal(e.Took, []Line{{To: "caught", On: workflow.OnUnhandled}}) {
+		t.Errorf("e %s, caught %v, took %v; a took %v", e.Status, e.Caught, e.Took, a.Took)
 	}
 }
 
-// A transform joined to a step's Unhandled records the way it came by as
-// that.
-func TestRun_ATransformRecordsAnUnhandledWay(t *testing.T) {
+// A step that fails into its Unhandled records the line it took from there;
+// one that answers, the line from its value.
+func TestRun_AStepRecordsTheLineFromItsUnhandled(t *testing.T) {
 	t.Parallel()
 	p := program(t, "", `{
 	  "nodes": [
@@ -152,14 +181,14 @@ func TestRun_ATransformRecordsAnUnhandledWay(t *testing.T) {
 	}`)
 	for n, want := range map[string]struct {
 		output string
-		ways   []Way
+		took   []Line
 	}{
-		`"2"`: {"2", []Way{{From: "count"}}},
-		`"x"`: {"0", []Way{{From: "count", On: workflow.OnUnhandled}}},
+		`"2"`: {"2", []Line{{To: "e"}}},
+		`"x"`: {"0", []Line{{To: "e", On: workflow.OnUnhandled}}},
 	} {
 		res, _ := execute(t, testEngine(Options{}), p, `{"n": `+n+`}`)
-		if string(res.Output) != want.output || !slices.Equal(res.Nodes[1].Ways, want.ways) {
-			t.Errorf("n %s: output %s (%v), ways %v; want %s, %v", n, res.Output, res.Err, res.Nodes[1].Ways, want.output, want.ways)
+		if string(res.Output) != want.output || !slices.Equal(res.Nodes[0].Took, want.took) {
+			t.Errorf("n %s: output %s (%v), count took %v; want %s, %v", n, res.Output, res.Err, res.Nodes[0].Took, want.output, want.took)
 		}
 	}
 }
@@ -233,13 +262,14 @@ func TestSimulate_ATransformsWays(t *testing.T) {
 	if got := problemCodes(pv); got != "/nodes/0/request/method invalid_method" {
 		t.Errorf("a problem in both runs: %s", got)
 	}
-	// With the line from fallback required, there's one way left that may
-	// not come, so one run, which comes by the required line: prefs answers
-	// 400, and fallback runs.
+	// With the line from fallback required, every run comes by it: prefs
+	// answers 400, so the run by prefs' 2xx doesn't take that line, and
+	// fallback's gives its theme.
 	fallback := func(d *workflow.Definition) { d.Edges[2].Required = true }
 	pv = previewOf(t, merged, "prefs_ok", fallback)
-	if pv.Ways != nil || pv.Skipped || !sameJSON(t, pv.Gives, `{"theme": "light"}`) {
-		t.Errorf("fallback required: skipped %v, gives %s, ways %+v", pv.Skipped, pv.Gives, pv.Ways)
+	if pv.Skipped || len(pv.Ways) != 2 || !pv.Ways[0].Skipped || !sameJSON(t, pv.Ways[1].Gives, `{"theme": "light"}`) ||
+		!strings.Contains(string(pv.Reads), `"prefs":{"status":400`) {
+		t.Errorf("fallback required: skipped %v, ways %+v, reads %s", pv.Skipped, pv.Ways, pv.Reads)
 	}
 	// A step after it comes by its required line too, and so does a
 	// connection out of it.
@@ -280,8 +310,9 @@ func TestSimulate_RequiredLinesCome(t *testing.T) {
 		d.Edges[2].Required = true
 		d.Edges = append(d.Edges, workflow.Edge{From: "c", To: "prefs_ok", Required: true})
 	})
-	if pv.Skipped || !sameJSON(t, pv.Gives, `{"theme": "light"}`) {
-		t.Errorf("two required lines: skipped %v, gives %s, problems %s", pv.Skipped, pv.Gives, problemCodes(pv))
+	if pv.Skipped || len(pv.Ways) != 3 || !pv.Ways[0].Skipped ||
+		!sameJSON(t, pv.Ways[1].Gives, `{"theme": "light"}`) || !sameJSON(t, pv.Ways[2].Gives, `{"theme": "light"}`) {
+		t.Errorf("two required lines: skipped %v, ways %+v, problems %s", pv.Skipped, pv.Ways, problemCodes(pv))
 	}
 	marked := `{"nodes": [
 	    {"id": "a", "kind": "http", "request": {"method": "GET", "url": "https://a.example.com/v1"}, "sample": {"body": "ok"},
@@ -338,5 +369,57 @@ func TestRun_RequiredLines(t *testing.T) {
 		if got := statuses(res) + " " + string(res.Output); res.Status != StatusSucceeded || got != want {
 			t.Errorf("%s: run %s, %s, err %v; want %s", input, res.Status, got, res.Err, want)
 		}
+	}
+	// t is skipped without a, but b took its line to t all the same.
+	res, _ := execute(t, testEngine(Options{}), p, `{"a": false, "b": true}`)
+	if b := res.Nodes[2]; !slices.Equal(b.Took, []Line{{To: "t"}}) {
+		t.Errorf("b took %v, want its line to t", b.Took)
+	}
+}
+
+// fixes is a merge as the Fixes check has it: test_400 follows prefs' 400,
+// crm its 2xx, and merge takes test_400, crm's 2xx or crm's 500.
+const fixes = `{
+  "nodes": [
+    {"id": "prefs", "kind": "http", "request": {"method": "GET", "url": "https://prefs.example.com/v1"},
+     "sample": {"body": {"theme": "dark"}}, "outputs": [{"status": 400, "sample": {"body": {"error": "no prefs"}}}]},
+    {"id": "crm", "kind": "http", "request": {"method": "GET", "url": "https://crm.example.com/v1"},
+     "sample": {"body": {"id": "c-1"}}, "outputs": [{"status": 500, "sample": {"body": {"error": "down"}}}]},
+    {"id": "test_400", "kind": "http", "request": {"method": "GET", "url": "https://prefs.example.com/v1"}, "sample": {"body": {"node": "t4"}}},
+    {"id": "merge", "kind": "transform", "expr": "$exists(nodes.test_400) ? nodes.test_400.body : nodes.crm.body"}
+  ],
+  "edges": [
+    {"from": "prefs", "to": "crm"}, {"from": "prefs", "to": "test_400", "on": 400},
+    {"from": "test_400", "to": "merge"}, {"from": "crm", "to": "merge"}, {"from": "crm", "to": "merge", "on": 500}
+  ]
+}`
+
+// A transform's preview runs by each line into it, a required one too, and
+// its required lines come first: with test_400's required, prefs answers
+// 400 in every run, so merge runs by test_400 and never by crm, whose
+// runs say so, and test_400 is in what merge reads.
+func TestSimulate_ARequiredLineComesFirst(t *testing.T) {
+	t.Parallel()
+	pv := previewOf(t, fixes, "merge", func(d *workflow.Definition) { d.Edges[2].Required = true })
+	if pv.Skipped || len(pv.Ways) != 3 ||
+		pv.Ways[0].Edge != 2 || pv.Ways[0].Skipped || !sameJSON(t, pv.Ways[0].Gives, `{"node": "t4"}`) ||
+		!pv.Ways[1].Skipped || pv.Ways[1].Gives != nil || !pv.Ways[2].Skipped {
+		t.Errorf("skipped %v, ways %+v", pv.Skipped, pv.Ways)
+	}
+	if !sameJSON(t, pv.Reads, `{"input": null, "nodes": {
+	    "prefs": {"status": 400, "headers": {}, "body": {"error": "no prefs"}},
+	    "test_400": {"status": 200, "headers": {}, "body": {"node": "t4"}}}}`) {
+		t.Errorf("merge reads %s", pv.Reads)
+	}
+	// Not required, each line has a run of its own.
+	pv = previewOf(t, fixes, "merge", nil)
+	if pv.Skipped || len(pv.Ways) != 3 || pv.Ways[0].Skipped || pv.Ways[1].Skipped || pv.Ways[2].Skipped {
+		t.Errorf("none required: skipped %v, ways %+v", pv.Skipped, pv.Ways)
+	}
+	// With no sample for crm's 500, the preview can't tell whether its line
+	// comes, so it doesn't say none does; the problem says why.
+	pv = previewOf(t, fixes, "merge", func(d *workflow.Definition) { d.Nodes[1].Outputs[0].Sample = nil })
+	if len(pv.Ways) != 3 || pv.Ways[2].Skipped || !strings.Contains(problemCodes(pv), "/nodes/1/outputs/0/sample missing_sample") {
+		t.Errorf("no sample for crm's 500: ways %+v, problems %s", pv.Ways, problemCodes(pv))
 	}
 }

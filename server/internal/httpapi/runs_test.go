@@ -176,8 +176,8 @@ func TestRuns_ACaughtFailure(t *testing.T) {
 	}
 }
 
-// A transform says which lines it came by, live and on the run's record.
-func TestRuns_ATransformsWays(t *testing.T) {
+// A node says which lines its answer took, live and on the run's record.
+func TestRuns_TheLinesTaken(t *testing.T) {
 	t.Parallel()
 	wr := create(t, strings.ReplaceAll(`{"nodes": [
 	    {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}, "outputs": [{"status": 404}]},
@@ -188,12 +188,12 @@ func TestRuns_ATransformsWays(t *testing.T) {
 	if got, want := eventList(t, events), "1 user started, 2 user succeeded, 3 found started, 4 found succeeded, end run succeeded"; got != want {
 		t.Fatalf("events: %s\nwant:   %s", got, want)
 	}
-	if n := strict[gen.NodeEvent](t, []byte(events[3].data)); !slices.Equal(n.Ways, []gen.Way{{From: "user"}}) {
-		t.Errorf("found's end = %s", events[3].data)
+	if n := strict[gen.NodeEvent](t, []byte(events[1].data)); !slices.Equal(n.Took, []gen.Line{{To: "found"}}) {
+		t.Errorf("user's end = %s", events[1].data)
 	}
 	got := strict[gen.Run](t, call(t, http.MethodGet, "/v1/runs/"+run.ID, "").body)
-	if user, found := got.Nodes[0], got.Nodes[1]; user.Ways != nil || !slices.Equal(found.Ways, []gen.Way{{From: "user"}}) {
-		t.Errorf("user's ways %+v, found's %+v", user.Ways, found.Ways)
+	if user, found := got.Nodes[0], got.Nodes[1]; !slices.Equal(user.Took, []gen.Line{{To: "found"}}) || found.Took != nil {
+		t.Errorf("user took %+v, found %+v", user.Took, found.Took)
 	}
 }
 

@@ -26,7 +26,7 @@ type NodeEvent struct {
 	At         time.Time
 	HTTPStatus int      // on the event that ends an http node that got an answer, or a transform's case
 	Failure    *Failure // on the event that ends a failed node
-	Ways       []Way    // on the event that ends a merge that ran
+	Took       []Line   // on the event that ends a node, the lines its answer took
 }
 
 // keep is how long an ended run's events stay in memory, for a client that

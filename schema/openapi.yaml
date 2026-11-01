@@ -646,9 +646,14 @@ components:
           x-go-type: json.RawMessage
         ways:
           type: array
-          description: A transform two or more of whose edges aren't required, a result for a run that comes by each of those, in the definition's order. Each other step answers through the outputs that lead to that edge's source.
+          description: A transform with two or more edges into it, a result for a run by each, in the definition's order. Each run comes by the transform's required edges first, and by its own where they let it; the steps before answer through the outputs that lead there.
           items:
             $ref: "#/components/schemas/WayPreview"
+        outcomes:
+          type: object
+          description: For a step, or a connection's source, what each step before it may have done in a run that reaches it, by id, worked out from the edges whatever the samples. Absent when it never runs, or the edges have a cycle.
+          additionalProperties:
+            $ref: "#/components/schemas/StepOutcome"
         taken:
           type: boolean
           description: A connection's preview only, whether a run would take it with these samples.
@@ -669,6 +674,20 @@ components:
           items:
             $ref: "#/components/schemas/ProblemError"
 
+    StepOutcome:
+      type: object
+      description: What a step may have done in a run that reaches a step after it.
+      required: [outputs, conditional]
+      properties:
+        outputs:
+          type: array
+          items:
+            type: integer
+          description: The outputs it may have answered through, sorted. -1 is its Unhandled, 0 is 2xx and a transform's one value, and any other is a status, a case's among them.
+        conditional:
+          type: boolean
+          description: A run may reach the step after it without it, having skipped it.
+
     WayPreview:
       type: object
       description: What a transform gives in a run that comes by one edge into it, over the samples.
@@ -682,7 +701,7 @@ components:
           x-go-type: json.RawMessage
         skipped:
           type: boolean
-          description: That run would skip the transform, its required edges or that one not taken.
+          description: No run comes by the edge, as that run doesn't take it, or skips the transform when a required edge isn't taken.
 
     UnhandledPreview:
       type: object
@@ -908,11 +927,11 @@ components:
           $ref: "#/components/schemas/NodeResponse"
         error:
           $ref: "#/components/schemas/RunError"
-        ways:
+        took:
           type: array
-          description: A transform node's, the edges into it that were taken, in the definition's order.
+          description: The lines the node's answer took, of those leaving the output it answered through, the ones whose condition held, in the definition's order. Absent for a node that took none.
           items:
-            $ref: "#/components/schemas/Way"
+            $ref: "#/components/schemas/Line"
         started_at:
           type: string
           format: date-time
@@ -985,22 +1004,22 @@ components:
           description: On the event that ends an http node that got an answer, or a transform whose case gave it.
         error:
           $ref: "#/components/schemas/RunError"
-        ways:
+        took:
           type: array
-          description: On the event that ends a transform node that ran, the edges into it that were taken.
+          description: On the event that ends a node, the lines its answer took, as a node run has them.
           items:
-            $ref: "#/components/schemas/Way"
+            $ref: "#/components/schemas/Line"
 
-    Way:
+    Line:
       type: object
-      description: An edge into a transform node that was taken, as the definition writes it.
-      required: [from]
+      description: An edge a node's answer took, as the definition writes it, from that node.
+      required: [to]
       properties:
-        from:
+        to:
           type: string
         on:
           type: integer
-          description: The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform.
+          description: The output it left, as an edge's. Absent means 2xx, and the only output of a transform.
         unhandled:
           type: boolean
-          description: It left from's Unhandled block, and on is absent.
+          description: It left the node's Unhandled block, and on is absent.

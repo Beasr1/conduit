@@ -31,4 +31,7 @@ jobs:
           version: v2.15.0
           install-only: true
       - run: just setup
+      # The libraries Chromium needs on Ubuntu, for the browser test; just
+      # setup installed Chromium itself.
+      - run: cd web && corepack pnpm exec playwright install-deps chromium
       - run: just check

@@ -102,9 +102,10 @@ export function ConnectionForm({ index }: { index: number }) {
           <FieldContent>
             <FieldLabel htmlFor="connection-required">Required</FieldLabel>
             <FieldDescription>
-              {edge.to} runs only if this is taken. Unmarked, {edge.to} can run
-              without it: a transform runs once every line into it marked
-              required is taken, or, with none marked, any.
+              A promise that {edge.from} is there whenever {edge.to} runs, so
+              its expression can read it without checking: {edge.to} runs only
+              once this line came. Unmarked, {edge.to} may run without it, once
+              another line came. Saving says where a promise shuts a line out.
             </FieldDescription>
             <FieldError errors={asErrors(required)} />
           </FieldContent>

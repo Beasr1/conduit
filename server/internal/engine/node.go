@@ -51,12 +51,12 @@ func document(input json.RawMessage, parts []docPart) ([]byte, error) {
 }
 
 // exec runs node i on its own goroutine and reports back whatever happens,
-// a panic included. parts is what it reads, and came, for a transform,
-// the edges taken into it. A failure of the node's own goes to its Unhandled
-// block when a line leaves that: the node ends failed, giving what the
-// block's body gives, and the run goes on down those lines. The run's end,
-// by its deadline or a failure elsewhere, and a panic, our bug, never do.
-func (r *run) exec(i int, parts []docPart, came []int) {
+// a panic included. parts is what it reads. A failure of the node's own
+// goes to its Unhandled block when a line leaves that: the node ends
+// failed, giving what the block's body gives, and the run goes on down
+// those lines. The run's end, by its deadline or a failure elsewhere, and a
+// panic, our bug, never do.
+func (r *run) exec(i int, parts []docPart) {
 	var o outcome
 	defer func() {
 		if v := recover(); v != nil {
@@ -75,7 +75,6 @@ func (r *run) exec(i int, parts []docPart, came []int) {
 		o = r.call(i, doc)
 	case n.kind == workflow.NodeKindTransform:
 		o = r.transform(n, doc)
-		o.result.Ways = r.ways(came)
 	}
 	on := exitOf(n.kind, o.result.HTTPStatus)
 	if o.err != nil {
@@ -103,7 +102,9 @@ func (r *run) exec(i int, parts []docPart, came []int) {
 	// keeps a slow condition off the scheduler.
 	self := append(parts[:len(parts):len(parts)], docPart{id: n.id, entry: o.entry})
 	if doc, err = document(r.input, self); err == nil {
-		o.taken, err = r.conditions(n, doc, on)
+		if o.taken, err = r.conditions(n, doc, on); err == nil {
+			o.result.Took = r.took(n, o.taken)
+		}
 	}
 	if err != nil && o.result.Caught {
 		// A condition on a line from Unhandled that fails fails the run, and
@@ -382,16 +383,15 @@ func (n *node) give(ctx context.Context, doc []byte) (status int, body json.RawM
 	return 0, nil, "/switch", ErrNoCase
 }
 
-// ways is the edges taken into a transform, came, as a run records them;
-// nil for one no edge comes into.
-func (r *run) ways(came []int) []Way {
-	if len(came) == 0 {
-		return nil
-	}
-	out := make([]Way, len(came))
-	for j, k := range came {
-		e := r.p.edges[k]
-		out[j] = Way{From: r.p.nodes[e.from].id, On: e.on}
+// took is the edges n's answer took, taken, as a run records them; nil
+// for none.
+func (r *run) took(n *node, taken []bool) []Line {
+	var out []Line
+	for j, k := range n.out {
+		if taken[j] {
+			e := r.p.edges[k]
+			out = append(out, Line{To: r.p.nodes[e.to].id, On: e.on})
+		}
 	}
 	return out
 }

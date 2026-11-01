@@ -200,6 +200,16 @@ type Health struct {
 	Status string `json:"status"`
 }
 
+// Line An edge a node's answer took, as the definition writes it, from that node.
+type Line struct {
+	// On The output it left, as an edge's. Absent means 2xx, and the only output of a transform.
+	On int    `json:"on,omitempty,omitzero"`
+	To string `json:"to"`
+
+	// Unhandled It left the node's Unhandled block, and on is absent.
+	Unhandled bool `json:"unhandled,omitempty,omitzero"`
+}
+
 // NodeEvent The data of a `node` event in a run's stream.
 type NodeEvent struct {
 	At time.Time `json:"at"`
@@ -215,8 +225,8 @@ type NodeEvent struct {
 	Kind       NodeEventKind `json:"kind"`
 	Node       string        `json:"node"`
 
-	// Ways On the event that ends a transform node that ran, the edges into it that were taken.
-	Ways []Way `json:"ways,omitempty,omitzero"`
+	// Took On the event that ends a node, the lines its answer took, as a node run has them.
+	Took []Line `json:"took,omitempty,omitzero"`
 }
 
 // NodeEventKind defines model for NodeEvent.Kind.
@@ -272,8 +282,8 @@ type NodeRun struct {
 	StartedAt time.Time     `json:"started_at,omitempty,omitzero"`
 	Status    NodeRunStatus `json:"status"`
 
-	// Ways A transform node's, the edges into it that were taken, in the definition's order.
-	Ways []Way `json:"ways,omitempty,omitzero"`
+	// Took The lines the node's answer took, of those leaving the output it answered through, the ones whose condition held, in the definition's order. Absent for a node that took none.
+	Took []Line `json:"took,omitempty,omitzero"`
 }
 
 // NodeRunStatus defines model for NodeRun.Status.
@@ -283,6 +293,9 @@ type NodeRunStatus string
 type Preview struct {
 	// Gives A transform step's value, or the workflow's output. Absent when it gave none, and for a transform with ways, as each way gives its own.
 	Gives json.RawMessage `json:"gives,omitempty,omitzero"`
+
+	// Outcomes For a step, or a connection's source, what each step before it may have done in a run that reaches it, by id, worked out from the edges whatever the samples. Absent when it never runs, or the edges have a cycle.
+	Outcomes map[string]StepOutcome `json:"outcomes,omitempty,omitzero"`
 
 	// Problems What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
 	Problems []ProblemError `json:"problems"`
@@ -302,7 +315,7 @@ type Preview struct {
 	// Unhandled A step with an Unhandled body, failing into the block with an error made up, as a preview calls nothing.
 	Unhandled UnhandledPreview `json:"unhandled,omitempty,omitzero"`
 
-	// Ways A transform two or more of whose edges aren't required, a result for a run that comes by each of those, in the definition's order. Each other step answers through the outputs that lead to that edge's source.
+	// Ways A transform with two or more edges into it, a result for a run by each, in the definition's order. Each run comes by the transform's required edges first, and by its own where they let it; the steps before answer through the outputs that lead there.
 	Ways []WayPreview `json:"ways,omitempty,omitzero"`
 }
 
@@ -505,6 +518,15 @@ type StartRun struct {
 	Revision int `json:"revision,omitempty,omitzero"`
 }
 
+// StepOutcome What a step may have done in a run that reaches a step after it.
+type StepOutcome struct {
+	// Conditional A run may reach the step after it without it, having skipped it.
+	Conditional bool `json:"conditional"`
+
+	// Outputs The outputs it may have answered through, sorted. -1 is its Unhandled, 0 is 2xx and a transform's one value, and any other is a status, a case's among them.
+	Outputs []int `json:"outputs"`
+}
+
 // UnhandledPreview A step with an Unhandled body, failing into the block with an error made up, as a preview calls nothing.
 type UnhandledPreview struct {
 	// Gives What the body gives. Absent when it gave nothing, or failed, as the preview's problems then say.
@@ -520,17 +542,6 @@ type Validation struct {
 	Problems []ProblemError `json:"problems"`
 }
 
-// Way An edge into a transform node that was taken, as the definition writes it.
-type Way struct {
-	From string `json:"from"`
-
-	// On The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform.
-	On int `json:"on,omitempty,omitzero"`
-
-	// Unhandled It left from's Unhandled block, and on is absent.
-	Unhandled bool `json:"unhandled,omitempty,omitzero"`
-}
-
 // WayPreview What a transform gives in a run that comes by one edge into it, over the samples.
 type WayPreview struct {
 	// Edge The edge, by its place in the definition's edges.
@@ -539,7 +550,7 @@ type WayPreview struct {
 	// Gives The transform's value in that run. Absent when it gave none.
 	Gives json.RawMessage `json:"gives,omitempty,omitzero"`
 
-	// Skipped That run would skip the transform, its required edges or that one not taken.
+	// Skipped No run comes by the edge, as that run doesn't take it, or skips the transform when a required edge isn't taken.
 	Skipped bool `json:"skipped"`
 }
 

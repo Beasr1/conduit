@@ -1,3 +1,6 @@
 dist
 src/gen
 pnpm-lock.yaml
+# the browser test's results and traces
+test-results
+playwright-report

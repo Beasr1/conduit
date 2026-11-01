@@ -14,7 +14,7 @@ const tokenRules = [
 ];
 
 export default defineConfig([
-  globalIgnores(["dist", "src/gen"]),
+  globalIgnores(["dist", "src/gen", "test-results", "playwright-report"]),
   js.configs.recommended,
   tseslint.configs.recommended,
   reactHooks.configs.flat.recommended,

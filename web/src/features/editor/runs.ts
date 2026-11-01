@@ -1,4 +1,4 @@
-import { UNHANDLED } from "@/features/editor/flow";
+import { outputOf, UNHANDLED } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 
 type NodeEvent = components["schemas"]["NodeEvent"];
@@ -6,12 +6,12 @@ type NodeRun = components["schemas"]["NodeRun"];
 type RunError = components["schemas"]["RunError"];
 type RunSummary = components["schemas"]["RunSummary"];
 type RunStatus = RunSummary["status"];
-type Way = components["schemas"]["Way"];
+type Line = components["schemas"]["Line"];
 
 // StepRun is how one step went in the run shown: its state, the status it
 // got back, if it's an HTTP step that got one, its attempts and time, why
-// it failed, and the ways a transform came by. A step is waiting while the
-// run hasn't reached it, and "not run" when the run ended without it.
+// it failed, and the lines its answer took. A step is waiting while the run
+// hasn't reached it, and "not run" when the run ended without it.
 export interface StepRun {
   state:
     | "waiting"
@@ -26,7 +26,7 @@ export interface StepRun {
   attempts?: number;
   ms?: number;
   error?: RunError;
-  came?: Way[];
+  took?: Line[];
 }
 
 // stepRunOf is how a step went: as the server recorded it, once it has,
@@ -46,7 +46,7 @@ export function stepRunOf(
       attempts: recorded.attempts,
       ...(from === undefined ? {} : { ms: Date.parse(to) - Date.parse(from) }),
       ...(recorded.error ? { error: recorded.error } : {}),
-      ...(recorded.ways ? { came: recorded.ways } : {}),
+      ...(recorded.took ? { took: recorded.took } : {}),
     };
   }
   if (last)
@@ -55,7 +55,7 @@ export function stepRunOf(
       ...(last.http_status === undefined ? {} : { status: last.http_status }),
       attempts: last.attempt,
       ...(last.error ? { error: last.error } : {}),
-      ...(last.ways ? { came: last.ways } : {}),
+      ...(last.took ? { took: last.took } : {}),
     };
   return { state: run === "running" ? "waiting" : "not run" };
 }
@@ -95,13 +95,10 @@ export function said(run: StepRun): string {
   }
 }
 
-// takenOf says whether a run took a line: its step answered through the
-// output the line leaves on (on, absent for 2xx and a transform's one, or
-// UNHANDLED), and the step it leads to ran. It's undefined until both have got that
-// far. The server doesn't record which lines it took, so a line whose
-// condition failed, into a step another line led on, counts as taken.
-// TODO(plan 04): the engine records the lines a run took, so this needn't
-// guess.
+// takenOf says whether a run took a line into an answer: its step answered
+// through the output the line leaves on (on, absent for 2xx and a
+// transform's one, or UNHANDLED), and the run answered with it, as to says.
+// It's undefined until both have got that far.
 export function takenOf(
   on: number | undefined,
   from: StepRun,
@@ -113,6 +110,18 @@ export function takenOf(
   if (way === undefined || way !== (on ?? 0)) return false;
   if (to.state === "waiting") return undefined;
   return !["skipped", "not run"].includes(to.state);
+}
+
+// tookLine says whether a run took a line into a step: once the step the
+// line leaves (from) has ended, whether its answer took the line to the step
+// to, leaving on on. It's undefined until then.
+export function tookLine(
+  on: number | undefined,
+  from: StepRun,
+  to: string,
+): boolean | undefined {
+  if (["waiting", "running", "retrying"].includes(from.state)) return undefined;
+  return (from.took ?? []).some((l) => l.to === to && outputOf(l) === on);
 }
 
 // wayOf is the output a step that ended answered through: 0 for 2xx and a

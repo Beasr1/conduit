@@ -12,6 +12,7 @@ import type { components } from "@/gen/schema";
 type Definition = components["schemas"]["Definition"];
 type Case = components["schemas"]["Case"];
 type DefinitionNode = components["schemas"]["Node"];
+type StepOutcome = components["schemas"]["StepOutcome"];
 
 // Every node is drawn at this size, or taller to fit its outputs, so placing
 // nodes and drawing them agree.
@@ -147,11 +148,45 @@ export function wayLabel(
   from: string,
   on: number | undefined,
 ): string {
-  if (on === UNHANDLED) return `${from} · Unhandled`;
-  const node = definition.nodes.find((n) => n.id === from);
-  if (node?.kind === "http") return `${from} · ${on ?? "2xx"}`;
-  const exit = exitsOf(node).find((e) => e.status === on);
-  return exit ? `${from} · ${exit.label}` : from;
+  const name = outputName(
+    definition.nodes.find((n) => n.id === from),
+    on,
+  );
+  return name === undefined ? from : `${from} · ${name}`;
+}
+
+// outputName is a step's output as the screen names it: an HTTP step's
+// response by its status, "2xx" for none or 0, a case by its name,
+// Unhandled; undefined for a transform's one value.
+function outputName(
+  node: DefinitionNode | undefined,
+  on: number | undefined,
+): string | undefined {
+  if (on === UNHANDLED) return "Unhandled";
+  if (node?.kind === "http")
+    return on === undefined || on === 0 ? "2xx" : String(on);
+  return exitsOf(node).find((e) => e.status === on)?.label;
+}
+
+// outcomeTag is how a step's Input tags an earlier step, from what it may
+// have done in a run that reaches this one: "conditional" when the run may
+// have skipped it, the outputs it may have answered through when there are
+// several, "2xx or 400", Unhandled last, or both; undefined when it surely
+// gave the one.
+export function outcomeTag(
+  node: DefinitionNode | undefined,
+  outcome: StepOutcome,
+): string | undefined {
+  const tags = [];
+  if (outcome.conditional) tags.push("conditional");
+  if (outcome.outputs.length > 1) {
+    const last = (on: number) => (on === UNHANDLED ? 1 : 0);
+    const outputs = outcome.outputs.toSorted((a, b) => last(a) - last(b));
+    tags.push(
+      outputs.map((on) => outputName(node, on) ?? "value").join(" or "),
+    );
+  }
+  return tags.length > 0 ? tags.join(" · ") : undefined;
 }
 
 // The response card's key. "#" can't appear in a node id, so the card is

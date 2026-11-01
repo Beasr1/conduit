@@ -372,9 +372,10 @@ func TestServe_ACasesStatusIsRecorded(t *testing.T) {
 	}
 }
 
-// A transform is recorded with the lines it came by, as the definition
-// writes those edges; one with no line into it has none.
-func TestServe_ATransformsWaysAreRecorded(t *testing.T) {
+// Each node is recorded with the lines its answer took, as the definition
+// writes those edges: from its value, or from its Unhandled; one with no
+// line out of it has none.
+func TestServe_TheLinesTakenAreRecorded(t *testing.T) {
 	t.Parallel()
 	r := newRunner(t, Options{})
 	w := saveWorkflow(t, "", `{"nodes": [{"id": "count", "kind": "transform", "expr": "$number(input.n)"},
@@ -383,10 +384,10 @@ func TestServe_ATransformsWaysAreRecorded(t *testing.T) {
 	  "response": {"answers": [{"status": 200, "from": "e"}]}}`)
 	for input, want := range map[string]struct {
 		output string
-		ways   []Way
+		took   []Line
 	}{
-		`{"n": "2"}`:   {"2", []Way{{From: "count"}}},
-		`{"n": "two"}`: {"0", []Way{{From: "count", Unhandled: true}}},
+		`{"n": "2"}`:   {"2", []Line{{To: "e"}}},
+		`{"n": "two"}`: {"0", []Line{{To: "e", Unhandled: true}}},
 	} {
 		out, err := r.Serve(t.Context(), w.Slug, json.RawMessage(input))
 		if err != nil {
@@ -399,8 +400,8 @@ func TestServe_ATransformsWaysAreRecorded(t *testing.T) {
 		if err != nil || len(nodes) != 2 {
 			t.Fatalf("%s: NodeRuns() = %+v, %v", input, nodes, err)
 		}
-		if nodes[0].Ways != nil || !slices.Equal(decode[[]Way](t, nodes[1].Ways), want.ways) {
-			t.Errorf("%s: count's ways %s, e's %s", input, nodes[0].Ways, nodes[1].Ways)
+		if !slices.Equal(decode[[]Line](t, nodes[0].Took), want.took) || nodes[1].Took != nil {
+			t.Errorf("%s: count took %s, e %s", input, nodes[0].Took, nodes[1].Took)
 		}
 	}
 }

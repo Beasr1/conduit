@@ -1,6 +1,7 @@
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { pathOf } from "@/features/editor/paths";
 
 // How many items of an array the tree shows; the rest are counted.
@@ -10,14 +11,17 @@ const SHOWN = 50;
 // hands over its JSONata path, to put in an expression; what holds more
 // expands and collapses. The first three levels start open, so a step's body
 // shows its fields: nodes › user › body › email, except the paths in folded.
+// A field whose path tags has gets that tag beside its name.
 export function DataTree({
   value,
   onPick,
   folded = new Set(),
+  tags = new Map(),
 }: {
   value: unknown;
   onPick: (path: string) => void;
   folded?: ReadonlySet<string>;
+  tags?: ReadonlyMap<string, string>;
 }) {
   return (
     <ul className="flex flex-col gap-0.5 font-mono text-xs">
@@ -27,6 +31,7 @@ export function DataTree({
         depth={0}
         onPick={onPick}
         folded={folded}
+        tags={tags}
       />
     </ul>
   );
@@ -38,12 +43,14 @@ function Children({
   depth,
   onPick,
   folded,
+  tags,
 }: {
   value: unknown;
   path: string;
   depth: number;
   onPick: (path: string) => void;
   folded: ReadonlySet<string>;
+  tags: ReadonlyMap<string, string>;
 }) {
   if (Array.isArray(value)) {
     const more = value.length - SHOWN;
@@ -58,6 +65,7 @@ function Children({
             depth={depth}
             onPick={onPick}
             folded={folded}
+            tags={tags}
           />
         ))}
         {more > 0 && <li className="text-muted-foreground">and {more} more</li>}
@@ -74,6 +82,7 @@ function Children({
         depth={depth}
         onPick={onPick}
         folded={folded}
+        tags={tags}
       />
     ));
   return null;
@@ -86,6 +95,7 @@ function Entry({
   depth,
   onPick,
   folded,
+  tags,
 }: {
   name: string;
   value: unknown;
@@ -93,7 +103,9 @@ function Entry({
   depth: number;
   onPick: (path: string) => void;
   folded: ReadonlySet<string>;
+  tags: ReadonlyMap<string, string>;
 }) {
+  const tag = tags.get(path);
   const holds = Array.isArray(value)
     ? value.length > 0
     : isObject(value) && Object.keys(value).length > 0;
@@ -122,6 +134,11 @@ function Entry({
         >
           {name}
         </button>
+        {tag !== undefined && (
+          <Badge variant="outline" className="font-sans">
+            {tag}
+          </Badge>
+        )}
         {!holds && (
           <span className="break-all text-muted-foreground">
             {JSON.stringify(value)}
@@ -141,6 +158,7 @@ function Entry({
             depth={depth + 1}
             onPick={onPick}
             folded={folded}
+            tags={tags}
           />
         </ul>
       )}

@@ -109,6 +109,17 @@ keeps serving.
 | JSONata is evaluated only through `internal/transform` | already a rule | checks under the same guardrails |
 | The definition grows by optional fields, as `sample` and `outputs` did | the habit | `tests` added with no migration of saved revisions |
 
+## Moved here from 04 (2026-11-01, your call)
+
+Left over when the graph editor was finished, and closer to what 07 does
+with schemas and samples than to the editor:
+- **An expression that reads what its samples lack**, or the wrong type,
+  marked under its field: the schema inferred from a sample (04,
+  samples) says a path isn't there, and an OpenAPI schema from the
+  library can say more.
+- **Fetching a sample from a GET**: one call to the step's URL, through
+  the SSRF guard, kept as its sample, as a run's response can be.
+
 ## Open questions (decide when 07 starts)
 
 - At Publish, live tests: run again, require the revision's last live

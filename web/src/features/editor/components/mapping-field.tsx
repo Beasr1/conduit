@@ -10,6 +10,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { DataTree } from "@/features/editor/components/data-tree";
 import { Where } from "@/features/editor/components/problem-list";
+import { outcomeTag, UNHANDLED } from "@/features/editor/flow";
 import { asErrors } from "@/features/editor/hooks/use-problems";
 import type { usePreview } from "@/features/editor/hooks/use-preview";
 import { pathOf } from "@/features/editor/paths";
@@ -121,7 +122,8 @@ export function MappingField({
 // Reads is what an expression reads, simulated over the samples: the run's
 // input, and what the steps before it got back, as a tree whose fields
 // give their path, which goes into what into names. The steps open names
-// start unfolded.
+// start unfolded. A step a run may come without, or that may answer more
+// than one way, is tagged so, and a note says what to check.
 export function Reads({
   into,
   preview,
@@ -157,8 +159,18 @@ export function Reads({
                 reads(preview.data.preview),
                 open(preview.data.of),
               )}
+              tags={tagsOf(
+                reads(preview.data.preview),
+                preview.data.preview,
+                preview.data.of,
+              )}
             />
           </div>
+          <OutcomeNotes
+            reads={reads(preview.data.preview)}
+            preview={preview.data.preview}
+            of={preview.data.of}
+          />
         </>
       )}
     </section>
@@ -168,15 +180,110 @@ export function Reads({
 // foldedOf is the paths, in what a preview reads, of the steps not among
 // open: the tree starts them folded.
 function foldedOf(reads: unknown, open: string[]): Set<string> {
+  return new Set(
+    stepsIn(reads)
+      .filter((id) => !open.includes(id))
+      .map((id) => pathOf("nodes", id)),
+  );
+}
+
+// stepsIn is the ids of the steps in what a preview reads.
+function stepsIn(reads: unknown): string[] {
   const nodes =
     typeof reads === "object" && reads !== null && "nodes" in reads
       ? reads.nodes
       : undefined;
-  const ids =
-    typeof nodes === "object" && nodes !== null ? Object.keys(nodes) : [];
-  return new Set(
-    ids.filter((id) => !open.includes(id)).map((id) => pathOf("nodes", id)),
+  return typeof nodes === "object" && nodes !== null ? Object.keys(nodes) : [];
+}
+
+// tagsOf is the tags of the steps in what a preview reads, by their paths
+// there, from what each may have done in a run that reaches the step.
+function tagsOf(
+  reads: unknown,
+  preview: Preview,
+  of: Definition,
+): Map<string, string> {
+  const tags = new Map<string, string>();
+  for (const id of stepsIn(reads)) {
+    const outcome = preview.outcomes?.[id];
+    const tag =
+      outcome &&
+      outcomeTag(
+        of.nodes.find((n) => n.id === id),
+        outcome,
+      );
+    if (tag) tags.set(pathOf("nodes", id), tag);
+  }
+  return tags;
+}
+
+// OutcomeNotes says what the tags in an Input ask of an expression: to
+// check a conditional step is there, or mark the line that brings it
+// required; and to check which way a step answered, when it may answer
+// more than one.
+function OutcomeNotes({
+  reads,
+  preview,
+  of,
+}: {
+  reads: unknown;
+  preview: Preview;
+  of: Definition;
+}) {
+  const ids = stepsIn(reads);
+  const conditional = ids.filter((id) => preview.outcomes?.[id]?.conditional);
+  const varied = ids.filter(
+    (id) => (preview.outcomes?.[id]?.outputs.length ?? 0) > 1,
   );
+  const [first] = conditional;
+  const [only] = varied;
+  const outcome = only === undefined ? undefined : preview.outcomes?.[only];
+  const node = of.nodes.find((n) => n.id === only);
+  const several = (n: number, one: string, more: string) =>
+    n > 1 ? more : one;
+  return (
+    <>
+      {first !== undefined && (
+        <p className="text-muted-foreground">
+          <Names ids={conditional} /> {several(conditional.length, "is", "are")}{" "}
+          conditional: a run can reach this step without{" "}
+          {several(conditional.length, "it", "them")}. Check{" "}
+          {several(conditional.length, "it", "one")} with{" "}
+          <span className="font-mono">{`$exists(${pathOf("nodes", first)})`}</span>
+          , or, to run this step only when it comes, mark the line that brings
+          it required.
+        </p>
+      )}
+      {only !== undefined && outcome && varied.length === 1 && (
+        <p className="text-muted-foreground">
+          <span className="font-mono">{only}</span> answers{" "}
+          {outcomeTag(node, { ...outcome, conditional: false })}: check{" "}
+          <span className="font-mono">
+            {outcome.outputs.includes(UNHANDLED)
+              ? `$exists(${pathOf(pathOf("nodes", only), "error")})`
+              : pathOf(pathOf("nodes", only), "status")}
+          </span>{" "}
+          before reading its body.
+        </p>
+      )}
+      {varied.length > 1 && (
+        <p className="text-muted-foreground">
+          <Names ids={varied} /> answer more than one way, as tagged: check
+          which before reading a body.
+        </p>
+      )}
+    </>
+  );
+}
+
+// Names lists steps by id: "a", "a and b", "a, b and c".
+function Names({ ids }: { ids: string[] }) {
+  return ids.map((id, i) => (
+    <span key={id}>
+      {i === 0 ? "" : i === ids.length - 1 ? " and " : ", "}
+      <span className="font-mono">{id}</span>
+    </span>
+  ));
 }
 
 // JsonBlock shows a JSON value as indented text, scrolling when it's long.

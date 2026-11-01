@@ -33,10 +33,11 @@ when a second consumer of shared TypeScript code does.
 
   | Recipe | Does |
   |---|---|
-  | `setup` | install the pinned golangci-lint into `.tools/bin`, and the web dependencies |
+  | `setup` | install the pinned golangci-lint into `.tools/bin`, the web dependencies, and the browser test's Chromium |
   | `dev` | Postgres, the server and Vite together. Ctrl-C stops them, Postgres only if `dev` started it |
   | `dev-server`, `dev-web` | the server, and Vite with `/api` proxied to it |
-  | `check` | format, lint, race tests, coverage floors, typecheck, build, generated-code drift. **The gate.** CI runs exactly this |
+  | `check` | format, lint, race tests, coverage floors, typecheck, the browser test on a build, generated-code drift. **The gate.** CI runs exactly this |
+  | `e2e` | the browser test: Playwright drives the built app in Chromium through plan 04's Done flow, against a database made afresh, the server and the test upstream, each on ports of their own, so it runs beside `dev` |
   | `fmt` | apply formatting |
   | `test *args` | Go and web tests; args pass through to `go test` |
   | `gen` | regenerate code from `schema/` |
@@ -44,7 +45,6 @@ when a second consumer of shared TypeScript code does.
   | `up`, `down` | the Docker stack |
   | `db-up`, `db-reset` | Postgres from compose, on 127.0.0.1:5432; reset deletes the volume |
   | `migrate *args` | `conduit migrate`; `up` by default |
-  | `dev` | everything at once: arrives in plan 03 phase C |
 
 - Start with one justfile. Once it passes ~15 recipes, split into
   `mod name 'just/name.just'` modules. Each module sets
@@ -72,7 +72,9 @@ lint fails only in CI, on code that's clean everywhere else.
 - One GitHub Actions workflow, `.github/workflows/ci.yml`:
   - Actions are pinned to full commit SHAs, with the release in a comment.
     GitHub's hardening guide recommends this, because a tag can be moved.
-  - It installs the pinned tools, then runs `just setup` and `just check`.
+  - It installs the pinned tools, then runs `just setup`, Playwright's
+    `install-deps` for the libraries Chromium needs on Ubuntu, and `just
+    check`.
   - Building and publishing images comes later.
 - Dependabot (`.github/dependabot.yml`) bumps Docker digests, actions, Go
   modules and npm packages weekly, with a 3-day cooldown matching pnpm's

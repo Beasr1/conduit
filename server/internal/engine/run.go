@@ -83,17 +83,18 @@ type NodeResult struct {
 	// Request is what an http node sent, as built, once its URL, headers and
 	// body rendered. Nothing is redacted here; whoever stores it does that.
 	Request *SentRequest
-	// Ways is a transform node's: the edges into it that were taken, in
-	// the definition's order.
-	Ways []Way
+	// Took is the edges the node's answer took, in the definition's order:
+	// of those leaving the output it answered through, the ones whose
+	// condition held.
+	Took []Line
 }
 
-// Way is an edge into a transform that was taken: the node it comes from,
-// and the output of that node it leaves, a status, 0 for 2xx and the one
-// output of a transform, or workflow.OnUnhandled.
-type Way struct {
-	From string
-	On   int
+// Line is an edge a node's answer took: the node it leads to, and the
+// output it leaves, a status, 0 for 2xx and the one output of a transform,
+// or workflow.OnUnhandled.
+type Line struct {
+	To string
+	On int
 }
 
 // SentRequest is a request as an http node built it.
@@ -283,23 +284,8 @@ func (r *run) startReady() {
 		n.started = true
 		r.inFlight++
 		r.emit(i, EventStarted, 1, nil)
-		go r.exec(i, r.parts(i), r.came(i))
+		go r.exec(i, r.parts(i))
 	}
-}
-
-// came is the edges taken into node i, a transform, in the definition's
-// order; nil for an http node.
-func (r *run) came(i int) []int {
-	if r.p.nodes[i].kind != workflow.NodeKindTransform {
-		return nil
-	}
-	var out []int
-	for _, k := range r.p.nodes[i].in {
-		if r.taken[k] {
-			out = append(out, k)
-		}
-	}
-	return out
 }
 
 // parts is what node i's expressions may see: the finished ancestors.

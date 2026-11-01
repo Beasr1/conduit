@@ -28,11 +28,12 @@ coverage_floors := "workflow=97 transform=84 upstream=91 engine=96 runner=92"
 default:
     @just --list
 
-# create .env and server/.env if missing; install the pinned golangci-lint and the web dependencies
+# create .env and server/.env if missing; install the pinned golangci-lint, the web dependencies and the browser test's Chromium
 setup:
     @for f in .env server/.env; do [ -f "$f" ] || { cp "$f.example" "$f"; echo "created $f from $f.example"; }; done
     @if golangci-lint version 2>/dev/null | grep -q "version {{golangci_version}} "; then echo "golangci-lint {{golangci_version}} already installed"; else curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b .tools/bin v{{golangci_version}}; fi
     cd web && corepack pnpm install --frozen-lockfile
+    cd web && corepack pnpm exec playwright install chromium
 
 # run Postgres, the API server, the web app and the test upstream together; Ctrl-C stops them all
 dev:
@@ -78,6 +79,23 @@ upstream:
 dev-web:
     cd web && corepack pnpm dev
 
+# The browser test runs the built app against a database made afresh, the
+# server and the test upstream, each on ports of their own, so it runs
+# beside `just dev`; web/playwright.config.ts starts and stops them.
+
+# the browser test: plan 04's Done flow in Chromium, with Playwright
+e2e: db-up
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{load_env}}
+    {{compose}} exec -T db psql -v ON_ERROR_STOP=1 -q -U postgres \
+        -c 'DROP DATABASE IF EXISTS conduit_e2e WITH (FORCE)' -c 'CREATE DATABASE conduit_e2e OWNER conduit'
+    export CONDUIT_E2E_DATABASE_URL="postgres://conduit:${CONDUIT_DB_PASSWORD}@127.0.0.1:5432/conduit_e2e?sslmode=disable"
+    (cd server && CONDUIT_DATABASE_URL="$CONDUIT_E2E_DATABASE_URL" go run ./cmd/conduit migrate up)
+    cd web
+    corepack pnpm build
+    corepack pnpm exec playwright test
+
 # start Postgres on 127.0.0.1:5432 and wait until it's healthy
 db-up:
     {{compose}} up --detach --wait db
@@ -92,7 +110,7 @@ db-reset:
 migrate *args="up":
     cd server && {{load_env}} && go run ./cmd/conduit migrate {{args}}
 
-# the gate: format, lint, tests and coverage floors, typecheck, build, stale generated code. CI runs the same
+# the gate: format, lint, tests and coverage floors, typecheck, the browser test on a build, stale generated code. CI runs the same
 check: _require-tools
     @cd server && golangci-lint fmt --diff || { echo "Go code isn't formatted: run just fmt"; exit 1; }
     cd server && golangci-lint run ./...
@@ -102,7 +120,7 @@ check: _require-tools
     cd web && corepack pnpm lint
     cd web && corepack pnpm typecheck
     cd web && corepack pnpm test
-    cd web && corepack pnpm build
+    just e2e
     just gen
     @git diff --exit-code --stat -- {{generated}} || { echo "generated code is stale: run just gen and commit it"; exit 1; }
     @untracked=$(git ls-files --others --exclude-standard -- {{generated}}); if [ -n "$untracked" ]; then echo "generated files aren't tracked:"; echo "$untracked"; exit 1; fi

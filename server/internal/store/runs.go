@@ -34,7 +34,7 @@ type NodeRun struct {
 	Request   json.RawMessage `db:"request"`  // empty if it sent nothing
 	Response  json.RawMessage `db:"response"` // empty if nothing came back
 	Error     json.RawMessage `db:"error"`    // {code, detail}, if it failed
-	Ways      json.RawMessage `db:"ways"`     // [{from, on, unhandled}], if it's a merge that ran
+	Took      json.RawMessage `db:"took"`     // [{to, on, unhandled}], the lines its answer took, if any
 	StartedAt *time.Time      `db:"started_at"`
 	EndedAt   time.Time       `db:"ended_at"`
 }
@@ -42,7 +42,7 @@ type NodeRun struct {
 const (
 	runColumns = `id::text AS id, workflow_id::text AS workflow_id, revision, trigger, status,
 		input, COALESCE(answered, 0) AS answered, output, output_truncated, error, started_at, ended_at`
-	nodeRunColumns = `run_id::text AS run_id, node_id, status, attempts, request, response, error, ways, started_at, ended_at`
+	nodeRunColumns = `run_id::text AS run_id, node_id, status, attempts, request, response, error, took, started_at, ended_at`
 )
 
 // StartRun records a run of revision as running, and returns it with its id.
@@ -58,9 +58,9 @@ func (s *Store) StartRun(ctx context.Context, workflowID string, revision int, t
 // SaveNodeRun records what one node did.
 func (s *Store) SaveNodeRun(ctx context.Context, n NodeRun) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO node_runs
-		(run_id, node_id, status, attempts, request, response, error, ways, started_at, ended_at)
+		(run_id, node_id, status, attempts, request, response, error, took, started_at, ended_at)
 		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		n.RunID, n.NodeID, n.Status, n.Attempts, orNull(n.Request), orNull(n.Response), orNull(n.Error), orNull(n.Ways), n.StartedAt, n.EndedAt)
+		n.RunID, n.NodeID, n.Status, n.Attempts, orNull(n.Request), orNull(n.Response), orNull(n.Error), orNull(n.Took), n.StartedAt, n.EndedAt)
 	if err != nil {
 		return fmt.Errorf("save node %s of run %s: %w", n.NodeID, n.RunID, translate(err))
 	}

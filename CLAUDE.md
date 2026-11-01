@@ -4,12 +4,10 @@ No-code API orchestration. Users compose upstream API calls into a DAG,
 using a graph editor or a page-by-page builder, and map data between steps
 with JSONata. A Go engine runs it, fanning out in parallel.
 
-**Status: plan 04, the graph editor, is under way: phases A, B and C are
-committed, with phase D's samples, previews, outputs by status and a step's
-blocks, D's answers, a step's Unhandled block, and strict joins
-(2026-11-01); a transform merging its lines, its cases as exits, and its
-lines as its parameters, required or not, are built. Next: Phase E, the
-browser test.** The web app signs in
+**Status: plan 04, the graph editor, is done (2026-11-01): its browser
+test, the Done flow, runs in `just check`. Next: your call between plan 11,
+the visual design, which the plans index puts next, and plan 07.** The web
+app signs in
 with a session cookie, lists workflows and
 creates them, and edits, checks, saves and publishes one in graph mode,
 previewing what each step reads and sends over sample data, branching on
@@ -25,9 +23,12 @@ one, and the run goes on down its line. An HTTP step runs only when every
 line into it is taken; a transform waits for them all too, and runs if
 every line marked required came and, with none marked, any did, its
 expression making its value from what did. Its preview is a run by each
-line that may come or not, over what those runs read, merged.
-What is left is in
-docs/plans/04-graph-editor.md; the bigger picture is docs/plans/README.md.
+line into it, its required ones coming first, over what those runs read,
+merged, and every
+Input tags a step a run may come without, or that may answer more than
+one way. A run records the lines each step's answer took.
+What was built, and why, is in docs/plans/04-graph-editor.md; the bigger
+picture is docs/plans/README.md.
 
 ## Read before working
 
@@ -74,14 +75,15 @@ docs/plans/04-graph-editor.md; the bigger picture is docs/plans/README.md.
 
 ```
 just                list recipes
-just setup          create .env; install the pinned golangci-lint (.tools/bin) and web dependencies
+just setup          create .env; install the pinned golangci-lint (.tools/bin), web dependencies and Chromium
 just db-up          Postgres on 127.0.0.1:5432; db-reset deletes it and starts afresh
 just migrate        apply migrations; `just migrate status` lists them
 just dev            Postgres, the server, the web app and the test upstream together; Ctrl-C stops them
 just dev-server     API server on http://127.0.0.1:8080, after db-up and migrate
 just dev-web        web app on http://127.0.0.1:5173; /api is proxied to the server
 just upstream       the test upstream on http://127.0.0.1:8090, to try runs against
-just check          the gate: format, lint, race tests, coverage floors, typecheck, build, stale generated code
+just check          the gate: format, lint, race tests, coverage floors, typecheck, the browser test on a build, stale generated code
+just e2e            the browser test: plan 04's Done flow in Chromium, against its own database, server and test upstream
 just fmt            apply formatting: gofumpt + goimports, Prettier
 just test           Go and web tests
 just gen            regenerate the HTTP layer, the workflow types and web/src/gen from schema/
@@ -110,6 +112,10 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`.
   server before starting the new one.
 - Coverage floors live in the justfile. Raise one when coverage rises;
   never lower one to get `just check` passing.
+- The browser test (`just e2e`) runs on ports 14173, 18080 and 18090,
+  against a database of its own, `conduit_e2e`, made afresh each time, so
+  it runs beside `just dev`; Playwright starts and stops the pieces. A
+  `.spec.ts` in `web/e2e` is Playwright's, and Vitest skips it.
 - All outbound HTTP goes through `internal/upstream`, which applies the
   SSRF guard, timeouts and size caps. Never use `http.DefaultClient`.
 - JSONata is untrusted user code. Evaluate it only through

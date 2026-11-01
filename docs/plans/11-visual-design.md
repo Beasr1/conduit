@@ -62,11 +62,27 @@ My reading, for the style tiles to confirm or overturn:
 - Cute touches in two places at most, chosen from the style tiles.
   Candidates: the empty workflow list, and the first run that succeeds.
 
+## Palettes to try (2026-11-01, your note; not picked yet)
+
+Three combinations you saw, for the style tiles to try:
+- Black, cobalt blue and acid lime.
+- Orchid pink, violet and orange.
+- Sage grey, beige and burgundy.
+
+Mine, for the tiles to settle, not to rule any out:
+- The first sits near the brief's "never", black with neon green, so its
+  lime would be an accent rather than text, and it needs a light mode too.
+- The second is the loudest where the brief asks for nothing loud, so its
+  colours would mean something, a step's kind or its status, rather than
+  fill.
+- The third is the calmest, nearest "calm and precise".
+- Each has to meet the floor's contrast in both modes (design.md).
+
 ## Steps
 
 - [ ] Style tiles: two or three directions as rendered pages (colours,
       type, a step on the canvas, the detail panel, the workflow list),
-      light and dark, as PNGs. You pick.
+      light and dark, as PNGs, the palettes above among them. You pick.
 - [ ] Tokens in `web/src/index.css`: colours, a type scale, radii,
       spacing, focus. Fonts are bundled, since the CSP only allows fonts
       from our own origin (`font-src 'self'`).

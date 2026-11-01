@@ -39,7 +39,7 @@ import {
   useProblems,
 } from "@/features/editor/hooks/use-problems";
 import { useRun, useRunSteps } from "@/features/editor/hooks/use-runs";
-import { type StepRun, takenOf } from "@/features/editor/runs";
+import { type StepRun, takenOf, tookLine } from "@/features/editor/runs";
 import { type Refused, useEditor } from "@/features/editor/store";
 import type { components } from "@/gen/schema";
 
@@ -81,10 +81,10 @@ export function Canvas() {
   // dashed, and its name says whether the run took it. A line into an
   // answer is taken once the run answered with it: gave is that status, or
   // -1 while the run goes on. A run that failed took none, even one the
-  // response's Unhandled answered. A line into a transform is taken when
-  // it's among the ways the transform says it came by. Until a run says, a
-  // way into a transform with several is dashed too, as it may not be taken;
-  // so is one the run is still to decide.
+  // response's Unhandled answered. A line into a step is taken when the step
+  // it leaves says its answer took it. Until a run says, a way into a
+  // transform with several is dashed too, as it may not be taken; so is one
+  // the run is still to decide.
   const troubled = useProblems((p) => p.on === "connection");
   const steps = useRunSteps();
   const gave = useRun(
@@ -118,29 +118,25 @@ export function Canvas() {
               to: `the ${answer.status} answer`,
             }
         : edge && { from: edge.from, on: outputOf(edge), to: edge.to };
-      const into = (): StepRun =>
-        answer
-          ? {
-              state:
-                gave === undefined || gave === -1
-                  ? "waiting"
-                  : gave === answer.status
-                    ? "succeeded"
-                    : "not run",
-            }
-          : (steps?.(line?.to ?? "") ?? { state: "waiting" });
-      const to = line && !answer ? steps?.(line.to) : undefined;
+      const answered: StepRun = {
+        state:
+          gave === undefined || gave === -1
+            ? "waiting"
+            : gave === answer?.status
+              ? "succeeded"
+              : "not run",
+      };
       const taken =
-        line && to?.came
-          ? to.came.some((w) => w.from === line.from && outputOf(w) === line.on)
-          : steps && line
+        !steps || !line
+          ? undefined
+          : answer
             ? takenOf(
                 line.on,
                 steps(line.from),
-                into(),
+                answered,
                 draft.nodes.some((n) => n.id === line.from && n.switch),
               )
-            : undefined;
+            : tookLine(line.on, steps(line.from), line.to);
       const may = e.data?.way === true && taken === undefined;
       if (!on && !bad && !may && taken === undefined) return e;
       const classes = [

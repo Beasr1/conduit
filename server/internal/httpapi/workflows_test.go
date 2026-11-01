@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -364,6 +365,10 @@ func TestPreview(t *testing.T) {
 	if err := json.Unmarshal(r.body, &pv); err != nil || r.status != http.StatusOK || len(pv.Ways) != 2 ||
 		pv.Ways[0].Edge != 0 || string(pv.Ways[0].Gives) != `"found"` || pv.Ways[1].Edge != 1 || string(pv.Ways[1].Gives) != `"gone"` {
 		t.Errorf("preview of a transform two lines may come into = %d %s", r.status, r.body)
+	}
+	// user answers either way when found runs, and found's preview says so.
+	if o, ok := pv.Outcomes["user"]; !ok || !slices.Equal(o.Outputs, []int{0, 404}) || o.Conditional {
+		t.Errorf("outcomes = %+v", pv.Outcomes)
 	}
 	// A run by a line whose condition doesn't hold skips it.
 	untaken := strings.Replace(merging, `"on": 404}`, `"on": 404, "when": "false"}`, 1)

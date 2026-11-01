@@ -567,6 +567,20 @@ test("the server's detail stands where it says what went wrong", () => {
   ).toBe(
     "a can never run: it needs b to answer 2xx and 404. It runs only when every line into it is taken; to run it after whichever comes, join them to a transform first.",
   );
+  // A line its transform's required lines rule out says how to take it.
+  expect(
+    say(
+      {
+        pointer: "/edges/2",
+        code: "never_taken",
+        detail:
+          "a's line to Bad can never be taken when Bad runs: it needs a to answer 2xx and 409",
+      },
+      broken,
+    ),
+  ).toBe(
+    "a's line to Bad can never be taken when Bad runs: it needs a to answer 2xx and 409. To run Bad after whichever line comes, mark none of its lines required; or remove this one.",
+  );
   // A transform never runs only as its required lines can't all come.
   expect(
     say(

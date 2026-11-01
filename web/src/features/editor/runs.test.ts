@@ -8,6 +8,7 @@ import {
   stepRunOf,
   takenOf,
   took,
+  tookLine,
   wayOf,
 } from "@/features/editor/runs";
 import type { components } from "@/gen/schema";
@@ -59,18 +60,40 @@ test("a step the server hasn't recorded goes by its last event", () => {
   ).toEqual({ state: "succeeded", status: 201, attempts: 1 });
 });
 
-test("a transform says which ways it came by, recorded or streamed", () => {
-  const came = [{ from: "prefs", on: 400 }, { from: "crm" }];
+test("a step says which lines its answer took, recorded or streamed", () => {
+  const lines = [{ to: "fallback", on: 400 }, { to: "log" }];
   expect(
-    stepRunOf(ended({ attempts: 0, ways: came }), undefined, "succeeded"),
-  ).toEqual({ state: "succeeded", attempts: 0, ms: 82, came });
+    stepRunOf(ended({ attempts: 0, took: lines }), undefined, "succeeded"),
+  ).toEqual({ state: "succeeded", attempts: 0, ms: 82, took: lines });
   expect(
     stepRunOf(
       undefined,
-      event({ kind: "succeeded", attempt: 0, ways: came }),
+      event({ kind: "succeeded", attempt: 0, took: lines }),
       "running",
     ),
-  ).toEqual({ state: "succeeded", attempts: 0, came });
+  ).toEqual({ state: "succeeded", attempts: 0, took: lines });
+});
+
+test("a line into a step is taken when the step it leaves says its answer took it", () => {
+  const prefs: StepRun = {
+    state: "succeeded",
+    status: 400,
+    attempts: 1,
+    took: [
+      { to: "fallback", on: 400 },
+      { to: "log", unhandled: true },
+    ],
+  };
+  expect(tookLine(400, prefs, "fallback")).toBe(true);
+  // The same steps, from another of prefs' outputs.
+  expect(tookLine(undefined, prefs, "fallback")).toBe(false);
+  expect(tookLine(400, prefs, "crm")).toBe(false);
+  expect(tookLine(UNHANDLED, prefs, "log")).toBe(true);
+  // Unknown until the step has ended; one that took none took none.
+  expect(tookLine(400, { ...prefs, state: "running" }, "fallback")).toBe(
+    undefined,
+  );
+  expect(tookLine(undefined, { state: "skipped" }, "fallback")).toBe(false);
 });
 
 test("a step with no event yet waits, and one a run ended without didn't run", () => {
@@ -103,7 +126,7 @@ test.each([
   expect(said(run)).toBe(words);
 });
 
-test("a line is taken when its step answered its way and the next step ran", () => {
+test("a line into an answer is taken when its step answered its way and the run answered with it", () => {
   const ok = { state: "succeeded", status: 200, attempts: 1 } as const;
   const gone = { state: "succeeded", status: 404, attempts: 1 } as const;
   const ran = { state: "succeeded", attempts: 1 } as const;

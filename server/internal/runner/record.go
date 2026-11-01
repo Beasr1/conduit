@@ -53,25 +53,25 @@ type Failure struct {
 	Caught bool `json:"caught,omitempty"`
 }
 
-// Way is an edge into a merge that was taken, as the definition writes it,
-// and as it's recorded and streamed.
-type Way struct {
-	From      string `json:"from"`
+// Line is an edge a node's answer took, as the definition writes it from
+// that node, and as it's recorded and streamed.
+type Line struct {
+	To        string `json:"to"`
 	On        int    `json:"on,omitempty"`
 	Unhandled bool   `json:"unhandled,omitempty"`
 }
 
-// waysOf is the engine's ways of a merge that ran, nil for any other node.
-func waysOf(ws []engine.Way) []Way {
-	if len(ws) == 0 {
+// tookOf is the engine's lines a node's answer took, nil for none.
+func tookOf(ls []engine.Line) []Line {
+	if len(ls) == 0 {
 		return nil
 	}
-	out := make([]Way, len(ws))
-	for i, w := range ws {
-		if w.On == workflow.OnUnhandled {
-			out[i] = Way{From: w.From, Unhandled: true}
+	out := make([]Line, len(ls))
+	for i, l := range ls {
+		if l.On == workflow.OnUnhandled {
+			out[i] = Line{To: l.To, Unhandled: true}
 		} else {
-			out[i] = Way{From: w.From, On: w.On}
+			out[i] = Line{To: l.To, On: l.On}
 		}
 	}
 	return out
@@ -225,9 +225,9 @@ func nodeRecord(runID string, n nodeEnd) (store.NodeRun, error) {
 			return rec, fmt.Errorf("encode the error: %w", err)
 		}
 	}
-	if ws := waysOf(res.Ways); ws != nil {
-		if rec.Ways, err = json.Marshal(ws); err != nil {
-			return rec, fmt.Errorf("encode the ways: %w", err)
+	if ls := tookOf(res.Took); ls != nil {
+		if rec.Took, err = json.Marshal(ls); err != nil {
+			return rec, fmt.Errorf("encode the lines taken: %w", err)
 		}
 	}
 	return rec, nil

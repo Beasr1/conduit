@@ -168,7 +168,7 @@ test("a way a run can't come by says so, and one that gives nothing says that", 
   await within(panel).findByText("It gives");
   expect(byLines(panel)).toEqual([
     "By prefs · 2xx",
-    "By fallback · 2xx, a run would skip this step: a connection it needs isn't taken.",
+    "By fallback · 2xx: no run comes this way with these samples.",
   ]);
   expect(within(panel).getAllByText("Nothing.")).toHaveLength(1);
 });
@@ -278,7 +278,7 @@ test("a case's tab says when a run by a way gives nothing", async () => {
   ).toBeTruthy();
   expect(byLines(shown())).toEqual([
     "By prefs · 2xx",
-    "By fallback · 2xx, a run would skip this step: a connection it needs isn't taken.",
+    "By fallback · 2xx: no run comes this way with these samples.",
   ]);
 });
 
@@ -419,7 +419,8 @@ test("a line into an HTTP step marked required shows Required with its problem, 
 const at = (ms: number) =>
   new Date(Date.UTC(2026, 10, 1, 20, 0, 0, ms)).toISOString();
 
-// ran is a run in which prefs answered 400, so prefs_ok came by fallback.
+// ran is a run in which prefs answered 400, so prefs_ok came by fallback:
+// each step says which lines its answer took.
 const ran: Run = {
   id: "r-1",
   workflow_id: "wf-1",
@@ -436,6 +437,7 @@ const ran: Run = {
       attempts: 1,
       ended_at: at(80),
       response: { status: 400, body: null },
+      took: [{ to: "fallback", on: 400 }],
     },
     {
       node: "fallback",
@@ -443,6 +445,7 @@ const ran: Run = {
       attempts: 1,
       ended_at: at(160),
       response: { status: 200, body: { data: { theme: "light" } } },
+      took: [{ to: "prefs_ok" }],
     },
     {
       node: "prefs_ok",
@@ -450,7 +453,7 @@ const ran: Run = {
       attempts: 0,
       ended_at: at(170),
       response: { body: { theme: "light" } },
-      ways: [{ from: "fallback" }],
+      took: [{ to: "greet" }],
     },
     {
       node: "greet",
@@ -458,7 +461,6 @@ const ran: Run = {
       attempts: 0,
       ended_at: at(180),
       response: { body: "light" },
-      ways: [{ from: "prefs_ok" }],
     },
   ],
 };
@@ -471,7 +473,7 @@ function serveRun(ran: Run) {
     kind: n.status,
     attempt: n.attempts,
     at: n.ended_at,
-    ...(n.ways ? { ways: n.ways } : {}),
+    ...(n.took ? { took: n.took } : {}),
   }));
   const encoder = new TextEncoder();
   const text = [
@@ -557,6 +559,7 @@ test("a run tells apart two ways from one step", async () => {
         attempts: 0,
         ended_at: at(10),
         error: { code: "workflow_error", detail: "no number", caught: true },
+        took: [{ to: "counted", unhandled: true }],
       },
       {
         node: "counted",
@@ -564,7 +567,6 @@ test("a run tells apart two ways from one step", async () => {
         attempts: 0,
         ended_at: at(20),
         response: { body: 0 },
-        ways: [{ from: "count", unhandled: true }],
       },
     ],
   });
@@ -580,4 +582,178 @@ test("a run tells apart two ways from one step", async () => {
   expect(
     screen.getByTestId("rf__edge-count->counted").getAttribute("aria-label"),
   ).toBe("Connection from count to counted, not taken in this run");
+});
+
+// With fallback's line required, a run in which prefs answered 2xx skips
+// fallback, and so prefs_ok, but prefs took its line to prefs_ok all the
+// same, and the canvas says so.
+test("a line into a step the run skipped is taken when its step took it", async () => {
+  renderEditor({
+    ...merged,
+    edges: (merged.edges ?? []).map((e, i) =>
+      i === 2 ? { ...e, required: true } : e,
+    ),
+  });
+  serveRun({
+    ...ran,
+    nodes: [
+      {
+        node: "prefs",
+        status: "succeeded",
+        attempts: 1,
+        ended_at: at(80),
+        response: { status: 200, body: { theme: "dark" } },
+        took: [{ to: "prefs_ok" }],
+      },
+      { node: "fallback", status: "skipped", attempts: 0, ended_at: at(90) },
+      { node: "prefs_ok", status: "skipped", attempts: 0, ended_at: at(90) },
+      { node: "greet", status: "skipped", attempts: 0, ended_at: at(90) },
+    ],
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Run" }));
+  const dialog = await screen.findByRole("dialog", { name: "Run" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Run" }));
+  const taken = await screen.findByTestId("rf__edge-prefs->prefs_ok");
+  await waitFor(() =>
+    expect(taken.getAttribute("aria-label")).toBe(
+      "Connection from prefs to prefs_ok, taken in this run",
+    ),
+  );
+  expect(
+    screen
+      .getByTestId("rf__edge-fallback->prefs_ok")
+      .getAttribute("aria-label"),
+  ).toBe("Connection from fallback to prefs_ok, not taken in this run");
+});
+
+// The paragraph whose words are text, as the screen shows it.
+const said = (text: string) => (_: string, el: Element | null) =>
+  el?.tagName === "P" && el.textContent === text;
+
+test("its Input tags a step a run may come without, and one that may answer either way, and says what to check", async () => {
+  renderEditor(merged);
+  previewing({
+    reads: mergedReads,
+    ways: [
+      { edge: 0, gives: { theme: "dark" }, skipped: false },
+      { edge: 2, gives: { theme: "light" }, skipped: false },
+    ],
+    outcomes: {
+      prefs: { outputs: [0, 400], conditional: false },
+      fallback: { outputs: [0], conditional: true },
+    },
+    skipped: false,
+    problems: [],
+  });
+  const panel = await open("prefs_ok");
+  const beside = (path: string) =>
+    within(panel).getByRole("button", { name: `Insert ${path}` }).parentElement
+      ?.textContent;
+  await waitFor(() =>
+    expect(beside("nodes.fallback")).toBe("fallbackconditional"),
+  );
+  expect(beside("nodes.prefs")).toBe("prefs2xx or 400");
+  expect(
+    within(panel).getByText(
+      said(
+        "fallback is conditional: a run can reach this step without it. Check it with $exists(nodes.fallback), or, to run this step only when it comes, mark the line that brings it required.",
+      ),
+    ),
+  ).toBeTruthy();
+  expect(
+    within(panel).getByText(
+      said(
+        "prefs answers 2xx or 400: check nodes.prefs.status before reading its body.",
+      ),
+    ),
+  ).toBeTruthy();
+});
+
+test("its Input names several conditional steps at once, and says what to check of one that may fail", async () => {
+  renderEditor(merged);
+  const step = (body: unknown) => ({ status: 200, body });
+  previewing({
+    reads: {
+      input: null,
+      nodes: { a: step(1), b: step(2), c: { body: 3 }, d: step(4), e: step(5) },
+    },
+    gives: "x",
+    outcomes: {
+      a: { outputs: [0], conditional: true },
+      b: { outputs: [0], conditional: true },
+      c: { outputs: [-1, 0], conditional: false },
+    },
+    skipped: false,
+    problems: [],
+  });
+  const panel = await open("greet");
+  expect(
+    await within(panel).findByText(
+      said(
+        "a and b are conditional: a run can reach this step without them. Check one with $exists(nodes.a), or, to run this step only when it comes, mark the line that brings it required.",
+      ),
+    ),
+  ).toBeTruthy();
+  expect(
+    within(panel).getByText(
+      said(
+        "c answers value or Unhandled: check $exists(nodes.c.error) before reading its body.",
+      ),
+    ),
+  ).toBeTruthy();
+});
+
+test("its Input says several steps may answer more than one way, as tagged", async () => {
+  renderEditor(merged);
+  previewing({
+    reads: {
+      input: null,
+      nodes: {
+        prefs: { status: 200, body: null },
+        user: { status: 200, body: null },
+      },
+    },
+    gives: "x",
+    outcomes: {
+      prefs: { outputs: [0, 400], conditional: false },
+      user: { outputs: [0, 404], conditional: false },
+    },
+    skipped: false,
+    problems: [],
+  });
+  const panel = await open("greet");
+  expect(
+    await within(panel).findByText(
+      said(
+        "prefs and user answer more than one way, as tagged: check which before reading a body.",
+      ),
+    ),
+  ).toBeTruthy();
+  expect(within(panel).queryByText(/conditional/)).toBeNull();
+});
+
+// With fallback's line required, every run comes by it, so prefs' 2xx line
+// never comes: its run says so, and fallback's is marked required.
+test("a required line's run is marked so, and one no run comes by says so", async () => {
+  renderEditor({
+    ...merged,
+    edges: (merged.edges ?? []).map((e, i) =>
+      i === 2 ? { ...e, required: true } : e,
+    ),
+  });
+  previewing({
+    reads: mergedReads,
+    ways: [
+      { edge: 0, skipped: true },
+      { edge: 2, gives: { theme: "light" }, skipped: false },
+    ],
+    skipped: false,
+    problems: [],
+  });
+  const panel = await open("prefs_ok");
+  expect(await within(panel).findByText(/"theme": "light"/)).toBeTruthy();
+  expect(byLines(panel)).toEqual([
+    "By prefs · 2xx: no run comes this way with these samples.",
+    "By fallback · 2xx (required)",
+  ]);
 });
