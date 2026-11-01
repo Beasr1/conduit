@@ -40,9 +40,12 @@ resolve, but their claims weren't re-read.
 | nginx access log | JSON including `Authorization` and the query string | JSON with a request id; path only, no credentials | a token in a log is a leaked token (measured: the query string stays out) |
 | nginx error log | default level | rate-limit refusals below the logged level | error lines quote the whole request line, query string included (measured 2026-10-25) |
 | nginx → server address | `proxy_pass` with a fixed host | Docker's DNS, resolved per request | measured: the server moved from .2 to .4 and requests still reached it |
+| Compressing the API's answers | gzip on every JSON answer | a workflow's own answers go uncompressed, as they carry the ETag a save sends back as If-Match | nginx 1.7.3: "weak entity tags are now preserved on response modifications, and strong ones are changed to weak" ✓ [82]; RFC 9110: "An origin server MUST use the strong comparison function when comparing entity tags for If-Match" ✓ [83]. Measured 2026-11-01: a workflow read through nginx came back `W/"42"` compressed, `"42"` without |
 | CI actions | `uses: owner/action@v7` | pinned to a full commit SHA, release in a comment | GitHub: pinning to a full-length commit SHA mitigates "a bad actor adding a backdoor to the action's repository" ✓ [34] |
 | Installing golangci-lint | `go install` or a `tool` line | the release binary: `just setup` locally, the official action in CI | its docs: `go install`/`tool` installs "aren't guaranteed to work"; they recommend binaries, and their action for CI ✓ [35] |
-| Dependency bumps | by hand | Dependabot with a 3-day cooldown | `cooldown` delays version updates by a set number of days ✓ [36] |
+| Installing corepack | bundled with Node | the npm package, pinned: `just setup` puts it in `.tools/bin`, and the web image installs the same version (Node 26, 2026-11-01) | Node's distribution doc: corepack "is no longer distributed as of Node.js 25.0.0" ✓ [84]; its README: "Corepack is distributed with Node.js from version 14.19.0 up to (but not including) 25.0.0", and otherwise `npm install -g corepack` ✓ [85] |
+| Browser sessions | a stateless cookie, its expiry and HMAC, for 12 hours | a sessions table: the cookie holds a random id, signing out deletes it, and it ends after 30 minutes unused or 12 hours (2026-11-01) | OWASP: "deleting a cookie alone does not invalidate a stolen copy of the session ID", and "Common idle timeouts ranges are 2-5 minutes for high-value applications and 15-30 minutes for low risk applications" ✓ [87]. NIST SP 800-63B-4 at AAL2: "The inactivity timeout SHOULD be no more than 1 hour" ✓ [88] |
+| Dependency bumps | by hand | Dependabot, with its default 3-day cooldown | Dependabot applies "a default cooldown period of 3 days to version updates, even when cooldown is not configured" ✓ [36] |
 | MSW 3 strict mode | `onUnhandledRequest: "error"` | `onUnhandledFrame: "error"` | MSW 3 renamed it; the old option still compiles in plain JS and is ignored at run time (checked in its types and with a probe test, 2026-10-25) |
 | openapi-typescript on TS 6 | (its peer range is `typescript: ^5.x`) | used with TypeScript 6.0.3 | generated `src/gen/schema.d.ts` correctly; pnpm reports the unmet peer (checked 2026-10-25) |
 | Vulnerable tool dependencies | (none raised before) | raise the requirement directly | kin-openapi v0.142.0 had nine advisories, fixed in v0.143.0–v0.149.0. oapi-codegen v2.8.1 still requires v0.142.0, so we raised it to v0.152.0 ourselves, and `x/mod`/`x/text` to their fixed releases. Generated output is identical; OSV finds 0 vulnerabilities in compiled modules, and the server binary has no third-party modules at all (checked 2026-10-25) |
@@ -90,6 +93,7 @@ resolve, but their claims weren't re-read.
 | Context files at all | ICLR 2026 paper: no significant gain, >20% more cost ✓ [27] | keep CLAUDE.md minimal; the substance lives in docs read on demand |
 | gnata | created 2026-03-10 ✓, ported with AI, pre-1.0, breaking changes in 0.6.0 ✓ | the alternatives are stale (blues/jsonata-go targets JSONata 1.5.4). Pin it exact, wrap it, golden-test it |
 | No Redis in v1 | the spec lists it | nothing in v1 needs it; agreed as D7 |
+| nginx's stable branch | nginx recommends mainline: "This version is recommended for production unless your organization has strict requirements for stability" ✓ [86] | fewer changes. CI builds the images and tests nginx's config (`just images`, 2026-11-01), so following mainline is dropping one ignore rule in `dependabot.yml` |
 | Lists of looks to avoid are review questions, not rules (design.md) | the design skill design.md started from [37] treats its list as rules | a list everyone follows becomes a template of its own (decided 2026-10-28) |
 
 ## gnata facts (checked ✓)
@@ -232,6 +236,13 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 79. https://en.wikipedia.org/wiki/Static_single-assignment_form
 80. https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.merge/
 81. https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.switch/
+82. https://nginx.org/en/CHANGES
+83. https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1
+84. https://github.com/nodejs/node/blob/main/doc/contributing/distribution.md
+85. https://github.com/nodejs/corepack#readme
+86. https://docs.nginx.com/nginx/admin-guide/installing-nginx/installing-nginx-open-source/
+87. https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+88. https://pages.nist.gov/800-63-4/sp800-63b.html
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

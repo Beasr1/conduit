@@ -343,13 +343,21 @@ function useOthers(
   return statuses.map((status, j) => ({ status, label: labels[j] ?? "" }));
 }
 
-// nextStatus is a new case's status: the first answer's no exit of the step
-// has, else the first from 400 up that none has.
+// nextStatus is a new case's status: the first answer's that no line gives
+// yet, nor an exit of the step has, as the case could give it; else the
+// first from 400 up that no exit or answer has. An answer with its line,
+// one from the step's Unhandled among them, isn't the case's to give.
 function nextStatus(d: Definition, index: number): number {
   const given = new Set(exitsOf(d.nodes[index]).map((e) => e.status));
-  const answers = (d.response?.answers ?? []).map((a) => a.status);
+  const answers = d.response?.answers ?? [];
+  const open = answers.filter((a) => a.from === undefined).map((a) => a.status);
+  const taken = new Set([...given, ...answers.map((a) => a.status)]);
   const errors = Array.from({ length: MAX_STATUS - 399 }, (_, i) => 400 + i);
-  return [...answers, ...errors].find((s) => !given.has(s)) ?? MAX_STATUS;
+  return (
+    open.find((s) => !given.has(s)) ??
+    errors.find((s) => !taken.has(s)) ??
+    MAX_STATUS
+  );
 }
 
 // Holds says, over the samples, what the case at part gives when it's the

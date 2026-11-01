@@ -55,7 +55,10 @@ export interface paths {
          * @description Trades the API token for the session cookie the web app uses. Scripts, agents and served callers send the token as a bearer token instead.
          */
         post: operations["createSession"];
-        /** Sign a browser out */
+        /**
+         * Sign a browser out
+         * @description Ends the session the cookie names, on the server as well, so a copy of the cookie stops working, and clears the cookie. It needs no live session, so signing out always works.
+         */
         delete: operations["deleteSession"];
         options?: never;
         head?: never;
@@ -842,7 +845,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Signed in, for 12 hours. */
+            /** @description Signed in, until 30 minutes pass without a request, or 12 hours after sign-in, whichever comes first. */
             204: {
                 headers: {
                     "Set-Cookie"?: string;
@@ -859,7 +862,10 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                /** @description The session to end. Without one, or with one this server didn't set, the cookie is only cleared. */
+                "__Host-conduit_session"?: string;
+            };
         };
         requestBody?: never;
         responses: {

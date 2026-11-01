@@ -1,5 +1,6 @@
-# Runs the same gate as `just check` locally. Actions are pinned to full
-# commit SHAs; the comment after each is the release it came from.
+# Runs the same gate as `just check` locally, and builds the Docker images
+# as `just images` does. Actions are pinned to full commit SHAs; the comment
+# after each is the release it came from.
 name: ci
 
 on:
@@ -32,6 +33,18 @@ jobs:
           install-only: true
       - run: just setup
       # The libraries Chromium needs on Ubuntu, for the browser test; just
-      # setup installed Chromium itself.
-      - run: cd web && corepack pnpm exec playwright install-deps chromium
+      # setup installed Chromium itself, and corepack in .tools/bin.
+      - run: cd web && ../.tools/bin/corepack pnpm exec playwright install-deps chromium
       - run: just check
+
+  # The images `just up` runs, built, and nginx's config tested in the web
+  # one: a base-image bump that breaks either fails here, not at the next
+  # `just up`.
+  images:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+        with:
+          just-version: 1.53.0
+      - run: just images

@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1
 # Build context is the repo root: docker build -f docker/web/Dockerfile .
 
-FROM node:24.22.0-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS build
+FROM node:26.13.0-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS build
 # corepack runs the pnpm version pinned in package.json's packageManager.
+# Node 25 and later don't ship it: this is the justfile's corepack_version.
+RUN npm install --global corepack@0.36.0
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /web
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./

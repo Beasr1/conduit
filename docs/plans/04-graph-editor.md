@@ -65,7 +65,7 @@ Also seen:
   and answer with the value or the error. This is D6: the browser never
   evaluates JSONata itself, so a preview can't disagree with a run.
 - **A browser session** (answer 1): `POST /v1/session` takes the API token
-  and sets the session cookie; `DELETE /v1/session` clears it. The auth
+  and sets the session cookie; `DELETE /v1/session` ends it and clears it. The auth
   middleware accepts the cookie as well as the bearer token, and checks
   `Sec-Fetch-Site` on writes that come with the cookie.
 
@@ -180,11 +180,16 @@ Also seen:
 Every API call needs the bearer token (D12). The browser trades it once for
 a session cookie that scripts can't read (answer 1):
 - **Sign-in** posts the token to `POST /v1/session`. The server checks it
-  as it checks a bearer token, and sets a cookie holding an expiry and an
-  HMAC of it. The key is derived from the API token, so changing the token
-  ends every session. Nothing is stored server-side.
+  as it checks a bearer token, records a session, and sets a cookie
+  holding the session's random id and an HMAC of it. The key is derived
+  from the API token, so changing the token ends every session. The
+  `sessions` table keeps the id's SHA-256, when it was last used and when
+  it expires. (Until 2026-11-01 nothing was stored: the cookie held its own
+  expiry.)
 - **The cookie** is `__Host-conduit_session`: `HttpOnly`, `Secure`,
-  `SameSite=Strict`, `Path=/`, for 12 hours.
+  `SameSite=Strict`, `Path=/`. A session ends 30 minutes after its last
+  request, or 12 hours after sign-in, whichever comes first (the idle time
+  since 2026-11-01).
 - **Writes** (`POST`, `PUT`, `DELETE`) made with the cookie must come with
   `Sec-Fetch-Site: same-origin`, on top of `SameSite`. The browser sets
   that header, so the server needn't know its own origin behind nginx and a
@@ -192,8 +197,10 @@ a session cookie that scripts can't read (answer 1):
   before 2023. Planned as an `Origin` check; changed in Phase A.
 - **Bearer tokens are unchanged:** scripts, agents and served callers keep
   using `Authorization`. A request with both is judged by the header.
-- **A `401`** sends the app back to sign-in; **sign-out** calls
-  `DELETE /v1/session`.
+- **A `401`** sends the app back to sign-in, or, in the editor with
+  unsaved changes, asks to sign in again there (since 2026-11-01).
+  **Sign-out** calls `DELETE /v1/session`, which ends the session on the
+  server too.
 - The token never goes in a URL, a log or an error message.
 - Checked in Phase A: Chromium and Firefox keep the `Secure` cookie over
   plain `http://127.0.0.1` and `http://localhost`. WebKit keeps it on
@@ -1327,7 +1334,8 @@ tried.
 - **No `env.ts`** while there's nothing to configure.
 
 **Decided while building, without a question** (each can be overruled):
-- Sessions last **12 hours**.
+- Sessions last **12 hours**; since 2026-11-01 they also end after 30
+  minutes unused (Loose ends and sessions, as built).
 - Pages are **lazy route modules**. The root route holds a blank
   first-load fallback and the error boundary for 404s; a pathless route
   under the layout holds the pages' boundary, so the header stays when a
@@ -2277,6 +2285,77 @@ go, your call. Decided while building:
   for want of its required line, b's line to it taken. No CSP violations
   and no console problems.
 
+## Loose ends and sessions, as built
+
+Built on 2026-11-01 after 81c7085, while you were away: the loose ends
+seen before, and the smaller points, your call ("fix known loose ends",
+"lets do smaller points"). Decided on your behalf, each open to
+overruling:
+- **A workflow's own answers go uncompressed** through nginx. Compressing
+  an answer turns its ETag weak, `W/"42"`, and If-Match compares strongly,
+  so a script saving with the ETag it read would be refused. A regex
+  location in `default.conf` turns gzip off for a workflow, created, read
+  or saved; `snippets/api.conf` holds what both `/api/` locations share.
+  Other answers are still compressed. Checked through `just up`: a
+  workflow read is `"42"` and uncompressed, a revision still gzip, and a
+  save with the ETag read as If-Match answered 200.
+- **`TestGuardrails`** takes either code for endless recursion: gnata's
+  stack guard, U1001, or the timeout, D1012, whichever comes first.
+  Without `-race` it was the stack guard, and the test failed. Passed
+  three times without `-race` and once with.
+- **+ Case's status**: a new case takes the first status an answer has
+  with no line yet that no exit of the step gives, as the case could give
+  it; else the first from 400 up that no exit or answer has. An answer
+  from the step's Unhandled, such as 422, isn't offered any more; it was
+  the default before. 3 mutations, each caught.
+- **Sessions**, the gaps against OWASP's cheat sheet raised after Phase
+  A: a `sessions` table (migration 20261101150000) keeps each session's id
+  hash, when it was last used and when it expires. A session ends 30
+  minutes after its last request, or 12 hours after sign-in, whichever
+  comes first. Signing out deletes it, so a copy of the cookie stops
+  working, and a sign-in clears away the ended ones. The cookie holds a
+  random id and an HMAC of it, keyed from the API token as before, so a
+  changed token ends every session, and a cookie the server didn't mint
+  never reaches the database. With the database down a session can't be
+  checked, and the request is a 500, not a 401 that would send the app to
+  sign in. `DELETE /v1/session` names the session by a cookie parameter in
+  the spec.
+  - **Why 30 minutes**: OWASP gives "15-30 minutes for low risk
+    applications", and NIST SP 800-63B-4 says the inactivity timeout
+    "SHOULD be no more than 1 hour" at AAL2. 12 hours stays: it's NIST's
+    limit at AAL3, though OWASP's example for a working day is 4 to 8.
+  - **The editor signs in again over unsaved changes.** A 401 still sends
+    the app to sign-in, carrying where you were, and now says on the way
+    that the session ended. The editor's leave dialog, which stops that
+    while there are unsaved changes, asks for the token there instead:
+    "Sign in again". Once signed in, what was refused on the page is asked
+    for again, and the changes are there to save; "Leave without saving"
+    goes on to sign-in. Before, the only ways on were losing the changes
+    or signing in in another tab, and a 30-minute idle time would have
+    made that common.
+  - **A sign-out that fails stays.** The session is still live, so the app
+    stays where it is and the toast says why; it used to go to sign-in
+    regardless.
+  - The sign-in form is shared, by the page and the dialog
+    (`components/sign-in-form.tsx`).
+- **Node 26, corepack and the image build** are plan 01's (Infra and CI);
+  the served runs' last write is plan 03's (Recording).
+- **Checked**: `just check` with everything staged, on Node 26:
+  golangci-lint, Go tests under `-race` with the coverage floors (workflow
+  97.8%, engine 96.2%, runner 92.2%), web format, lint, typecheck and 431
+  tests, the browser test (2 tests) and the generated code. 27 mutations,
+  17 in the server's sessions (the store, the cookie, the middleware) and
+  10 in the web (the dialog, `sendToSignIn`, sign-out), each caught, three
+  only after a test was added: a session expired but not idle, a wrong
+  token on the sign-in page, and a navigation's state that isn't
+  `sendToSignIn`'s. Chromium through nginx, light and dark: sign-in; an
+  unsaved change, then its session's row deleted, the next check of the
+  draft refused and "Sign in again" over the editor; signed in, "Unsaved
+  changes" still there, and saved as the next revision; then signing out,
+  after which a copy of the cookie got 401. No CSP violations; the
+  console's only errors are the browser's own lines for the refused
+  requests.
+
 ## A transform's lines as its parameters, as built
 
 Built on 2026-11-01 on top of "a step and a transform" (84fc8dd), with the
@@ -2747,7 +2826,9 @@ Listed so each can be overruled:
   telling apart from a `404`. It would save eventsource-parser and the
   reconnect code.
 - **The session cookie is stateless** (an expiry and its HMAC), keyed from
-  the API token, rather than a sessions table.
+  the API token, rather than a sessions table. Changed on 2026-11-01: a
+  sessions table, so signing out ends a session on the server, and a
+  session can go idle (Loose ends and sessions, as built).
 - **The JSONata package is plan 10**, a new number after 09 rather than
   renumbering 05–09. It has since moved up to come before 08.
 - **The release-age guard made strict**, as a change of its own.

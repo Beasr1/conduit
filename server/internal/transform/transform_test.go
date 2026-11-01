@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -201,15 +202,18 @@ func TestCompileTemplate_RejectsBadPlaceholders(t *testing.T) {
 func TestGuardrails(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name, src, code string
+		name, src string
+		codes     []string // any of them
 	}{
-		{"deep recursion", "($f := function($n) { $n = 0 ? 0 : 1 + $f($n - 1) }; $f(1000))", "D1011"},
-		{"endless tail recursion", "($inf := function() { $inf() }; $inf())", "D1012"},
-		{"a range past the sequence limit", "$count([1..200000])", "D2015"},
+		{"deep recursion", "($f := function($n) { $n = 0 ? 0 : 1 + $f($n - 1) }; $f(1000))", []string{"D1011"}},
+		// gnata's own stack guard or the timeout, whichever comes first: under
+		// -race evaluation is slower, and the timeout does.
+		{"endless tail recursion", "($inf := function() { $inf() }; $inf())", []string{"U1001", "D1012"}},
+		{"a range past the sequence limit", "$count([1..200000])", []string{"D2015"}},
 		// Just past the limit, at 102,400 items: the product is built before
 		// the limit is checked, so a bigger one can reach the timeout first on
 		// a slow machine. A million items did, in CI under -race.
-		{"a cross product past the sequence limit", "$count([1..320].([1..320]))", "D2015"},
+		{"a cross product past the sequence limit", "$count([1..320].([1..320]))", []string{"D2015"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -220,8 +224,8 @@ func TestGuardrails(t *testing.T) {
 			}
 			start := time.Now()
 			_, err = x.Eval(t.Context(), []byte(`{}`))
-			if err == nil || !strings.Contains(err.Error(), tt.code) {
-				t.Fatalf("Eval(%q) error = %v, want %s", tt.src, err, tt.code)
+			if err == nil || !slices.ContainsFunc(tt.codes, func(code string) bool { return strings.Contains(err.Error(), code) }) {
+				t.Fatalf("Eval(%q) error = %v, want one of %v", tt.src, err, tt.codes)
 			}
 			if elapsed := time.Since(start); elapsed > 2*time.Second {
 				t.Errorf("Eval(%q) took %v; the guardrail fired late", tt.src, elapsed)

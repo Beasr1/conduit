@@ -1,5 +1,6 @@
-# Weekly version bumps, including the digest-pinned base images. The 3-day
-# cooldown matches pnpm's release-age guard: nothing brand new gets proposed.
+# Weekly version bumps, including the digest-pinned base images. Dependabot
+# holds each release back 3 days by default, so nothing brand new gets
+# proposed; pnpm's own release-age guard, a day, covers installs.
 version: 2
 updates:
   # The Dockerfiles we build. Postgres has none; its image is in compose.
@@ -7,13 +8,13 @@ updates:
     directories: ["/docker/server", "/docker/web"]
     schedule:
       interval: weekly
-    cooldown:
-      default-days: 3
     ignore:
       # Each of these lines is chosen on purpose and moves by hand: nginx's
       # stable branch (even minor; odd is mainline), Node's LTS line, and the
       # Go minor that server/go.mod's toolchain line names. Patch releases and
-      # digest refreshes still come through.
+      # digest refreshes still come through. nginx recommends mainline for
+      # production; CI builds the images and tests nginx's config (`just
+      # images`), so following it is dropping the first rule.
       - dependency-name: nginxinc/nginx-unprivileged
         update-types: ["version-update:semver-minor"]
       - dependency-name: node
@@ -26,8 +27,6 @@ updates:
     directory: /docker/postgres
     schedule:
       interval: weekly
-    cooldown:
-      default-days: 3
     ignore:
       # A Postgres major needs a dump and restore, so it moves by hand.
       - dependency-name: postgres
@@ -37,23 +36,17 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    cooldown:
-      default-days: 3
 
   - package-ecosystem: gomod
     directory: /server
     schedule:
       interval: weekly
-    cooldown:
-      default-days: 3
 
   - package-ecosystem: npm
     directory: /web
     schedule:
       interval: weekly
-    cooldown:
-      default-days: 3
     ignore:
-      # The types track the Node version we run (24, web/.node-version).
+      # The types track the Node version we run (26, web/.node-version).
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]

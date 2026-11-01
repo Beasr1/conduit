@@ -96,7 +96,11 @@ the API is `/api` on the page's own origin.
 - Error toasts come from the global `QueryCache` / `MutationCache`
   `onError`. A component handles an error only when it can do something
   about it, and then marks its query or mutation `meta: { quiet: true }`.
-- A `401` anywhere sends the app to sign-in, carrying where you were.
+- A `401` anywhere sends the app to sign-in, carrying where you were
+  (`sendToSignIn`), and says on the way that the session ended
+  (`sessionEnded`). The editor's leave dialog, which stops that while
+  there are unsaved changes, signs in again there instead, then asks
+  again for what was refused on the page.
 - Server data never gets copied into Zustand. The editor store holds the
   draft; the saved version lives in the query cache.
 - Zod is for untrusted edges only: env, forms, imported files. API

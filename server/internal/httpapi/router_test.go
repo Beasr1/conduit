@@ -21,12 +21,13 @@ const testToken = "test-token-0123456789abcdef0123456789abcdef"
 
 var (
 	db     *store.Store
+	dbURL  string // the package's own database
 	router http.Handler
 )
 
 func TestMain(m *testing.M) {
-	os.Exit(storetest.Run(m, func(s *store.Store, _ string) {
-		db, router = s, newRouter(s, runner.Options{}, 0)
+	os.Exit(storetest.Run(m, func(s *store.Store, url string) {
+		db, dbURL, router = s, url, newRouter(s, runner.Options{}, 0)
 	}))
 }
 

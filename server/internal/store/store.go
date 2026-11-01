@@ -1,5 +1,5 @@
 // Package store keeps conduit's state in Postgres: workflows, their
-// revisions, and runs. Queries are plain SQL through pgx. Driver errors are translated
+// revisions, runs, and the web app's sessions. Queries are plain SQL through pgx. Driver errors are translated
 // here, so callers see ErrNotFound, ErrConflict and ErrRevisionMismatch,
 // never a pgx type.
 package store

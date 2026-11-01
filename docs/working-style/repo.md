@@ -33,7 +33,7 @@ when a second consumer of shared TypeScript code does.
 
   | Recipe | Does |
   |---|---|
-  | `setup` | install the pinned golangci-lint into `.tools/bin`, the web dependencies, and the browser test's Chromium |
+  | `setup` | install the pinned golangci-lint and corepack into `.tools/bin`, the web dependencies, and the browser test's Chromium |
   | `dev` | Postgres, the server and Vite together. Ctrl-C stops them, Postgres only if `dev` started it |
   | `dev-server`, `dev-web` | the server, and Vite with `/api` proxied to it |
   | `check` | format, lint, race tests, coverage floors, typecheck, the browser test on a build, generated-code drift. **The gate.** CI runs exactly this |
@@ -43,6 +43,7 @@ when a second consumer of shared TypeScript code does.
   | `gen` | regenerate code from `schema/` |
   | `hooks-install` | pre-push hook that runs `just check` |
   | `up`, `down` | the Docker stack |
+  | `images` | build the images `up` runs without starting them, and test nginx's config in the web one, hardened as compose runs it. CI runs it as a job of its own |
   | `db-up`, `db-reset` | Postgres from compose, on 127.0.0.1:5432; reset deletes the volume |
   | `migrate *args` | `conduit migrate`; `up` by default |
 
@@ -61,6 +62,7 @@ when a second consumer of shared TypeScript code does.
 | pnpm | `web/package.json` `packageManager` (corepack) |
 | JS dependencies | exact versions, via `saveExact: true` in `web/pnpm-workspace.yaml`; nothing younger than pnpm's release-age cutoff |
 | golangci-lint | justfile variable, used by `setup` and CI |
+| corepack | justfile variable: `setup` installs it in `.tools/bin`, as Node 25 and later don't ship it; the web Dockerfile installs the same version |
 | Docker base images | tag + digest |
 
 Nothing is "latest", and CI reads the same pins. An unpinned CI image
@@ -75,10 +77,12 @@ lint fails only in CI, on code that's clean everywhere else.
   - It installs the pinned tools, then runs `just setup`, Playwright's
     `install-deps` for the libraries Chromium needs on Ubuntu, and `just
     check`.
-  - Building and publishing images comes later.
+  - A second job runs `just images`, so a base-image bump that breaks a
+    build, or nginx's config, fails in CI rather than at the next `just
+    up`. Publishing images comes later.
 - Dependabot (`.github/dependabot.yml`) bumps Docker digests, actions, Go
-  modules and npm packages weekly, with a 3-day cooldown matching pnpm's
-  release-age guard.
+  modules and npm packages weekly. Its default 3-day cooldown keeps
+  brand-new releases out; pnpm's release-age guard, a day, covers installs.
 - CI and local run the same command, so they can't drift. The pre-push hook
   is a convenience, not a gate. Hooks can be skipped with `--no-verify`, are
   missing in fresh clones, and never run for merges made in the web UI.
@@ -147,8 +151,8 @@ lint fails only in CI, on code that's clean everywhere else.
     numbered files define things: `00-logging` (log format),
     `10-security` (CSP map), `20-limits` (rate-limit zones) and
     `30-compression`. `default.conf` is the server, and it uses them.
-  - `snippets/` holds pieces a location includes: `security-headers.conf`
-    and `proxy.conf`.
+  - `snippets/` holds pieces a location includes: `security-headers.conf`,
+    `proxy.conf`, and `api.conf`, what every `/api/` location does.
   - A new topic gets its own numbered file rather than growing
     `default.conf`.
 - **What the nginx config does.**
@@ -163,6 +167,11 @@ lint fails only in CI, on code that's clean everywhere else.
     streams with `X-Accel-Buffering: no`.
   - The server is found through Docker's DNS on every request, so
     recreating it doesn't strand nginx on an old IP.
+  - A workflow's own answers, as created, read and saved, go uncompressed.
+    They carry the revision's ETag, which a save sends back as If-Match,
+    and nginx turns a strong ETag weak when it compresses (since 1.7.3),
+    which If-Match's strong comparison never matches. The rest of `/api/`
+    stays compressed.
 
 ## Docs
 

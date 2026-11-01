@@ -8,8 +8,8 @@ with JSONata. A Go engine runs it, fanning out in parallel.
 test, the Done flow, runs in `just check`. Next: your call between plan 11,
 the visual design, which the plans index puts next, and plan 07.** The web
 app signs in
-with a session cookie, lists workflows and
-creates them, and edits, checks, saves and publishes one in graph mode,
+with a session cookie, which sign-out or 30 minutes unused ends, lists
+workflows and creates them, and edits, checks, saves and publishes one in graph mode,
 previewing what each step reads and sends over sample data, branching on
 the status a step gets back, and running it with an input, followed live
 on the canvas. A step is drawn as its request and a block per response,
@@ -75,7 +75,7 @@ picture is docs/plans/README.md.
 
 ```
 just                list recipes
-just setup          create .env; install the pinned golangci-lint (.tools/bin), web dependencies and Chromium
+just setup          create .env; install the pinned golangci-lint and corepack (.tools/bin), web dependencies and Chromium
 just db-up          Postgres on 127.0.0.1:5432; db-reset deletes it and starts afresh
 just migrate        apply migrations; `just migrate status` lists them
 just dev            Postgres, the server, the web app and the test upstream together; Ctrl-C stops them
@@ -89,9 +89,11 @@ just test           Go and web tests
 just gen            regenerate the HTTP layer, the workflow types and web/src/gen from schema/
 just hooks-install  pre-push hook that runs just check
 just up / down      everything in Docker behind nginx on http://127.0.0.1:8088
+just images         build the Docker images without starting them, and test nginx's config
 ```
 
-CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`.
+CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`, and
+`just images` as a job of its own.
 
 ## Gotchas
 

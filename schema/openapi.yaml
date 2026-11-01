@@ -56,7 +56,7 @@ paths:
               $ref: "#/components/schemas/SignIn"
       responses:
         "204":
-          description: Signed in, for 12 hours.
+          description: Signed in, until 30 minutes pass without a request, or 12 hours after sign-in, whichever comes first.
           headers:
             Set-Cookie:
               schema:
@@ -68,7 +68,15 @@ paths:
     delete:
       operationId: deleteSession
       summary: Sign a browser out
+      description: Ends the session the cookie names, on the server as well, so a copy of the cookie stops working, and clears the cookie. It needs no live session, so signing out always works.
       security: []
+      parameters:
+        - name: __Host-conduit_session
+          in: cookie
+          description: The session to end. Without one, or with one this server didn't set, the cookie is only cleared.
+          schema:
+            type: string
+          x-go-name: Session
       responses:
         "204":
           description: Signed out; the cookie is cleared.
@@ -476,7 +484,7 @@ components:
       type: apiKey
       in: cookie
       name: __Host-conduit_session
-      description: The web app's session, set by POST /v1/session. A write made with it must come from the app's own pages (Sec-Fetch-Site same-origin), or it's refused with 403.
+      description: The web app's session, set by POST /v1/session. It ends after 30 minutes without a request, 12 hours after sign-in, or at sign-out. A write made with it must come from the app's own pages (Sec-Fetch-Site same-origin), or it's refused with 403.
 
   parameters:
     WorkflowID:

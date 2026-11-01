@@ -609,6 +609,12 @@ type StreamRunEventsParams struct {
 	LastEventID string `json:"Last-Event-ID,omitempty,omitzero"`
 }
 
+// DeleteSessionParams defines parameters for DeleteSession.
+type DeleteSessionParams struct {
+	// Session The session to end. Without one, or with one this server didn't set, the cookie is only cleared.
+	Session string `form:"__Host-conduit_session,omitempty" json:"__Host-conduit_session,omitempty,omitzero"`
+}
+
 // ListWorkflowsParams defines parameters for ListWorkflows.
 type ListWorkflowsParams struct {
 	Limit int `form:"limit,omitempty" json:"limit,omitempty,omitzero"`
@@ -672,7 +678,7 @@ type ServerInterface interface {
 	StreamRunEvents(w http.ResponseWriter, r *http.Request, id RunID, params StreamRunEventsParams)
 	// DeleteSession Sign a browser out
 	// (DELETE /v1/session)
-	DeleteSession(w http.ResponseWriter, r *http.Request)
+	DeleteSession(w http.ResponseWriter, r *http.Request, params DeleteSessionParams)
 	// CreateSession Sign a browser in
 	// (POST /v1/session)
 	CreateSession(w http.ResponseWriter, r *http.Request)
@@ -920,8 +926,29 @@ func (siw *ServerInterfaceWrapper) StreamRunEvents(w http.ResponseWriter, r *htt
 // DeleteSession operation middleware
 func (siw *ServerInterfaceWrapper) DeleteSession(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteSessionParams
+
+	{
+		var cookie *http.Cookie
+
+		if cookie, err = r.Cookie("__Host-conduit_session"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "__Host-conduit_session", cookie.Value, &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationCookie, Explode: true, Required: false, Type: "string", Format: ""})
+			if err != nil {
+				siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "__Host-conduit_session", Err: err})
+				return
+			}
+			params.Session = value
+
+		}
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteSession(w, r)
+		siw.Handler.DeleteSession(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1809,6 +1836,7 @@ func (response StreamRunEvents503ApplicationProblemPlusJSONResponse) VisitStream
 }
 
 type DeleteSessionRequestObject struct {
+	Params DeleteSessionParams
 }
 
 type DeleteSessionResponseObject interface {
@@ -2781,8 +2809,10 @@ func (sh *strictHandler) StreamRunEvents(w http.ResponseWriter, r *http.Request,
 }
 
 // DeleteSession operation middleware
-func (sh *strictHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) DeleteSession(w http.ResponseWriter, r *http.Request, params DeleteSessionParams) {
 	var request DeleteSessionRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DeleteSession(ctx, request.(DeleteSessionRequestObject))

@@ -6,6 +6,7 @@ import { RouterProvider } from "react-router/dom";
 
 import { Toaster } from "@/components/ui/toast";
 import { createQueryClient } from "@/lib/query-client";
+import { sendToSignIn } from "@/router";
 
 // renderAt renders ui at path, with the app's providers: a query client
 // that doesn't retry, toasts, and a router in memory. routes are the other
@@ -26,14 +27,11 @@ export function renderAt(
 }
 
 // renderRoutes renders a route tree, such as the app's own, at a path, with
-// the same providers as renderAt.
+// the same providers as renderAt. A 401 goes to sign-in, as in the app.
 export function renderRoutes(tree: RouteObject[], at: string) {
-  const onUnauthorized = { called: false };
-  const queryClient = createQueryClient(() => {
-    onUnauthorized.called = true;
-  });
-  queryClient.setDefaultOptions({ queries: { retry: false } });
   const router = createMemoryRouter(tree, { initialEntries: [at] });
+  const queryClient = createQueryClient(() => sendToSignIn(router));
+  queryClient.setDefaultOptions({ queries: { retry: false } });
   render(
     <QueryClientProvider client={queryClient}>
       <Toaster>
@@ -41,5 +39,5 @@ export function renderRoutes(tree: RouteObject[], at: string) {
       </Toaster>
     </QueryClientProvider>,
   );
-  return { router, onUnauthorized };
+  return { router };
 }

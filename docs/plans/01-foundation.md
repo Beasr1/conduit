@@ -82,10 +82,20 @@ Infra and CI
       else was flagged.
 - [x] `just hooks-install`: a pre-push hook that runs `just check`.
 - [x] Dependabot (`.github/dependabot.yml`): weekly bumps for Docker digests,
-      actions, Go modules and npm, with a 3-day cooldown matching pnpm's
-      release-age guard. Its first PRs proposed nginx mainline (1.31) and
-      `@types/node` 26. Ignore rules now keep it on the lines we chose:
-      nginx stable, Node 24 LTS, and the Go minor in `go.mod`.
+      actions, Go modules and npm, held back 3 days by its default cooldown;
+      pnpm's release-age guard, a day, covers installs. Its first PRs
+      proposed nginx mainline (1.31) and `@types/node` 26. Ignore rules now
+      keep it on the lines we chose: nginx stable, Node's LTS line, and the
+      Go minor in `go.mod`.
+- [x] Node 26, LTS since 2026-10-28, by hand (2026-11-01): `.node-version`,
+      the web image, `engines` and `@types/node` together. Node 25 and later
+      don't ship corepack, so `just setup` installs the justfile's pinned one
+      in `.tools/bin`, and the web image the same version.
+- [x] CI builds both images and tests nginx's config in the web one (`just
+      images`, 2026-11-01). It would have caught the missing corepack,
+      which only `just up` found. nginx recommends mainline for production;
+      with images built in CI, following it is dropping one ignore rule. We
+      stay on stable for now.
 - [x] CLAUDE.md's commands match the justfile.
 - [ ] Turn on Dependabot alerts and security updates in the GitHub repo's
       settings (Settings → Advanced Security). It's a click on GitHub, not

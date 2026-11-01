@@ -347,3 +347,84 @@ test("leaving with unsaved changes asks first", async () => {
   );
   expect(await screen.findByText("at /workflows")).toBeTruthy();
 });
+
+// endSession makes the server refuse everything as it does once a session
+// has ended, until a sign-in; then each request is answered as before. It
+// keeps what each sign-in sent.
+function endSession() {
+  const signIns: unknown[] = [];
+  server.use(
+    http.post("/api/v1/session", async ({ request }) => {
+      signIns.push(await request.json());
+      return new HttpResponse(null, { status: 204 });
+    }),
+    http.all("/api/v1/*", () =>
+      signIns.length > 0
+        ? undefined
+        : HttpResponse.json<Problem>(
+            { status: 401, code: "unauthorized", detail: "Sign in." },
+            {
+              status: 401,
+              headers: { "Content-Type": "application/problem+json" },
+            },
+          ),
+    ),
+  );
+  return signIns;
+}
+
+test("a session that ends with unsaved changes signs in again where it is", async () => {
+  const { saves } = serveWorkflow();
+  const { router } = open(["/sign-in"]);
+  await pick("crm");
+  await screen.findByLabelText("URL");
+  const signIns = endSession();
+
+  // The change's check is refused, which asks to sign in here, rather than
+  // leaving for sign-in.
+  type("URL", "https://crm.example.com/v2/contacts");
+  const dialog = await screen.findByRole("dialog", { name: "Sign in again" });
+  fireEvent.change(within(dialog).getByLabelText("API token"), {
+    target: { value: "the-token" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Sign in" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(signIns).toEqual([{ token: "the-token" }]);
+  expect(router.state.location.pathname).toBe("/workflows/wf-1");
+
+  // The check is asked again, and the change is still there to save.
+  await screen.findByText("Revision 1 · Unsaved changes");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await screen.findByText("Revision 2 · Saved");
+  expect(saves.map((s) => crmURL(s.body))).toEqual([
+    "https://crm.example.com/v2/contacts",
+  ]);
+});
+
+test("a session that ends with unsaved changes can be left for sign-in", async () => {
+  serveWorkflow();
+  const { router } = open(["/sign-in"]);
+  await pick("crm");
+  await screen.findByLabelText("URL");
+  type("URL", "https://crm.example.com/v2/contacts");
+  await screen.findByText("Revision 1 · Unsaved changes");
+
+  // Going to sign-in on purpose, as Sign out does, only asks to leave.
+  void router.navigate("/sign-in");
+  fireEvent.click(
+    within(
+      await screen.findByRole("dialog", { name: "Leave without saving?" }),
+    ).getByRole("button", { name: "Stay" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+  endSession();
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(
+    within(
+      await screen.findByRole("dialog", { name: "Sign in again" }),
+    ).getByRole("button", { name: "Leave without saving" }),
+  );
+  expect(await screen.findByText("at /sign-in")).toBeTruthy();
+  expect(router.state.location.search).toBe("?from=%2Fworkflows%2Fwf-1");
+});

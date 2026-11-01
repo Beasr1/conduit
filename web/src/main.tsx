@@ -7,7 +7,7 @@ import { z } from "zod";
 
 import { Toaster } from "@/components/ui/toast";
 import { createQueryClient } from "@/lib/query-client";
-import { createAppRouter, routes } from "@/router";
+import { createAppRouter, sendToSignIn } from "@/router";
 import "@/index.css";
 
 // The page's CSP allows no eval and no inline styles (nginx's
@@ -18,13 +18,7 @@ import "@/index.css";
 z.config({ jitless: true });
 
 const router = createAppRouter();
-// A 401 means the session ran out, or there never was one: sign in, then
-// carry on where you were.
-const queryClient = createQueryClient(() => {
-  const { pathname, search } = router.state.location;
-  if (pathname !== routes.signIn())
-    void router.navigate(routes.signIn(pathname + search));
-});
+const queryClient = createQueryClient(() => sendToSignIn(router));
 
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html is missing #root");

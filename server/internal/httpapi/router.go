@@ -31,7 +31,7 @@ type Deps struct {
 // NewRouter returns the server's handler.
 func NewRouter(d Deps) http.Handler {
 	a := &api{
-		store: d.Store, runner: d.Runner, log: d.Log, creds: newCredentials(d.Token),
+		store: d.Store, runner: d.Runner, log: d.Log, creds: newCredentials(d.Token, d.Store),
 		streams: make(chan struct{}, cmp.Or(d.MaxStreams, 256)),
 	}
 	strict := gen.NewStrictHandlerWithOptions(a, nil, gen.StrictHTTPServerOptions{
@@ -41,7 +41,7 @@ func NewRouter(d Deps) http.Handler {
 	h := gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{
 		BaseRouter: http.NewServeMux(),
 		// Each wraps the one before, so credentials are checked before the body.
-		Middlewares:      []gen.MiddlewareFunc{checkShape, authenticate(a.creds)},
+		Middlewares:      []gen.MiddlewareFunc{checkShape, authenticate(a.creds, a.answerError)},
 		ErrorHandlerFunc: a.requestError,
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

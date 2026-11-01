@@ -4,6 +4,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # Tools that `just setup` installs, pinned here. .tools/bin comes first on PATH.
 golangci_version := "2.15.0"
+# Node 25 and later don't ship corepack; the web image installs this one too.
+corepack_version := "0.36.0"
 export PATH := justfile_directory() / ".tools/bin" + ":" + env("PATH")
 
 # corepack fetches the pnpm pinned in web/package.json without asking
@@ -28,10 +30,11 @@ coverage_floors := "workflow=97 transform=84 upstream=91 engine=96 runner=92"
 default:
     @just --list
 
-# create .env and server/.env if missing; install the pinned golangci-lint, the web dependencies and the browser test's Chromium
+# create .env and server/.env if missing; install the pinned golangci-lint and corepack, the web dependencies and the browser test's Chromium
 setup:
     @for f in .env server/.env; do [ -f "$f" ] || { cp "$f.example" "$f"; echo "created $f from $f.example"; }; done
     @if golangci-lint version 2>/dev/null | grep -q "version {{golangci_version}} "; then echo "golangci-lint {{golangci_version}} already installed"; else curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b .tools/bin v{{golangci_version}}; fi
+    @if [ "$(corepack --version 2>/dev/null)" = "{{corepack_version}}" ]; then echo "corepack {{corepack_version}} already installed"; else npm install --global --prefix .tools corepack@{{corepack_version}}; fi
     cd web && corepack pnpm install --frozen-lockfile
     cd web && corepack pnpm exec playwright install chromium
 
@@ -144,6 +147,12 @@ gen:
 # install a git pre-push hook that runs `just check`
 hooks-install:
     @hook="$(git rev-parse --git-path hooks)/pre-push"; printf '#!/bin/sh\nexec just check\n' > "$hook"; chmod +x "$hook"; echo "installed $hook"
+
+# build the images `up` runs, without starting them, and test nginx's config in the web one, hardened as compose runs it
+images:
+    docker build --file docker/server/Dockerfile --tag conduit-server:check .
+    docker build --file docker/web/Dockerfile --tag conduit-web:check .
+    docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges conduit-web:check nginx -t
 
 # build and start everything behind nginx on http://127.0.0.1:8088
 up:

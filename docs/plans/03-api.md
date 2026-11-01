@@ -191,7 +191,12 @@ The validator is santhosh-tekuri/jsonschema v6.0.3:
   goroutine per run, so a slow database never holds up the scheduler.
   - When the run ends, the writer is flushed, then the run row is
     finalised.
-  - A served run waits for that before it answers.
+  - A served run waits for that before it answers. Asked whether
+    recording is async: node results are, off the scheduler's path, and
+    only this last write is in line, a few milliseconds. So a caller who
+    reads the run after its answer finds it ended, and a crash after an
+    answer can't leave that run to be marked `interrupted`. Kept so
+    (2026-11-01).
 - **The cap on concurrent runs** is a semaphore, `CONDUIT_MAX_RUNS`,
   default 32. Past it, a start gets `503` with `Retry-After`.
 - **At startup**, every run still `running` is marked `failed` with code

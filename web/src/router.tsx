@@ -1,5 +1,6 @@
 import {
   createBrowserRouter,
+  type DataRouter,
   Outlet,
   redirect,
   type RouteObject,
@@ -21,6 +22,28 @@ export function safeFrom(from: string | null): string {
   if (!from || !from.startsWith("/") || /^\/[/\\]/.test(from))
     return routes.workflows();
   return from;
+}
+
+// sendToSignIn is what a 401 does: the session ran out, or there never was
+// one. It goes to sign-in, carrying where you were, and says on the way
+// there that the session ended, so a page with unsaved changes can stop it
+// and sign in again where it is (sessionEnded).
+export function sendToSignIn(router: DataRouter) {
+  const { pathname, search } = router.state.location;
+  if (pathname !== routes.signIn())
+    void router.navigate(routes.signIn(pathname + search), {
+      state: { sessionEnded: true },
+    });
+}
+
+// sessionEnded says whether a navigation's state is sendToSignIn's.
+export function sessionEnded(state: unknown): boolean {
+  return (
+    typeof state === "object" &&
+    state !== null &&
+    "sessionEnded" in state &&
+    state.sessionEnded === true
+  );
 }
 
 // Pages load lazily, so a page's code (later, the editor's React Flow) is

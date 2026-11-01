@@ -70,5 +70,7 @@ test("says when the token is wrong", async () => {
 
   signIn("nope");
   expect(await screen.findByText("That isn't the API token.")).toBeTruthy();
+  // The 401 doesn't send the page to sign-in again.
   expect(router.state.location.pathname).toBe("/sign-in");
+  expect(router.state.location.search).toBe("");
 });

@@ -192,8 +192,9 @@ test("+ Case adds a case, named, with a code no exit has, and opens its tab", as
   renderEditor(cased);
   await open();
   tab("Add a case");
-  // The first answer's status no case has.
-  expect(field("New case status")).toHaveProperty("value", "500");
+  // Each answer has its line, 500 from respond's Unhandled, so it's the
+  // first status from 400 that no exit or answer has.
+  expect(field("New case status")).toHaveProperty("value", "400");
   type("New case name", "bad_key");
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   await waitFor(() =>
@@ -204,9 +205,21 @@ test("+ Case adds a case, named, with a code no exit has, and opens its tab", as
   expect(blocks()).toEqual([
     "case:0 found · 200",
     "case:1 missing · 404",
-    "case:2 bad_key · 500",
+    "case:2 bad_key · 400",
     "add + Case",
   ]);
+});
+
+test("+ Case offers an answer no line gives yet", async () => {
+  renderEditor({
+    ...cased,
+    response: {
+      answers: [...(cased.response?.answers ?? []), { status: 409 }],
+    },
+  });
+  await open();
+  tab("Add a case");
+  expect(field("New case status")).toHaveProperty("value", "409");
 });
 
 test("a status that isn't 200 to 599 says so, and the one held stays", async () => {
@@ -391,4 +404,19 @@ test("a run marks the case that held, and takes the lines leaving its exit", asy
   ).toBe("Connection from respond to fallback, not taken in this run");
   const panel = await open();
   expect(await within(panel).findByText("It gave 200")).toBeTruthy();
+});
+
+test("+ Case skips a status an answer has, as the step's Unhandled gives it", async () => {
+  renderEditor({
+    ...cased,
+    response: {
+      answers: [
+        { status: 200, from: "respond", on: 200 },
+        { status: 400, from: "respond", unhandled: true },
+      ],
+    },
+  });
+  await open();
+  tab("Add a case");
+  expect(field("New case status")).toHaveProperty("value", "401");
 });

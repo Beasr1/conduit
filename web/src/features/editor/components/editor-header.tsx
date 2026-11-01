@@ -19,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LeaveDialog } from "@/features/editor/components/leave-dialog";
 import { RunBar } from "@/features/editor/components/run-bar";
 import { RunButton } from "@/features/editor/components/run-dialog";
 import {
@@ -130,7 +131,8 @@ export function EditorHeader({
   }, []);
 
   // Leaving with unsaved changes asks first: another page in the app through
-  // a dialog, and closing or reloading the tab through the browser's own.
+  // a dialog, which signs in again here when a 401 is what's leaving, and
+  // closing or reloading the tab through the browser's own.
   const blocker = useBlocker(dirty);
   useEffect(() => {
     if (!dirty) return;
@@ -255,29 +257,7 @@ export function EditorHeader({
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={blocker.state === "blocked"}
-        onOpenChange={(open) => {
-          if (!open) blocker.reset?.();
-        }}
-      >
-        <DialogContent className="nokey">
-          <DialogHeader>
-            <DialogTitle>Leave without saving?</DialogTitle>
-            <DialogDescription>
-              Your unsaved changes here will be lost.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => blocker.reset?.()}>
-              Stay
-            </Button>
-            <Button variant="destructive" onClick={() => blocker.proceed?.()}>
-              Leave
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <LeaveDialog blocker={blocker} />
     </div>
   );
 }
