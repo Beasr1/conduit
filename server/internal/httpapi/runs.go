@@ -137,7 +137,15 @@ func (a *api) ServeWorkflow(ctx context.Context, req gen.ServeWorkflowRequestObj
 	case err != nil:
 		return nil, refusal(err)
 	}
-	// An answer goes out as it is, a failed run's unhandled one too.
+	// An answer goes out as it is, a failed run's unhandled one too; one
+	// passing an error on with no error body to say it, as problem details
+	// at its status (plan 12).
+	if f := out.Problem; out.Answer != 0 && f != nil {
+		return nil, &problem{
+			status: out.Answer, code: f.Code, detail: f.Detail,
+			node: f.Node, instance: "/v1/runs/" + out.Run.ID,
+		}
+	}
 	if out.Answer != 0 {
 		return servedAnswer{status: out.Answer, body: out.Output}, nil
 	}

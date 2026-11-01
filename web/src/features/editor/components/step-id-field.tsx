@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { Hint } from "@/components/hint";
 import {
   Field,
   FieldDescription,
@@ -75,7 +76,16 @@ export function StepIdField({ index }: { index: number }) {
 
   return (
     <Field data-invalid={said.length > 0}>
-      <FieldLabel htmlFor="step-id">Id</FieldLabel>
+      <div className="flex items-center gap-1">
+        <FieldLabel htmlFor="step-id">Id</FieldLabel>
+        <Hint about="Id">
+          Expressions read this step as{" "}
+          <span className="font-mono">{`nodes.${id}`}</span>: its{" "}
+          <span className="font-mono">status</span>,{" "}
+          <span className="font-mono">headers</span>, with names in lower case,
+          and <span className="font-mono">body</span>.
+        </Hint>
+      </div>
       <Input
         id="step-id"
         className="font-mono"
@@ -89,10 +99,7 @@ export function StepIdField({ index }: { index: number }) {
         }}
       />
       <FieldError errors={said} />
-      <FieldDescription>
-        In expressions, this step is{" "}
-        <span className="font-mono">{`nodes.${id}`}</span>.
-      </FieldDescription>
+      <FieldDescription className="font-mono">{`nodes.${id}`}</FieldDescription>
       {stale.map(({ old, places }) => (
         <p key={old} role="status" className="text-sm">
           Still reading <span className="font-mono">nodes.{old}</span>:{" "}

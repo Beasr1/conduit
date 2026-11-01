@@ -235,12 +235,12 @@ func TestServe(t *testing.T) {
 	// picks answers through a transform that picks among 200 and 201.
 	picks := func(expr string) string {
 		return `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/ok"}}, {"id": "r", "kind": "transform", "expr": "` + expr + `"}],
-		  "edges": [{"from": "a", "to": "r"}], "response": {"answers": [{"status": 200, "from": "r"}, {"status": 201, "from": "r"}]}}`
+		  "edges": [{"from": "a", "to": "r"}], "response": {"answers": [{"status": 200, "lines": [{"from": "r"}]}, {"status": 201, "lines": [{"from": "r"}]}]}}`
 	}
 	// unhandled answers a's failure with the body given.
 	unhandled := func(body string) string {
 		return `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/fail"}}],
-		  "response": {"answers": [{"status": 200, "from": "a"}], "unhandled": {"body": "` + body + `"}}}`
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}], "errors": {"body": "` + body + `"}}}`
 	}
 	tests := []struct {
 		name, def    string
@@ -302,8 +302,8 @@ func TestServe(t *testing.T) {
 	}
 }
 
-// An unhandled that fails leaves the run's failure to answer, and says why.
-func TestServe_AnUnhandledThatFails(t *testing.T) {
+// An error body that fails leaves the run's failure to answer, and says why.
+func TestServe_AnErrorBodyThatFails(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error": "down"}`, http.StatusInternalServerError)
@@ -311,17 +311,105 @@ func TestServe_AnUnhandledThatFails(t *testing.T) {
 	t.Cleanup(srv.Close)
 	r := newRunner(t, Options{})
 	w := saveWorkflow(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}}],
-	  "response": {"answers": [{"status": 200, "from": "a"}], "unhandled": {"body": "$number(error.code)"}}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}], "errors": {"body": "$number(error.code)"}}}`)
 	out, err := r.Serve(t.Context(), w.Slug, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out.Answer != 0 || out.Output != nil || out.Failure == nil || out.Failure.Code != CodeUpstream ||
-		!strings.Contains(out.Failure.Detail, "; unhandled failed too: unhandled: ") {
+		!strings.Contains(out.Failure.Detail, "; the error body failed too: error body: ") {
 		t.Errorf("answer %d %s, failure %+v", out.Answer, out.Output, out.Failure)
 	}
 	if stored, err := db.Run(t.Context(), out.Run.ID); err != nil || stored.Answered != 0 || decode[Failure](t, stored.Error) != *out.Failure {
 		t.Errorf("stored run = %+v, %v", stored, err)
+	}
+}
+
+// An answer that passes an error on whose error body fails answers
+// problem details instead, which say the body failed too.
+func TestServe_AnErrorAnswerWhoseBodyFails(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error": "gone"}`)
+	}))
+	t.Cleanup(srv.Close)
+	r := newRunner(t, Options{})
+	w := saveWorkflow(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}, "outputs": [{"status": 404}]}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 404, "lines": [{"from": "a", "on": 404}]}], "errors": {"body": "$number(error.code)"}}}`)
+	out, err := r.Serve(t.Context(), w.Slug, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Answer != 404 || out.Output != nil || out.Problem == nil || out.Problem.Code != CodeUpstream || out.Problem.Node != "a" ||
+		!strings.HasPrefix(out.Problem.Detail, "a answered 404; the error body failed too: error body: ") {
+		t.Errorf("answer %d %s, problem %+v", out.Answer, out.Output, out.Problem)
+	}
+}
+
+// An answer that passes an error on, from an error block or from an
+// Unhandled with no body of its own, answers the response's error body over
+// that error, or, with none, Conduit's problem details (plan 12). A body of
+// the step's own still answers as written.
+func TestServe_ErrorAnswers(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /gone", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Trace", "t-1")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error": "gone"}`)
+	})
+	mux.HandleFunc("GET /fail", func(w http.ResponseWriter, r *http.Request) { http.Error(w, `{"error": "down"}`, 500) })
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	r := newRunner(t, Options{})
+
+	gone := func(errors string) string {
+		return `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/gone"}, "outputs": [{"status": 404}]}],
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}, {"status": 404, "lines": [{"from": "user", "on": 404}]}]` + errors + `}}`
+	}
+	down := func(unhandled, errors string) string {
+		return `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/fail"}` + unhandled + `}],
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}, {"status": 502, "lines": [{"from": "user", "unhandled": true}]}]` + errors + `}}`
+	}
+	shape := `, "errors": {"body": "{ 'error': error.code, 'why': error.detail, 'at': error.node, 'got': error.status, 'said': error.body.error, 'trace': error.headers.'x-trace' }"}`
+	failed := fmt.Sprintf("GET %s/fail: status 500", srv.URL)
+	tests := []struct {
+		name, def string
+		answer    int
+		output    string
+		problem   *Failure
+	}{
+		{
+			"an error block, with an error body", gone(shape), 404,
+			`{"error":"upstream_failed","why":"user answered 404","at":"user","got":404,"said":"gone","trace":"t-1"}`, nil,
+		},
+		{"an error block, with none", gone(""), 404, "", &Failure{Code: CodeUpstream, Detail: "user answered 404", Node: "user"}},
+		{
+			"an Unhandled, with an error body", down("", shape), 502,
+			`{"error":"upstream_failed","why":"` + failed + `","at":"user","got":500,"said":"down"}`, nil,
+		},
+		{"an Unhandled, with none", down("", ""), 502, "", &Failure{Code: CodeUpstream, Detail: failed, Node: "user"}},
+		{"an Unhandled body of its own", down(`, "unhandled": {"body": "{ 'down': true }"}`, shape), 502, `{"down":true}`, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			w := saveWorkflow(t, srv.URL, tt.def)
+			out, err := r.Serve(t.Context(), w.Slug, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.Run.Status != "succeeded" || out.Answer != tt.answer || string(out.Output) != tt.output || out.Failure != nil {
+				t.Errorf("run %s answered %d %s, failure %+v; want %d %s", out.Run.Status, out.Answer, out.Output, out.Failure, tt.answer, tt.output)
+			}
+			if (out.Problem == nil) != (tt.problem == nil) || out.Problem != nil && *out.Problem != *tt.problem {
+				t.Errorf("problem %+v, want %+v", out.Problem, tt.problem)
+			}
+			if stored, err := db.Run(t.Context(), out.Run.ID); err != nil || stored.Answered != tt.answer {
+				t.Errorf("stored run = %+v, %v", stored, err)
+			}
+		})
 	}
 }
 
@@ -333,7 +421,7 @@ func TestServe_ATransformsUnhandledBodyIsRecorded(t *testing.T) {
 	w := saveWorkflow(t, "", `{"nodes": [{"id": "count", "kind": "transform", "expr": "$number('two')", "unhandled": {"body": "0"}},
 	    {"id": "next", "kind": "transform", "expr": "nodes.count.body + 1"}],
 	  "edges": [{"from": "count", "to": "next", "unhandled": true}],
-	  "response": {"answers": [{"status": 200, "from": "next"}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "next"}]}]}}`)
 	out, err := r.Serve(t.Context(), w.Slug, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -357,7 +445,7 @@ func TestServe_ACasesStatusIsRecorded(t *testing.T) {
 	r := newRunner(t, Options{})
 	w := saveWorkflow(t, "", `{"nodes": [{"id": "check", "kind": "transform",
 	    "switch": {"cases": [{"when": "input.id = 0", "status": 404, "body": "{ 'error': 'gone' }"}, {"when": "true", "status": 200}]}}],
-	  "response": {"answers": [{"status": 200, "from": "check", "on": 200}, {"status": 404, "from": "check", "on": 404}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "check", "on": 200}]}, {"status": 404, "lines": [{"from": "check", "on": 404}]}]}}`)
 	out, err := r.Serve(t.Context(), w.Slug, json.RawMessage(`{"id": 0}`))
 	if err != nil || out.Answer != 404 || string(out.Output) != `{"error":"gone"}` {
 		t.Fatalf("Serve() = %d %s, %v", out.Answer, out.Output, err)
@@ -381,7 +469,7 @@ func TestServe_TheLinesTakenAreRecorded(t *testing.T) {
 	w := saveWorkflow(t, "", `{"nodes": [{"id": "count", "kind": "transform", "expr": "$number(input.n)"},
 	    {"id": "e", "kind": "transform", "expr": "$exists(nodes.count.error) ? 0 : nodes.count.body"}],
 	  "edges": [{"from": "count", "to": "e"}, {"from": "count", "to": "e", "unhandled": true}],
-	  "response": {"answers": [{"status": 200, "from": "e"}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "e"}]}]}}`)
 	for input, want := range map[string]struct {
 		output string
 		took   []Line
@@ -418,7 +506,7 @@ func TestServe_AStepsUnhandledTakesItsFailure(t *testing.T) {
 	w := saveWorkflow(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}, "unhandled": {"body": "{ 'down': true }"}},
 	    {"id": "sorry", "kind": "transform", "expr": "{ 'error': nodes.a.error.code, 'upstream': nodes.a.status }"}],
 	  "edges": [{"from": "a", "to": "sorry", "unhandled": true}],
-	  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 503, "from": "sorry"}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 503, "lines": [{"from": "sorry"}]}]}}`)
 	out, err := r.Serve(t.Context(), w.Slug, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -7,8 +7,8 @@ import {
   removeEdges,
   removeNodes,
   renameNode,
+  setErrorBody,
   setStepUnhandled,
-  setUnhandled,
   updateCase,
   updateEdge,
   updateNode,
@@ -17,7 +17,9 @@ import {
   follow,
   type Place,
   placeOf,
+  placeOfProblem,
   problemsIn,
+  requestTabOf,
   say,
   stepPartOf,
 } from "@/features/editor/problems";
@@ -70,14 +72,27 @@ test.each<[string, Place]>([
   ["/output", { on: "response", field: "output" }],
   ["/output_schema", { on: "response", field: "output_schema" }],
   ["/response/answers", { on: "response", field: "answers" }],
-  ["/response/answers/2/from", { on: "response", field: "from", answer: 2 }],
-  ["/response/answers/0/on", { on: "response", field: "on", answer: 0 }],
-  ["/response/answers/1/unhandled", { on: "response", field: "on", answer: 1 }],
-  ["/response/unhandled/body", { on: "response", field: "unhandled" }],
+  ["/response/answers/2/lines", { on: "response", field: "from", answer: 2 }],
+  [
+    "/response/answers/2/lines/1/from",
+    { on: "response", field: "from", answer: 2, line: 1 },
+  ],
+  [
+    "/response/answers/0/lines/0/on",
+    { on: "response", field: "on", answer: 0, line: 0 },
+  ],
+  [
+    "/response/answers/1/lines/0/unhandled",
+    { on: "response", field: "on", answer: 1, line: 0 },
+  ],
+  ["/response/errors/body", { on: "response", field: "errors" }],
+  ["/response/errors", { on: "response", field: "errors" }],
   [
     "/nodes/1/unhandled/body",
     { on: "step", index: 1, field: "unhandled_body" },
   ],
+  ["/nodes/1/unhandled", { on: "step", index: 1, field: "unhandled" }],
+  ["/nodes/1/unhandled/fail", { on: "step", index: 1, field: "unhandled" }],
   ["/response/from", { on: "workflow" }],
   ["/nodes/1/switch", { on: "step", index: 1, field: "switch" }],
   [
@@ -138,6 +153,7 @@ test.each<[string, string]>([
   ["/nodes/0/outputs/5/status", "add"],
   ["/nodes/0/outputs", "add"],
   ["/nodes/0/unhandled/body", "unhandled"],
+  ["/nodes/0/unhandled/fail", "unhandled"],
   ["/edges/0/when", "request"],
 ])("%j is on the step's %j", (pointer, part) => {
   const draft: Definition = {
@@ -268,7 +284,9 @@ test("a problem goes once what it's about changes", () => {
 test("an answer's problem goes once that answer changes, and its line's once the line moves", () => {
   const answered: Definition = {
     ...specExample,
-    response: { answers: [{ status: 200, from: "zz" }, { status: 99 }] },
+    response: {
+      answers: [{ status: 200, lines: [{ from: "zz" }] }, { status: 99 }],
+    },
   };
   const status: Place = { on: "response", field: "status", answer: 1 };
   expect(follow(status, answered, addAnswer(answered, 404))).toEqual(status);
@@ -280,7 +298,7 @@ test("an answer's problem goes once that answer changes, and its line's once the
   ).toBeUndefined();
   // One about the answers as a whole goes once any of them changes.
   const answers: Place = { on: "response", field: "answers" };
-  expect(follow(answers, answered, setUnhandled(answered, "1"))).toEqual(
+  expect(follow(answers, answered, setErrorBody(answered, "1"))).toEqual(
     answers,
   );
   expect(follow(answers, answered, addAnswer(answered, 404))).toBeUndefined();
@@ -350,42 +368,53 @@ const broken: Definition = {
   ],
   response: {
     answers: [
-      { status: 99, from: "zz", on: 409 },
-      { status: 99, from: "a", on: 409 },
-      { status: 98, from: "a", unhandled: true },
+      { status: 99, lines: [{ from: "zz", on: 409 }] },
+      { status: 99, lines: [{ from: "a", on: 409 }] },
+      {
+        status: 98,
+        lines: [
+          { from: "a", unhandled: true },
+          { from: "a", unhandled: true },
+        ],
+      },
+      { status: 97, lines: [{ from: "a", on: 409 }] },
     ],
   },
 };
 
 test.each([
   [
-    "/response/answers/0/from",
+    "/response/answers/0/lines",
     "required",
     "Join a step to this answer: drag from the step's point to the answer's.",
   ],
-  ["/response/answers/0/from", "unknown_node", "No step has the id “zz”."],
   [
-    "/response/answers/0/on",
+    "/response/answers/0/lines/0/from",
+    "unknown_node",
+    "No step has the id “zz”.",
+  ],
+  [
+    "/response/answers/0/lines/0/on",
     "unknown_output",
     "zz has no 409 response. Join this answer from another of its points.",
   ],
   [
-    "/response/answers/0/on",
+    "/response/answers/0/lines/0/on",
     "not_allowed",
     "A transform step has one point, so its line into an answer names no response.",
   ],
   [
-    "/response/answers/1/from",
-    "not_allowed",
-    "An HTTP step's response is what it got, so each of its responses gives one answer. To pick among several, join a transform step that does.",
+    "/response/answers/3/lines/0/from",
+    "dead_line",
+    "a gives 99 from this point, above, so this line never answers: remove one.",
   ],
   [
-    "/response/answers/2/from",
-    "not_allowed",
-    "A step's Unhandled has no status to pick an answer with, so it gives one. To pick among several, join a transform step that does.",
+    "/response/answers/2/lines/1/from",
+    "duplicate_line",
+    "Joined to this answer twice: remove one.",
   ],
   [
-    "/response/answers/2/unhandled",
+    "/response/answers/2/lines/0/unhandled",
     "not_allowed",
     "A line leaves from one block: one of the step's responses, or its Unhandled.",
   ],
@@ -395,15 +424,35 @@ test.each([
     "A line leaves from one block: one of the step's responses, or its Unhandled.",
   ],
   [
-    "/response/answers/1/from",
+    "/response/answers/1/lines/0/from",
     "other_status",
     "a's case exits with 409, so its line joins the 409 answer: draw it there instead.",
   ],
   ["/response/answers", "required", "Add an answer: a status the API gives."],
   [
-    "/response/unhandled/body",
+    "/response/errors/body",
     "required",
-    "Write its body, or use Conduit's problem details instead.",
+    "Write the error body, or use problem details.",
+  ],
+  [
+    "/nodes/1",
+    "no_answer",
+    "No answer follows: join it to an answer, or to a step that leads to one.",
+  ],
+  [
+    "/response/answers",
+    "no_answers",
+    "Add an answer, and join the step that gives it.",
+  ],
+  [
+    "/nodes/1/unhandled",
+    "unhandled_undecided",
+    "Join its Unhandled to a step or an answer, or let it fail the run.",
+  ],
+  [
+    "/nodes/1/unhandled/fail",
+    "unhandled_both",
+    "Its Unhandled has a line and fails the run: keep one.",
   ],
   ["/nodes/0/switch/cases/0/when", "required", "Add a condition."],
   ["/nodes/0/switch/cases/0/status", "required", "Give it a status."],
@@ -440,11 +489,7 @@ test.each([
     "A workflow with a response has no output: the steps joined to its answers give them.",
   ],
   ["/nodes/0/expr", "required", "Add an expression."],
-  [
-    "/nodes/0/unhandled/body",
-    "required",
-    "Write its body, or give what the step got instead.",
-  ],
+  ["/nodes/0/unhandled/body", "required", "Write its body, or remove it."],
   ["/nodes/1/request/url", "required", "Add a URL."],
   ["/nodes/1/id", "duplicate_id", "Another step already has this id."],
   [
@@ -525,6 +570,46 @@ test.each([
   expect(say({ pointer, code, detail: "the server's words" }, broken)).toBe(
     said,
   );
+});
+
+// No answer following an HTTP step's 2xx is said of the step, as the 2xx has
+// no place of its own in the definition (plan 12); it goes on the 2xx block.
+// Every other block has its place, and every other problem said of a step
+// stays on the step.
+test.each<[string, string, Place]>([
+  ["/nodes/0", "no_answer", { on: "step", index: 0, field: "sample" }],
+  [
+    "/nodes/0/outputs/1",
+    "no_answer",
+    { on: "step", index: 0, field: "outputs", output: 1 },
+  ],
+  [
+    "/nodes/0/switch/cases/2",
+    "no_answer",
+    { on: "step", index: 0, field: "case_status", case: 2 },
+  ],
+  ["/nodes/0/expr", "no_answer", { on: "step", index: 0, field: "expr" }],
+  ["/nodes/0", "never_runs", { on: "step", index: 0 }],
+  ["/response/answers", "no_answer", { on: "response", field: "answers" }],
+])("%s, %s, is placed at %j", (pointer, code, place) => {
+  expect(placeOfProblem({ pointer, code, detail: "" })).toEqual(place);
+});
+
+// The tab of a step's Request each field is on (plan 13): the call's
+// address, headers, query, body or retry.
+test.each<[Parameters<typeof requestTabOf>[0], string]>([
+  ["method", "url"],
+  ["url", "url"],
+  ["headers", "headers"],
+  ["query", "query"],
+  ["body", "body"],
+  ["timeout", "retry"],
+  ["attempts", "retry"],
+  ["idempotent", "retry"],
+  ["request", "url"],
+  [undefined, "url"],
+])("%s is on the Request's %s tab", (field, tab) => {
+  expect(requestTabOf(field)).toBe(tab);
 });
 
 test("the server's detail stands where it says what went wrong", () => {
@@ -616,7 +701,9 @@ test("a case's problems say what a status as an exit asks of it", () => {
       { from: "check", to: "next" },
       { from: "check", to: "next", on: 418 },
     ],
-    response: { answers: [{ status: 418, from: "check", on: 418 }] },
+    response: {
+      answers: [{ status: 418, lines: [{ from: "check", on: 418 }] }],
+    },
   };
   const says = (pointer: string, code: string) =>
     say({ pointer, code, detail: "the server's words" }, of);
@@ -629,7 +716,7 @@ test("a case's problems say what a status as an exit asks of it", () => {
   expect(says("/edges/1/on", "unknown_output")).toBe(
     "check has no case exiting with 418. Add one with + Case on the step, or draw the connection from another.",
   );
-  expect(says("/response/answers/0/on", "unknown_output")).toBe(
+  expect(says("/response/answers/0/lines/0/on", "unknown_output")).toBe(
     "check has no case exiting with 418. Join this answer from another of its points.",
   );
 });

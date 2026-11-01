@@ -40,6 +40,12 @@ async function open(id: string) {
   fireEvent.click(await screen.findByText(id));
 }
 
+// openBody picks an HTTP step and opens its Request's Body tab.
+async function openBody(id: string) {
+  await open(id);
+  fireEvent.click(await screen.findByRole("tab", { name: "Body" }));
+}
+
 async function close() {
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await waitFor(() => expect(screen.queryByRole("complementary")).toBeNull());
@@ -74,8 +80,8 @@ test("the request body shows what the step reads, what it makes and what it send
       },
     ),
   );
-  await open("crm");
-  const panel = screen.getByRole("tabpanel", { name: "Request" });
+  await openBody("crm");
+  const panel = screen.getByRole("tabpanel", { name: "Body" });
   // The input, as a tree of what it can read. A step it has no connection
   // from starts folded: crm's come from orders and prefs.
   expect(
@@ -112,7 +118,7 @@ test("picking a field of the input puts its path where the cursor is", async () 
       HttpResponse.json<Preview>({ reads, skipped: false, problems: [] }),
     ),
   );
-  await open("crm");
+  await openBody("crm");
   fireEvent.click(
     await screen.findByRole("button", { name: "Expand nodes.user" }),
   );
@@ -135,7 +141,7 @@ test("picking a field of the input puts its path where the cursor is", async () 
   fireEvent.click(insert);
   expect(body.value).toBe('{ "email": nodes.user.body.email }');
 
-  // And the step holds it.
+  // And the step holds it. Its Request opens again on Body.
   await close();
   await open("crm");
   expect(field("Request body")).toHaveProperty(
@@ -163,7 +169,7 @@ test("a transform step previews what it gives", async () => {
     name: "Transform step",
   });
   expect(
-    await within(step).findByRole("heading", { name: "It gives" }),
+    await within(step).findByRole("heading", { name: "Gives" }),
   ).toBeTruthy();
   expect(within(step).getByText(/"who": "ADA"/)).toBeTruthy();
 });

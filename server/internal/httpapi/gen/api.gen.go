@@ -410,7 +410,7 @@ type RevisionSummary struct {
 
 // Run defines model for Run.
 type Run struct {
-	// Answered The status of the answer the run gave, its own once it succeeded, or its response's unhandled once it failed, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
+	// Answered The status of the answer the run gave, its own once it succeeded, or, once it failed, the status by cause its response's error body answered with, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
 	Answered int `json:"answered,omitempty,omitzero"`
 
 	// EndedAt Absent while the run goes on.
@@ -479,7 +479,7 @@ type RunList struct {
 
 // RunSummary defines model for RunSummary.
 type RunSummary struct {
-	// Answered The status of the answer the run gave, its own once it succeeded, or its response's unhandled once it failed, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
+	// Answered The status of the answer the run gave, its own once it succeeded, or, once it failed, the status by cause its response's error body answered with, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
 	Answered int `json:"answered,omitempty,omitzero"`
 
 	// EndedAt Absent while the run goes on.

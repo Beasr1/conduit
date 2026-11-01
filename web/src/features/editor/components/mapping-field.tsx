@@ -1,16 +1,12 @@
 import { type ReactNode, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Hint } from "@/components/hint";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { DataTree } from "@/features/editor/components/data-tree";
 import { Where } from "@/features/editor/components/problem-list";
-import { outcomeTag, UNHANDLED } from "@/features/editor/flow";
+import { outcomeTag } from "@/features/editor/flow";
 import { asErrors } from "@/features/editor/hooks/use-problems";
 import type { usePreview } from "@/features/editor/hooks/use-preview";
 import { pathOf } from "@/features/editor/paths";
@@ -26,11 +22,12 @@ type Preview = components["schemas"]["Preview"];
 // as it's typed; then the result. A step's request body, a transform's
 // value, a connection's condition and the workflow's output are each
 // written in one. reads picks what of the preview it reads, its reads but
-// for a step's Unhandled body.
+// for a step's Unhandled body. What the expression is for is a hint beside
+// its label (plan 13); a connection's input starts folded.
 export function MappingField({
   id,
   label,
-  description,
+  hint,
   placeholder,
   initial,
   apply,
@@ -39,10 +36,11 @@ export function MappingField({
   open,
   result,
   reads = (p) => p.reads,
+  folded = false,
 }: {
   id: string;
   label: string;
-  description: ReactNode;
+  hint: ReactNode;
   placeholder?: string;
   initial: string;
   apply: (text: string) => void;
@@ -55,6 +53,7 @@ export function MappingField({
   // What it makes of that, given the preview and the draft previewed.
   result: (preview: Preview, of: Definition) => ReactNode;
   reads?: (preview: Preview) => unknown;
+  folded?: boolean;
 }) {
   const [text, setText] = useState(initial);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -90,9 +89,13 @@ export function MappingField({
         open={open}
         onPick={insert}
         reads={reads}
+        folded={folded}
       />
       <Field data-invalid={problems.length > 0}>
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
+        <div className="flex items-center gap-1">
+          <FieldLabel htmlFor={id}>{label}</FieldLabel>
+          <Hint about={label}>{hint}</Hint>
+        </div>
         {/* TODO(plan 10): a JSONata editor replaces this textarea. */}
         <Textarea
           id={id}
@@ -108,7 +111,6 @@ export function MappingField({
           }}
         />
         <FieldError errors={asErrors(problems)} />
-        <FieldDescription>{description}</FieldDescription>
       </Field>
       {preview.data !== undefined && (
         <section className="flex flex-col gap-1.5 text-sm">
@@ -123,27 +125,25 @@ export function MappingField({
 // input, and what the steps before it got back, as a tree whose fields
 // give their path, which goes into what into names. The steps open names
 // start unfolded. A step a run may come without, or that may answer more
-// than one way, is tagged so, and a note says what to check.
+// than one way, is tagged so, and the hint says what to check. Folded, it
+// waits to be opened.
 export function Reads({
   into,
   preview,
   open,
   onPick,
   reads = (p) => p.reads,
+  folded = false,
 }: {
   into: string;
   preview: ReturnType<typeof usePreview>;
   open: (of: Definition) => string[];
   onPick: (path: string) => void;
   reads?: (preview: Preview) => unknown;
+  folded?: boolean;
 }) {
-  return (
-    <section className="flex flex-col gap-1.5 text-sm">
-      <h3 className="font-medium">Input</h3>
-      <p className="text-muted-foreground">
-        What it reads: the run&apos;s input, and what the steps before it got
-        back. Pick a field to put its path in {into}.
-      </p>
+  const body = (
+    <>
       {preview.isPending ? (
         <Waiting />
       ) : preview.isError ? (
@@ -166,13 +166,29 @@ export function Reads({
               )}
             />
           </div>
-          <OutcomeNotes
-            reads={reads(preview.data.preview)}
-            preview={preview.data.preview}
-            of={preview.data.of}
-          />
         </>
       )}
+    </>
+  );
+  if (folded)
+    return (
+      <details className="flex flex-col gap-1.5 text-sm">
+        <summary className="cursor-pointer font-medium">Input</summary>
+        <div className="mt-1.5 flex flex-col gap-1.5">{body}</div>
+      </details>
+    );
+  return (
+    <section className="flex flex-col gap-1.5 text-sm">
+      <div className="flex items-center gap-1">
+        <h3 className="font-medium">Input</h3>
+        <Hint about="Input">
+          The run&apos;s input, and what the steps before got back. Pick a field
+          to put its path in {into}. A step tagged conditional may not be there,
+          so check it with <span className="font-mono">$exists</span>; one
+          tagged with its responses may have answered any of them.
+        </Hint>
+      </div>
+      {body}
     </section>
   );
 }
@@ -217,75 +233,6 @@ function tagsOf(
   return tags;
 }
 
-// OutcomeNotes says what the tags in an Input ask of an expression: to
-// check a conditional step is there, or mark the line that brings it
-// required; and to check which way a step answered, when it may answer
-// more than one.
-function OutcomeNotes({
-  reads,
-  preview,
-  of,
-}: {
-  reads: unknown;
-  preview: Preview;
-  of: Definition;
-}) {
-  const ids = stepsIn(reads);
-  const conditional = ids.filter((id) => preview.outcomes?.[id]?.conditional);
-  const varied = ids.filter(
-    (id) => (preview.outcomes?.[id]?.outputs.length ?? 0) > 1,
-  );
-  const [first] = conditional;
-  const [only] = varied;
-  const outcome = only === undefined ? undefined : preview.outcomes?.[only];
-  const node = of.nodes.find((n) => n.id === only);
-  const several = (n: number, one: string, more: string) =>
-    n > 1 ? more : one;
-  return (
-    <>
-      {first !== undefined && (
-        <p className="text-muted-foreground">
-          <Names ids={conditional} /> {several(conditional.length, "is", "are")}{" "}
-          conditional: a run can reach this step without{" "}
-          {several(conditional.length, "it", "them")}. Check{" "}
-          {several(conditional.length, "it", "one")} with{" "}
-          <span className="font-mono">{`$exists(${pathOf("nodes", first)})`}</span>
-          , or, to run this step only when it comes, mark the line that brings
-          it required.
-        </p>
-      )}
-      {only !== undefined && outcome && varied.length === 1 && (
-        <p className="text-muted-foreground">
-          <span className="font-mono">{only}</span> answers{" "}
-          {outcomeTag(node, { ...outcome, conditional: false })}: check{" "}
-          <span className="font-mono">
-            {outcome.outputs.includes(UNHANDLED)
-              ? `$exists(${pathOf(pathOf("nodes", only), "error")})`
-              : pathOf(pathOf("nodes", only), "status")}
-          </span>{" "}
-          before reading its body.
-        </p>
-      )}
-      {varied.length > 1 && (
-        <p className="text-muted-foreground">
-          <Names ids={varied} /> answer more than one way, as tagged: check
-          which before reading a body.
-        </p>
-      )}
-    </>
-  );
-}
-
-// Names lists steps by id: "a", "a and b", "a, b and c".
-function Names({ ids }: { ids: string[] }) {
-  return ids.map((id, i) => (
-    <span key={id}>
-      {i === 0 ? "" : i === ids.length - 1 ? " and " : ", "}
-      <span className="font-mono">{id}</span>
-    </span>
-  ));
-}
-
 // JsonBlock shows a JSON value as indented text, scrolling when it's long.
 export function JsonBlock({ value }: { value: unknown }) {
   return (
@@ -297,12 +244,7 @@ export function JsonBlock({ value }: { value: unknown }) {
 
 // Skipped says a run wouldn't start the step at all.
 export function Skipped() {
-  return (
-    <p>
-      With these samples, a run would skip this step: a connection it needs
-      isn&apos;t taken.
-    </p>
-  );
+  return <p>Skipped with these samples.</p>;
 }
 
 // Problems lists what got in the preview's way, each with where it is.

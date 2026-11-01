@@ -1,8 +1,8 @@
+import { Hint } from "@/components/hint";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Field,
   FieldContent,
-  FieldDescription,
   FieldError,
   FieldLabel,
 } from "@/components/ui/field";
@@ -40,7 +40,8 @@ function joinOf(d: Definition, index: number): Join {
 // response the connection leaves from; the condition, which goes into the
 // draft as it's typed; then whether it's taken. No text means it's taken
 // whenever its step answers that way. One into a transform can be marked
-// required, as a parameter the transform can't do without.
+// required, as a parameter the transform can't do without. What each part is
+// for is a hint, and what it reads starts folded (plan 13).
 export function ConnectionForm({ index }: { index: number }) {
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
@@ -68,14 +69,10 @@ export function ConnectionForm({ index }: { index: number }) {
 
   return (
     <>
-      <p className="text-sm">
-        From <span className="font-mono">{edge.from}</span>
-        {http && (
-          <>
-            , on <span className="font-mono">{edge.on ?? "2xx"}</span>,
-          </>
-        )}{" "}
-        to <span className="font-mono">{edge.to}</span>.
+      <p className="font-mono text-sm">
+        {edge.from}
+        {http && ` ${edge.unhandled ? "Unhandled" : (edge.on ?? "2xx")}`} →{" "}
+        {edge.to}
       </p>
       <FieldError
         errors={asErrors(
@@ -100,13 +97,14 @@ export function ConnectionForm({ index }: { index: number }) {
             }
           />
           <FieldContent>
-            <FieldLabel htmlFor="connection-required">Required</FieldLabel>
-            <FieldDescription>
-              A promise that {edge.from} is there whenever {edge.to} runs, so
-              its expression can read it without checking: {edge.to} runs only
-              once this line came. Unmarked, {edge.to} may run without it, once
-              another line came. Saving says where a promise shuts a line out.
-            </FieldDescription>
+            <div className="flex items-center gap-1">
+              <FieldLabel htmlFor="connection-required">Required</FieldLabel>
+              <Hint about="Required">
+                {edge.to} runs only once this line came, so its expression can
+                read {edge.from} without checking. Unmarked, {edge.to} may run
+                without it, once another line came.
+              </Hint>
+            </div>
             <FieldError errors={asErrors(required)} />
           </FieldContent>
         </Field>
@@ -114,20 +112,13 @@ export function ConnectionForm({ index }: { index: number }) {
       <MappingField
         id="connection-when"
         label="Condition"
-        description={
+        hint={
           <>
-            JSONata over what {edge.from} and the steps before it got back.{" "}
-            {join === "way"
-              ? `${edge.to}, a transform, runs if any of its ways is taken, once all have ended, and this way is taken only when this is true`
-              : join === "optional"
-                ? `${edge.to}, a transform, runs once its required lines are taken, with this way or without it, and this way is taken only when this is true`
-                : join === "required"
-                  ? `${edge.to} runs only when this is true and its other required lines are taken`
-                  : `${edge.to} runs only when this is true and its other connections are taken`}
-            ; empty means always. A step that doesn't run is skipped, and so are
-            the steps after it that need it.
+            JSONata over what {edge.from} and the steps before it got back: the
+            line is taken only when it&apos;s true. Empty means always.
           </>
         }
+        folded
         placeholder={`nodes.${edge.from}.body.active = true`}
         initial={editor.getState().draft.edges?.[index]?.when ?? ""}
         apply={(text) =>
@@ -149,7 +140,8 @@ export function ConnectionForm({ index }: { index: number }) {
   );
 }
 
-// Taken says whether a run would take the connection, with these samples.
+// Taken says whether a run would take the connection, with these samples,
+// and when that skips the step it goes to.
 function Taken({
   preview,
   from,
@@ -162,27 +154,16 @@ function Taken({
   join: Join;
 }) {
   return (
-    <>
-      <h3 className="font-medium">With these samples</h3>
-      <p>
-        {preview.skipped
-          ? `A run would skip ${from}, so it wouldn't take this connection.`
-          : preview.taken === undefined
-            ? "It can't tell yet: the problems above say why."
-            : preview.taken
-              ? {
-                  needed: `Taken, so ${to} runs once its other connections are.`,
-                  required: `Taken, so ${to} runs once its other required lines are.`,
-                  optional: `Taken, so ${to} reads it, once its required lines are taken.`,
-                  way: `Taken, so ${to} runs, with this way among those that came.`,
-                }[join]
-              : {
-                  needed: `Not taken, so ${to} is skipped: it needs every connection into it.`,
-                  required: `Not taken, so ${to} is skipped: this line is required.`,
-                  optional: `Not taken. ${to} runs without it once its required lines are taken.`,
-                  way: `Not taken. ${to} runs if another of its ways is.`,
-                }[join]}
-      </p>
-    </>
+    <p>
+      {preview.skipped
+        ? `${from} is skipped with these samples.`
+        : preview.taken === undefined
+          ? "Can't tell yet."
+          : preview.taken
+            ? "Taken, with these samples."
+            : join === "needed" || join === "required"
+              ? `Not taken, with these samples, so ${to} is skipped.`
+              : "Not taken, with these samples."}
+    </p>
   );
 }

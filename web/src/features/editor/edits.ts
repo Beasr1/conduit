@@ -12,6 +12,7 @@ import {
 import type { components } from "@/gen/schema";
 
 type Answer = components["schemas"]["Answer"];
+type AnswerLine = components["schemas"]["AnswerLine"];
 type Case = components["schemas"]["Case"];
 type Definition = components["schemas"]["Definition"];
 type Edge = components["schemas"]["Edge"];
@@ -106,7 +107,8 @@ function reaches(d: Definition, from: string, to: string): boolean {
 }
 
 // connect draws an edge from one node, leaving from its output on, to
-// another.
+// another. A line from its Unhandled block takes its failures, so the node
+// no longer fails the run with them.
 export function connect(
   d: Definition,
   from: string,
@@ -114,46 +116,54 @@ export function connect(
   on?: number,
 ): Definition {
   const edge = { from, to, ...lineFrom(on) };
-  return { ...d, edges: [...(d.edges ?? []), edge] };
+  const drawn = { ...d, edges: [...(d.edges ?? []), edge] };
+  return on === UNHANDLED ? goesOn(drawn, from) : drawn;
+}
+
+// goesOn takes away node id's choice to fail the run, as a line or an
+// answer now leaves its Unhandled block: it can do only one (plan 12).
+function goesOn(d: Definition, id: string): Definition {
+  const index = d.nodes.findIndex((n) => n.id === id);
+  return index < 0 ? d : setStepFails(d, index, false);
+}
+
+// leaves says whether a line into an answer leaves output on of node from:
+// 2xx, or a transform's one, when there's none; a case's exit; or its
+// Unhandled block.
+function leaves(l: AnswerLine, from: string, on?: number): boolean {
+  return l.from === from && (outputOf(l) ?? 0) === (on ?? 0);
 }
 
 // joinedTo is the places in the response's answers of those joined to
-// output on of node from (2xx, or a transform's one, when there's none; or
-// its Unhandled block): the answers that output gives.
+// output on of node from: the answers that output gives.
 export function joinedTo(d: Definition, from: string, on?: number): number[] {
   return (d.response?.answers ?? []).flatMap((a, k) =>
-    a.from === from && (outputOf(a) ?? 0) === (on ?? 0) ? [k] : [],
+    (a.lines ?? []).some((l) => leaves(l, from, on)) ? [k] : [],
   );
 }
 
-// canJoin says whether a line may be drawn into answer k: each takes one. A
-// line from a step that's gone can be drawn again.
-export function canJoin(d: Definition, k: number): boolean {
-  const a = d.response?.answers?.[k];
-  return a !== undefined && (!a.from || !d.nodes.some((n) => n.id === a.from));
-}
-
-// refusal is why a line from step into answer k can't be drawn: the
-// answer's status, and the other step its one line is from. Undefined when
-// the line can be drawn, or already is.
-export function refusal(
+// canJoin says whether a line from node from's output on may be drawn into
+// answer k: an answer takes lines from any number of steps (plan 14), but
+// each once.
+export function canJoin(
   d: Definition,
-  step: string,
   k: number,
-): { status: number; from: string } | undefined {
+  from: string,
+  on?: number,
+): boolean {
   const a = d.response?.answers?.[k];
-  if (!a?.from || a.from === step || canJoin(d, k)) return undefined;
-  return { status: a.status, from: a.from };
+  return a !== undefined && !(a.lines ?? []).some((l) => leaves(l, from, on));
 }
 
 // joinAnswer joins node from, on its output on (2xx, or a transform's one,
 // when there's none; a case's exit; or its Unhandled block), to answer k,
-// in place of any line it had. A transform with an expression joined to a
+// after the lines it has. A run gives the first answer, top to bottom, that
+// one of its lines reached (plan 14), so an output gives one answer, and its
+// line into another goes. But a transform with an expression joined to a
 // second answer picks between them, so it gets cases: the first keeps its
 // expression as the first answer's body, and one for the new status follows
 // it, each waiting for its condition, and each answer's line on the exit of
-// its status. A line from Unhandled, or from a case, picks nothing, and
-// changes neither.
+// its status. A line from Unhandled, or from a case, picks nothing.
 export function joinAnswer(
   d: Definition,
   k: number,
@@ -162,52 +172,75 @@ export function joinAnswer(
 ): Definition {
   const answers = d.response?.answers;
   const answer = answers?.[k];
-  if (!answers || !answer) return d;
-  const before = joinedTo(d, from, on).filter((j) => j !== k);
-  const line = { ...unjoined(answer), from, ...lineFrom(on) };
-  const joined = {
-    ...d,
-    response: { ...d.response, answers: answers.with(k, line) },
-  };
+  if (!answers || !answer || !canJoin(d, k, from, on)) return d;
   const index = d.nodes.findIndex((n) => n.id === from);
   const node = d.nodes[index];
-  if (node?.kind !== "transform" || node.switch || on === UNHANDLED)
-    return joined;
+  const picks = on !== UNHANDLED && node?.kind === "transform" && !node.switch;
+  const before = joinedTo(d, from, on);
+  const moved = picks ? d : unjoinWhere(d, (l) => leaves(l, from, on));
+  const after = moved.response?.answers ?? answers;
+  const target = after[k] ?? answer;
+  const joined = {
+    ...moved,
+    response: {
+      ...moved.response,
+      answers: after.with(
+        k,
+        withLines(target, [...(target.lines ?? []), { from, ...lineFrom(on) }]),
+      ),
+    },
+  };
+  if (on === UNHANDLED) return goesOn(joined, from);
   const first = answers[before[0] ?? -1]?.status;
-  if (first === undefined) return joined;
+  if (!picks || first === undefined) return joined;
   return toCases(joined, index, first);
 }
 
-// leaveAnswer takes away the line into answer k; the answer stays.
-export function leaveAnswer(d: Definition, k: number): Definition {
-  const answers = d.response?.answers;
-  const a = answers?.[k];
-  if (!answers || !a || (a.from === undefined && outputOf(a) === undefined))
-    return d;
-  return {
-    ...d,
-    response: { ...d.response, answers: answers.with(k, unjoined(a)) },
-  };
+// leaveLines takes away lines into answers, by identity, so several go at
+// once whatever their places; the answers stay.
+export function leaveLines(d: Definition, gone: AnswerLine[]): Definition {
+  const lines = new Set(gone);
+  return unjoinWhere(d, (l) => lines.has(l));
 }
 
-// unjoinWhere takes away the lines into the answers lost picks.
-function unjoinWhere(d: Definition, lost: (a: Answer) => boolean): Definition {
-  const answers = d.response?.answers;
-  if (!answers?.some(lost)) return d;
-  return {
-    ...d,
-    response: {
-      ...d.response,
-      answers: answers.map((a) => (lost(a) ? unjoined(a) : a)),
-    },
-  };
+// unjoinWhere takes away the lines into answers that lost picks.
+function unjoinWhere(
+  d: Definition,
+  lost: (l: AnswerLine) => boolean,
+): Definition {
+  return mapLines(d, (l) => (lost(l) ? undefined : l));
 }
 
-// unjoined is an answer without its line.
-function unjoined(a: Answer): Answer {
-  return a.schema
-    ? { status: a.status, schema: a.schema }
-    : { status: a.status };
+// mapLines puts what change makes of each line into an answer in its place,
+// dropping those it makes nothing of; the answers stay. A change that alters
+// nothing gives back the draft itself.
+function mapLines(
+  d: Definition,
+  change: (l: AnswerLine, a: Answer) => AnswerLine | undefined,
+): Definition {
+  const answers = d.response?.answers;
+  if (!answers) return d;
+  let changed = false;
+  const next = answers.map((a) => {
+    const lines = a.lines ?? [];
+    const kept = lines.flatMap((l) => {
+      const after = change(l, a);
+      if (after !== l) changed = true;
+      return after ? [after] : [];
+    });
+    return kept.length === lines.length && kept.every((l, i) => l === lines[i])
+      ? a
+      : withLines(a, kept);
+  });
+  return changed ? { ...d, response: { ...d.response, answers: next } } : d;
+}
+
+// withLines is answer a with lines; with none, it has no lines at all.
+function withLines(a: Answer, lines: AnswerLine[]): Answer {
+  const next = { ...a };
+  if (lines.length === 0) delete next.lines;
+  else next.lines = lines;
+  return next;
 }
 
 // addAnswer gives the response an answer for status, after its others, with
@@ -220,8 +253,19 @@ export function addAnswer(d: Definition, status: number): Definition {
   };
 }
 
+// moveAnswer moves answer k to place to: a run gives the first answer, top
+// to bottom, that one of its lines reached (plan 14).
+export function moveAnswer(d: Definition, k: number, to: number): Definition {
+  const answers = d.response?.answers;
+  const a = answers?.[k];
+  if (!answers || !a || k === to || to < 0 || to >= answers.length) return d;
+  const next = answers.filter((_, i) => i !== k);
+  next.splice(to, 0, a);
+  return { ...d, response: { ...d.response, answers: next } };
+}
+
 // removeAnswer takes away answer k. A response left with neither an answer
-// nor unhandled goes.
+// nor an error body goes.
 export function removeAnswer(d: Definition, k: number): Definition {
   const r = d.response;
   if (!r?.answers?.[k]) return d;
@@ -258,32 +302,62 @@ export function setStepUnhandled(
 ): Definition {
   const n = d.nodes[index];
   if (!n || n.unhandled?.body === body) return d;
-  return updateNode(d, index, (node) => {
-    const next = { ...node };
-    if (body === undefined) delete next.unhandled;
-    else next.unhandled = { body };
-    return next;
-  });
+  return updateNode(d, index, (node) =>
+    withUnhandled(node, { ...node.unhandled, body }),
+  );
 }
 
-// setUnhandled gives the response an unhandled whose body is body;
-// undefined removes it. A body it already has gives back the draft itself.
-export function setUnhandled(
+// setStepFails says whether step index fails the run with its failures, on
+// purpose, rather than leaving them to a line from its Unhandled block
+// (plan 12). Its Unhandled body stays, for when it doesn't.
+export function setStepFails(
+  d: Definition,
+  index: number,
+  fail: boolean,
+): Definition {
+  const n = d.nodes[index];
+  if (!n || (n.unhandled?.fail ?? false) === fail) return d;
+  return updateNode(d, index, (node) =>
+    withUnhandled(node, { ...node.unhandled, fail: fail || undefined }),
+  );
+}
+
+// withUnhandled gives a node u as its Unhandled, leaving out the parts it
+// doesn't set, and the whole when it sets none.
+function withUnhandled(
+  node: Definition["nodes"][number],
+  u: { body?: string; fail?: boolean },
+): Definition["nodes"][number] {
+  const next = { ...node };
+  const kept = {
+    ...(u.fail ? { fail: true } : {}),
+    ...(u.body === undefined ? {} : { body: u.body }),
+  };
+  if (Object.keys(kept).length === 0) delete next.unhandled;
+  else next.unhandled = kept;
+  return next;
+}
+
+// setErrorBody gives the response the error body, what answers each error
+// the workflow passes on without a body of its own (plan 12); undefined
+// removes it, so Conduit's problem details answer them. A body it already
+// has gives back the draft itself.
+export function setErrorBody(
   d: Definition,
   body: string | undefined,
 ): Definition {
   const r = d.response ?? {};
-  if (r.unhandled?.body === body) return d;
+  if (r.errors?.body === body) return d;
   const next = { ...r };
-  if (body === undefined) delete next.unhandled;
-  else next.unhandled = { body };
+  if (body === undefined) delete next.errors;
+  else next.errors = { body };
   return withResponse(d, next);
 }
 
 // withResponse puts r in place of the response. One with neither an answer
-// nor unhandled goes.
+// nor an error body goes.
 function withResponse(d: Definition, r: Response): Definition {
-  if ((r.answers ?? []).length > 0 || r.unhandled) return { ...d, response: r };
+  if ((r.answers ?? []).length > 0 || r.errors) return { ...d, response: r };
   const next = { ...d };
   delete next.response;
   return next;
@@ -306,7 +380,7 @@ export function toCases(
     line.from === id && outputOf(line) === undefined;
   const answers = d.response?.answers ?? [];
   const others = answers
-    .filter((a) => one(a) && a.status !== status)
+    .filter((a) => (a.lines ?? []).some(one) && a.status !== status)
     .map((a) => ({ when: "", status: a.status }));
   const cased = updateNode(d, index, (node) => {
     const first = {
@@ -318,18 +392,15 @@ export function toCases(
     delete next.expr;
     return next;
   });
-  return {
-    ...cased,
-    ...(cased.edges && {
-      edges: cased.edges.map((e) => (one(e) ? { ...e, on: status } : e)),
-    }),
-    ...(cased.response?.answers && {
-      response: {
-        ...cased.response,
-        answers: answers.map((a) => (one(a) ? { ...a, on: a.status } : a)),
-      },
-    }),
-  };
+  return mapLines(
+    {
+      ...cased,
+      ...(cased.edges && {
+        edges: cased.edges.map((e) => (one(e) ? { ...e, on: status } : e)),
+      }),
+    },
+    (l, a) => (one(l) ? { ...l, on: a.status } : l),
+  );
 }
 
 // addCase gives switch node index a case for status, after its others, and
@@ -378,20 +449,15 @@ function moveExit(
 ): Definition {
   const moving = (line: { from?: string; on?: number }) =>
     line.from === id && line.on === was;
-  return {
-    ...d,
-    ...(d.edges && {
-      edges: d.edges.map((e) => (moving(e) ? { ...e, on: now } : e)),
-    }),
-    ...(d.response?.answers && {
-      response: {
-        ...d.response,
-        answers: d.response.answers.map((a) =>
-          moving(a) ? { ...a, on: now } : a,
-        ),
-      },
-    }),
-  };
+  return mapLines(
+    {
+      ...d,
+      ...(d.edges && {
+        edges: d.edges.map((e) => (moving(e) ? { ...e, on: now } : e)),
+      }),
+    },
+    (l) => (moving(l) ? { ...l, on: now } : l),
+  );
 }
 
 // updateCase puts what change makes of case k in its place.
@@ -473,7 +539,9 @@ export function outputToStep(d: Definition): {
     nodes: [...d.nodes, { id: step, kind: "transform", expr: output }],
     edges: [...(d.edges ?? []), ...edges],
     response: {
-      answers: [{ status: 200, from: step, ...(schema ? { schema } : {}) }],
+      answers: [
+        { status: 200, lines: [{ from: step }], ...(schema ? { schema } : {}) },
+      ],
     },
   };
 
@@ -527,7 +595,7 @@ function leaveExit(
   id: string | undefined,
   status: number,
 ): Definition {
-  const left = unjoinWhere(d, (a) => a.from === id && a.on === status);
+  const left = unjoinWhere(d, (l) => l.from === id && l.on === status);
   if (!left.edges) return left;
   return {
     ...left,
@@ -595,13 +663,10 @@ export function renameNode(
       from: e.from === from ? to : e.from,
       to: e.to === from ? to : e.to,
     }));
-  if (d.response?.answers)
-    renamed.response = {
-      ...d.response,
-      answers: d.response.answers.map((a) =>
-        a.from === from ? { ...a, from: to } : a,
-      ),
-    };
+  const lines = mapLines(renamed, (l) =>
+    l.from === from ? { ...l, from: to } : l,
+  );
+  if (lines !== renamed) renamed.response = lines.response;
   if (d.ui?.positions?.[from]) {
     const positions = Object.fromEntries(
       Object.entries(d.ui.positions)
@@ -642,7 +707,7 @@ export function mentions(d: Definition, id: string): string[] {
   for (const e of d.edges ?? []) {
     check(`the condition on the connection from ${e.from} to ${e.to}`, e.when);
   }
-  check("the response's Unhandled body", d.response?.unhandled?.body);
+  check("the error body", d.response?.errors?.body);
   check("the workflow's output", d.output);
   return found;
 }
@@ -687,7 +752,7 @@ export function removeNodes(d: Definition, indexes: number[]): Definition {
   const edges = (d.edges ?? []).filter(
     (e) => !lost.has(e.from) && !lost.has(e.to),
   );
-  const kept = unjoinWhere(d, (a) => a.from !== undefined && lost.has(a.from));
+  const kept = unjoinWhere(d, (l) => lost.has(l.from));
   if (!d.ui) return { ...kept, nodes, edges };
   const positions = Object.fromEntries(
     Object.entries(d.ui.positions ?? {}).filter(([id]) => !lost.has(id)),

@@ -26,7 +26,6 @@ interface Selection {
 
 export interface Refused {
   step: string;
-  answer?: number;
 }
 
 // The open editor's state. The canvas names nodes and edges by toFlow's keys,
@@ -46,6 +45,11 @@ export interface EditorState {
   // a block opens its part, and picking another step opens its request.
   part: string;
   setPart: (part: string) => void;
+  // The tab a step's Request opens on (plan 13): "url", "headers",
+  // "query", "body" or "retry". Kept across steps, so the problem list can
+  // open the one a field is in.
+  requestTab: string;
+  setRequestTab: (tab: string) => void;
   // What the side panel shows while nothing is picked: the workflow's own
   // settings, the list of problems, or its runs. Opening one puts away what
   // was picked, and picking something closes it.
@@ -93,6 +97,8 @@ export function createEditorStore(opened: Definition): EditorStore {
     selected: { nodes: [], edges: [] },
     part: "request",
     setPart: (part) => set({ part }),
+    requestTab: "url",
+    setRequestTab: (requestTab) => set({ requestTab }),
     panel: undefined,
     openPanel: (panel) => set({ panel, selected: { nodes: [], edges: [] } }),
     closePanel: () => set({ panel: undefined }),

@@ -59,8 +59,14 @@ type Result struct {
 	// 0, nothing.
 	Answer int
 	Output json.RawMessage
-	Err    error        // why the run didn't succeed: a *NodeError when a node failed it
-	Nodes  []NodeResult // one per node, in declaration order
+	// ErrorFrom names the node whose error the answer passes on: its line
+	// leaves an http node's block for a status of 400 or more, or a node's
+	// Unhandled block with no body of its own. Output is nil then: the
+	// response's error body says it, over that error, and the runner, which
+	// words failures, evaluates it (plan 12).
+	ErrorFrom string
+	Err       error        // why the run didn't succeed: a *NodeError when a node failed it
+	Nodes     []NodeResult // one per node, in declaration order
 }
 
 // NodeResult is how one node ended.
@@ -262,7 +268,7 @@ func (r *run) schedule() *Result {
 	case cause != nil:
 		res.Status, res.Err = StatusCancelled, cause
 	default:
-		res.Answer, res.Output, res.Err = r.answer()
+		res.Answer, res.Output, res.ErrorFrom, res.Err = r.answer()
 		res.Status = StatusSucceeded
 		if res.Err != nil {
 			res.Status = StatusFailed
@@ -391,59 +397,52 @@ func (r *run) emit(i int, kind EventKind, attempt int, result *NodeResult) {
 	}
 }
 
-// answer is what the run answers: the answer whose line it took, or the
-// output of a definition saved with one, as a 200. A run takes an answer's
-// line when its node answered through its output, or failed into its
-// Unhandled block for a line from that. Taking none, or lines from two
-// outputs, fails the run, and so does a node joined to several answers
-// that picked none of them.
-func (r *run) answer() (int, json.RawMessage, error) {
+// answer is what the run answers: the first answer, top to bottom, that one
+// of its lines reached (plan 14), with its first line reached; or the
+// output of a definition saved with one, as a 200. A run reaches a line
+// when its node answered through its output, or failed into its Unhandled
+// block for a line from that. A transform with an expr joined to several
+// answers picks among them, so its line reaches only the one it picked, and
+// picking none of them fails the run, as does reaching no answer. An answer
+// that passes an error on names the node it's from, and has no body here
+// (Result.ErrorFrom).
+func (r *run) answer() (status int, body json.RawMessage, errorFrom string, err error) {
 	if r.p.output != nil {
 		out, err := r.output()
 		if err != nil {
-			return 0, nil, err
+			return 0, nil, "", err
 		}
-		return http.StatusOK, out, nil
+		return http.StatusOK, out, "", nil
 	}
 	resp := r.p.response
 	if resp == nil {
-		return 0, nil, nil
+		return 0, nil, "", nil
 	}
-	// The answers taken, by the output they're joined to.
-	type joined struct {
-		from, on int
-		statuses []int
-	}
-	var taken []joined
 	for _, a := range resp.answers {
-		if on, ok := took(r.p.nodes[a.from].kind, r.nodes[a.from].result); !ok || on != a.on {
-			continue
+		for _, l := range a.lines {
+			if on, ok := took(r.p.nodes[l.from].kind, r.nodes[l.from].result); !ok || on != l.on {
+				continue
+			}
+			n := r.nodes[l.from].result
+			switch statuses := resp.picks[l.from]; {
+			case l.on == workflow.OnUnhandled && n.Gave != nil:
+				return a.status, n.Gave, "", nil
+			case l.on == workflow.OnUnhandled, r.p.nodes[l.from].kind == workflow.NodeKindHTTP && l.on >= 400:
+				return a.status, nil, n.ID, nil
+			case len(statuses) < 2:
+				return a.status, n.Body, "", nil
+			default:
+				picked, body, err := pick(n.ID, n.Body, statuses)
+				if err != nil {
+					return 0, nil, "", err
+				}
+				if picked == a.status {
+					return a.status, body, "", nil
+				}
+			}
 		}
-		i := slices.IndexFunc(taken, func(j joined) bool { return j.from == a.from && j.on == a.on })
-		if i < 0 {
-			taken = append(taken, joined{from: a.from, on: a.on})
-			i = len(taken) - 1
-		}
-		taken[i].statuses = append(taken[i].statuses, a.status)
 	}
-	switch len(taken) {
-	case 0:
-		return 0, nil, errors.New("no answer: no line into the response was taken")
-	case 1:
-	default:
-		a, b := taken[0], taken[1]
-		return 0, nil, fmt.Errorf("two answers: %d from %s and %d from %s were both reached",
-			a.statuses[0], r.p.nodes[a.from].id, b.statuses[0], r.p.nodes[b.from].id)
-	}
-	j := taken[0]
-	n := r.nodes[j.from].result
-	if j.on == workflow.OnUnhandled {
-		return j.statuses[0], n.caughtBody(), nil
-	}
-	if len(j.statuses) == 1 {
-		return j.statuses[0], n.Body, nil
-	}
-	return pick(n.ID, n.Body, j.statuses)
+	return 0, nil, "", errors.New("no answer: no line into the response was taken")
 }
 
 // caughtBody is the body a node gives through its Unhandled block: what
@@ -502,13 +501,36 @@ func statusList(statuses []int) string {
 	return strings.Join(words[:len(words)-1], ", ") + " or " + words[len(words)-1]
 }
 
-// Unhandled is what the response's unhandled answers a run that gave no
-// answer: its body, JSONata evaluated over the run as it stood, its input
-// and every node that succeeded or failed into its Unhandled block, with
-// failure, the run's {code, detail, node}, as error. ok says whether the
-// response has one.
-func (p *Program) Unhandled(ctx context.Context, input json.RawMessage, nodes []NodeResult, failure json.RawMessage) (body json.RawMessage, ok bool, err error) {
-	if p.response == nil || p.response.unhandled == nil {
+// ErrorOf is the error an answer passes on (Result.ErrorFrom), as the error
+// body reads it: {code, detail, node}, beside the status, headers and body
+// the node got back, when it got any. code and detail are the caller's
+// words for it.
+func ErrorOf(n NodeResult, code, detail string) (json.RawMessage, error) {
+	if n.HTTPStatus == 0 {
+		return json.Marshal(struct {
+			Code   string `json:"code"`
+			Detail string `json:"detail"`
+			Node   string `json:"node"`
+		}{code, detail, n.ID})
+	}
+	return json.Marshal(struct {
+		Code    string            `json:"code"`
+		Detail  string            `json:"detail"`
+		Node    string            `json:"node"`
+		Status  int               `json:"status"`
+		Headers map[string]string `json:"headers"`
+		Body    json.RawMessage   `json:"body"` // nil marshals as null
+	}{code, detail, n.ID, n.HTTPStatus, lowerHeaders(n.Header), n.Body})
+}
+
+// ErrorBody is the response's error body, JSONata evaluated over the run as
+// it stood, its input and every node that succeeded or failed into its
+// Unhandled block, with failure as error: {code, detail, node}, and the
+// upstream's status, headers and body when it answered. It answers a run
+// that gave no answer, and an answer that passes an error on. ok says
+// whether the response has one.
+func (p *Program) ErrorBody(ctx context.Context, input json.RawMessage, nodes []NodeResult, failure json.RawMessage) (body json.RawMessage, ok bool, err error) {
+	if p.response == nil || p.response.errors == nil {
 		return nil, false, nil
 	}
 	defer func() {
@@ -533,7 +555,7 @@ func (p *Program) Unhandled(ctx context.Context, input json.RawMessage, nodes []
 			entry = transformEntry(n.HTTPStatus, n.Body)
 		}
 		if err != nil {
-			return nil, true, fmt.Errorf("unhandled: %w", err)
+			return nil, true, fmt.Errorf("error body: %w", err)
 		}
 		parts = append(parts, docPart{id: p.nodes[i].id, entry: entry})
 	}
@@ -542,11 +564,11 @@ func (p *Program) Unhandled(ctx context.Context, input json.RawMessage, nodes []
 	}
 	doc, err := document(input, parts)
 	if err != nil {
-		return nil, true, fmt.Errorf("unhandled: %w", err)
+		return nil, true, fmt.Errorf("error body: %w", err)
 	}
 	doc = append(append(append(doc[:len(doc)-1], `,"error":`...), failure...), '}')
-	if body, err = p.response.unhandled.Eval(ctx, doc); err != nil {
-		return nil, true, fmt.Errorf("unhandled: %w", err)
+	if body, err = p.response.errors.Eval(ctx, doc); err != nil {
+		return nil, true, fmt.Errorf("error body: %w", err)
 	}
 	return body, true, nil
 }

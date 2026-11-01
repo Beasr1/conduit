@@ -324,6 +324,9 @@ can do.
 | 09 later | parked ideas | Redis response cache, cron triggers, durable runs, loops, import/export; other step types: database, queue and script plugins, SOAP/XML, gRPC (D18) |
 | 10 jsonata-editing | after 04 and before 08, moved up on 2026-10-28: your own JSONata language package for CodeMirror 6, in its own repo and published, starting from gnata-sqlite's MIT grammar; the editor's textareas become CodeMirror (plan 04 answer 3) | expressions highlighted, completed (`input.`, `nodes.<id>.body`, `$` functions), checked by the server inline, and formatted in your style |
 | 11 visual-design | right after 04 and before 05 and 10, so both are built in the new look: calm, precise and simple, with the emphasis on the canvas and the data. Brief taken 2026-10-28 (11-visual-design.md) | every screen meets design.md's floor in both colour modes, and you've signed off the screenshots |
+| 12 strengthening | after 04, before 11 and 07 (decided 2026-11-01): no loose ends, every failure mapped, one error body (12-strengthening.md) | Publish refuses a workflow with a way a run can go that answers nothing, or a step whose failures go nowhere chosen; every error answer has the error body's shape |
+| 13 minimal-editor | with 12 (decided 2026-11-01): the editor's explanations move to a short tour and one-line hints, and a step's panel gets two rows of tabs (13-minimal-editor.md) | every panel says only what its fields are, and a newcomer can learn the editor from the tour |
+| 14 the-response-picks | after 12 and 13 (decided 2026-11-02): the response picks its answer, top to bottom, and no step is needed for it (14-the-response-picks.md) | a workflow's failures and results join its answers straight, in one place, with one answer per run |
 
 ## Risks
 

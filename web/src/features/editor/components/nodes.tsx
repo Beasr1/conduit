@@ -82,15 +82,19 @@ function Card({
 // UnhandledStrip is a step's Unhandled block, along the bottom of its card:
 // it takes what the step's other blocks don't, its failures, once a line
 // leaves its handle, and the run goes on down those lines. Until one does,
-// it's dimmed, and says the failure fails the run. While a run is shown,
-// it's marked when the step's failure went to it.
+// it's dimmed, and says what's chosen: the failure fails the run, or that
+// nothing is yet (plan 12). While a run is shown, it's marked when the
+// step's failure went to it.
 function UnhandledStrip({ step }: { step: string }) {
+  const fails = useEditor(
+    (s) => s.draft.nodes.find((n) => n.id === step)?.unhandled?.fail === true,
+  );
   const joined = useEditor(
     (s) =>
       step !== "" &&
       ((s.draft.edges ?? []).some((e) => e.from === step && e.unhandled) ||
-        (s.draft.response?.answers ?? []).some(
-          (a) => a.from === step && a.unhandled,
+        (s.draft.response?.answers ?? []).some((a) =>
+          (a.lines ?? []).some((l) => l.from === step && l.unhandled),
         )),
   );
   const run = useStepRun(step);
@@ -105,7 +109,7 @@ function UnhandledStrip({ step }: { step: string }) {
       {!joined && (
         <>
           {" "}
-          <span>· fails the run</span>
+          <span>· {fails ? "fails the run" : "not decided"}</span>
         </>
       )}
       {took && (
@@ -270,24 +274,30 @@ const UnknownNode = memo(function UnknownNode({ data }: NodeProps<FlowNode>) {
 });
 
 // The response card ends the graph: what the workflow's API answers. Its
-// answers are blocks on its left, then + Add, each with its point, where its
-// one line arrives from the step that gives it; an answer no line reaches
-// yet is dimmed. It names Conduit's own answers too, and along its bottom,
-// its Unhandled: the body for a run that gives no answer, yours or
-// Conduit's. Each block says which part it is, for the canvas to open.
-// While a run is shown, the card says how it went, and the answer it gave
-// is marked, Unhandled when a run that failed was answered with it. Below it, a status says why a line it just refused couldn't
-// be drawn; it's there, empty, all along, so a screen reader hears it fill.
+// answers are blocks on its left, top to bottom as a run tries them (plan
+// 14), then + Add, each with its point, where lines arrive from the steps
+// that give it; an answer no line reaches yet is dimmed. It names Conduit's
+// own answers too, and along its bottom, its Unhandled: the body for a run
+// that gives no answer, yours or Conduit's. Each block says which part it
+// is, for the canvas to open. While a run is shown, the card says how it
+// went, and the answer it gave is marked, Unhandled when a run that failed
+// was answered with it. Below it, a status says why a line it just refused
+// couldn't be drawn; it's there, empty, all along, so a screen reader hears
+// it fill.
 const ResponseNode = memo(function ResponseNode({ id }: NodeProps<FlowNode>) {
   const statuses = useEditor(
     useShallow((s) => (s.draft.response?.answers ?? []).map((a) => a.status)),
   );
+  // The steps each answer's lines come from, joined by a space, as a
+  // selector keeps a list of strings.
   const froms = useEditor(
     useShallow((s) =>
-      (s.draft.response?.answers ?? []).map((a) => a.from ?? ""),
+      (s.draft.response?.answers ?? []).map((a) =>
+        (a.lines ?? []).map((l) => l.from).join(" "),
+      ),
     ),
   );
-  const unhandled = useEditor((s) => s.draft.response?.unhandled !== undefined);
+  const errors = useEditor((s) => s.draft.response?.errors !== undefined);
   const refused = useEditor((s) => s.refused);
   const problems = useProblemCount((p) => p.on === "response");
   const shown = useEditor((s) => s.run);
@@ -302,7 +312,9 @@ const ResponseNode = memo(function ResponseNode({ id }: NodeProps<FlowNode>) {
   // The card grows with its answers, each with its point.
   const update = useUpdateNodeInternals();
   useEffect(() => update(id), [update, id, statuses.length]);
-  const steps = [...new Set(froms.filter((f) => f !== ""))];
+  const steps = [
+    ...new Set(froms.flatMap((f) => f.split(" ")).filter((f) => f !== "")),
+  ];
   return (
     <div
       data-problems={problems > 0 || undefined}
@@ -361,7 +373,7 @@ const ResponseNode = memo(function ResponseNode({ id }: NodeProps<FlowNode>) {
       >
         <span className="font-mono">Unhandled</span>{" "}
         <span className="truncate text-muted-foreground">
-          · {unhandled ? "your body" : "problem details"}
+          · {errors ? "your error body" : "problem details"}
         </span>
         {caught && (
           <>
@@ -384,21 +396,11 @@ const ResponseNode = memo(function ResponseNode({ id }: NodeProps<FlowNode>) {
   );
 });
 
-// Refusal says why a line into the response couldn't be drawn: the answer
-// already takes one, from another step; or there's no answer to join yet;
-// or the line was let go off an answer's point.
-function Refusal({ refused: { step, answer } }: { refused: Refused }) {
+// Refusal says why a line into the response couldn't be drawn: there's no
+// answer to join yet, or the line was let go off an answer's point.
+function Refusal({ refused: { step } }: { refused: Refused }) {
   const answers = useEditor(useShallow((s) => s.draft.response?.answers ?? []));
-  const taken = answer === undefined ? undefined : answers[answer];
   const name = (id: string) => <span className="font-mono">{id}</span>;
-  if (taken?.from)
-    return (
-      <>
-        {taken.status} takes one line, from {name(taken.from)}. To answer{" "}
-        {taken.status} from {name(step)} too, join both to a transform, and the
-        transform to the answer.
-      </>
-    );
   if (answers.length === 0)
     return <>Add an answer with + Add, then join {name(step)} to it.</>;
   return (

@@ -101,7 +101,9 @@ async function pick(id: string) {
 }
 
 function type(label: string, value: string) {
-  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  fireEvent.change(screen.getByRole("textbox", { name: label }), {
+    target: { value },
+  });
 }
 
 // crm's URL in a draft.
@@ -129,7 +131,7 @@ test("a save names the revision it builds on, and the editor stays as it was", a
   const server = serveWorkflow();
   open();
   await pick("crm");
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
   expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
     "disabled",
     true,
@@ -145,7 +147,7 @@ test("a save names the revision it builds on, and the editor stays as it was", a
   );
   // Still on crm, with what was typed.
   const panel = screen.getByRole("complementary", { name: "HTTP step" });
-  expect(within(panel).getByLabelText("URL")).toHaveProperty(
+  expect(within(panel).getByRole("textbox", { name: "URL" })).toHaveProperty(
     "value",
     "https://crm.example.com/v2/contacts",
   );
@@ -160,9 +162,12 @@ test("Ctrl-S saves, wherever the focus is", async () => {
   const server = serveWorkflow();
   open();
   await pick("crm");
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
   type("URL", "https://crm.example.com/v2/contacts");
-  fireEvent.keyDown(screen.getByLabelText("URL"), { key: "s", ctrlKey: true });
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "URL" }), {
+    key: "s",
+    ctrlKey: true,
+  });
   expect(await screen.findByText("Revision 2 · Saved")).toBeTruthy();
   expect(server.saves).toHaveLength(1);
 });
@@ -190,7 +195,7 @@ test("after a newer revision is saved elsewhere, nothing is saved over it", asyn
   const server = serveWorkflow();
   open();
   await pick("crm");
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
   server.saveElsewhere(specExample);
 
   type("URL", "https://crm.example.com/v2/contacts");
@@ -215,7 +220,7 @@ test("after a newer revision is saved elsewhere, nothing is saved over it", asyn
       true,
     );
   fireEvent.keyDown(window, { key: "s", ctrlKey: true });
-  expect(screen.getByLabelText("URL")).toHaveProperty(
+  expect(screen.getByRole("textbox", { name: "URL" })).toHaveProperty(
     "value",
     "https://crm.example.com/v2/contacts",
   );
@@ -228,7 +233,7 @@ test("a newer revision found when the tab is back in view stops a save before it
   const server = serveWorkflow();
   open();
   await pick("crm");
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
   type("URL", "https://crm.example.com/v2/contacts");
   server.saveElsewhere(specExample);
 
@@ -251,7 +256,7 @@ test("after a newer revision is saved elsewhere, Load opens it afresh", async ()
   const server = serveWorkflow();
   open();
   await pick("crm");
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
   server.saveElsewhere({
     ...specExample,
     nodes: specExample.nodes.map((n) =>
@@ -285,7 +290,7 @@ test("Publish saves what's on screen, publishes it, and says where it's served",
     await screen.findByText(/^Not published\. Publishing serves it at/),
   ).toBeTruthy();
   await pick("crm");
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
 
   type("URL", "https://crm.example.com/v2/contacts");
   fireEvent.click(screen.getByRole("button", { name: "Publish" }));
@@ -327,7 +332,7 @@ test("leaving with unsaved changes asks first", async () => {
   serveWorkflow();
   const { router } = open(["/workflows"]);
   await pick("crm");
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
   type("URL", "https://crm.example.com/v2/contacts");
   await screen.findByText("Revision 1 · Unsaved changes");
 
@@ -377,7 +382,7 @@ test("a session that ends with unsaved changes signs in again where it is", asyn
   const { saves } = serveWorkflow();
   const { router } = open(["/sign-in"]);
   await pick("crm");
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
   const signIns = endSession();
 
   // The change's check is refused, which asks to sign in here, rather than
@@ -405,7 +410,7 @@ test("a session that ends with unsaved changes can be left for sign-in", async (
   serveWorkflow();
   const { router } = open(["/sign-in"]);
   await pick("crm");
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
   type("URL", "https://crm.example.com/v2/contacts");
   await screen.findByText("Revision 1 · Unsaved changes");
 

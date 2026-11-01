@@ -625,44 +625,113 @@ func TestRun_AnswersThroughTheLineTaken(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	user := `{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.id }}"}, "outputs": [{"status": 404}]}`
-	// Each of user's outputs answers on its own, with what user got.
+	// Each of user's outputs answers on its own: 2xx with what user got, and
+	// 404, an error block, with the response's error body, which the runner
+	// fills in (plan 12).
 	direct := program(t, srv.URL, `{"nodes": [`+user+`],
-	  "response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "on": 404}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}, {"status": 404, "lines": [{"from": "user", "on": 404}]}]}}`)
 	// answered, a transform, takes either answer user gives, and respond
 	// picks the status.
 	picked := program(t, srv.URL, `{"nodes": [`+user+`, {"id": "answered", "kind": "transform", "expr": "nodes.user.status"},
 	    {"id": "respond", "kind": "transform", "expr": "nodes.user.status = 404 ? { 'status': 404, 'body': { 'error': nodes.user.body.error } } : { 'status': 200, 'body': nodes.user.body }"}],
 	  "edges": [{"from": "user", "to": "answered"}, {"from": "user", "to": "answered", "on": 404}, {"from": "answered", "to": "respond"}],
-	  "response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "respond"}]}, {"status": 404, "lines": [{"from": "respond"}]}]}}`)
 	// One transform per status, kept apart by user's outputs.
 	apart := program(t, srv.URL, `{"nodes": [`+user+`,
 	    {"id": "found", "kind": "transform", "expr": "{ 'id': nodes.user.body.id }"},
 	    {"id": "gone", "kind": "transform", "expr": "{ 'error': 'no such user' }"}],
 	  "edges": [{"from": "user", "to": "found"}, {"from": "user", "to": "gone", "on": 404}],
-	  "response": {"answers": [{"status": 200, "from": "found"}, {"status": 404, "from": "gone"}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "found"}]}, {"status": 404, "lines": [{"from": "gone"}]}]}}`)
 	tests := []struct {
 		name   string
 		p      *Program
 		id     string
 		answer int
 		output string
+		errs   string // the node an error answer passes on
 	}{
-		{"direct 404", direct, "7", 404, `{"error": "gone"}`},
-		{"direct 200", direct, "8", 200, `{"id": "8"}`},
-		{"picked 404", picked, "7", 404, `{"error":"gone"}`},
-		{"picked 200", picked, "8", 200, `{"id":"8"}`},
-		{"apart 404", apart, "7", 404, `{"error":"no such user"}`},
-		{"apart 200", apart, "8", 200, `{"id":"8"}`},
+		{"direct 404", direct, "7", 404, "", "user"},
+		{"direct 200", direct, "8", 200, `{"id": "8"}`, ""},
+		{"picked 404", picked, "7", 404, `{"error":"gone"}`, ""},
+		{"picked 200", picked, "8", 200, `{"id":"8"}`, ""},
+		{"apart 404", apart, "7", 404, `{"error":"no such user"}`, ""},
+		{"apart 200", apart, "8", 200, `{"id":"8"}`, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			res, _ := execute(t, testEngine(Options{}), tt.p, `{"id": "`+tt.id+`"}`)
-			if res.Status != StatusSucceeded || res.Answer != tt.answer || string(res.Output) != tt.output {
-				t.Errorf("run %s answered %d %s, err %v; want succeeded answering %d %s",
-					res.Status, res.Answer, res.Output, res.Err, tt.answer, tt.output)
+			if res.Status != StatusSucceeded || res.Answer != tt.answer || string(res.Output) != tt.output || res.ErrorFrom != tt.errs {
+				t.Errorf("run %s answered %d %s from %q's error, err %v; want succeeded answering %d %s from %q's",
+					res.Status, res.Answer, res.Output, res.ErrorFrom, res.Err, tt.answer, tt.output, tt.errs)
 			}
 		})
+	}
+}
+
+// An error block is a status a node lists from 400 up (plan 12): joined
+// straight to an answer, it passes the node's error on, for the response's
+// error body to say. One under 400 answers with what the node got, as 2xx
+// does.
+func TestRun_AnErrorBlockIsFrom400Up(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	for _, status := range []int{399, 400} {
+		mux.HandleFunc(fmt.Sprintf("GET /%d", status), func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			fmt.Fprintf(w, `{"said": %d}`, status)
+		})
+	}
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	p := program(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/{{ input.status }}"},
+	    "outputs": [{"status": 399}, {"status": 400}]}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 399, "lines": [{"from": "a", "on": 399}]}, {"status": 400, "lines": [{"from": "a", "on": 400}]}]}}`)
+	for _, tt := range []struct {
+		status, output, errs string
+		answer               int
+	}{
+		{"399", `{"said": 399}`, "", 399},
+		{"400", "", "a", 400},
+	} {
+		res, _ := execute(t, testEngine(Options{}), p, `{"status": "`+tt.status+`"}`)
+		if res.Status != StatusSucceeded || res.Answer != tt.answer || string(res.Output) != tt.output || res.ErrorFrom != tt.errs {
+			t.Errorf("%s: run %s answered %d %s from %q's error, err %v; want %d %s from %q's",
+				tt.status, res.Status, res.Answer, res.Output, res.ErrorFrom, res.Err, tt.answer, tt.output, tt.errs)
+		}
+	}
+}
+
+// ErrorOf is the error an answer passes on, as the error body reads it: what
+// went wrong, and, when the step got an answer, its status, its headers with
+// names in lower case, and its body.
+func TestErrorOf(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, code, detail string
+		n                  NodeResult
+		want               string
+	}{
+		{
+			"no answer", "upstream_timeout", "timed out",
+			NodeResult{ID: "a"},
+			`{"code":"upstream_timeout","detail":"timed out","node":"a"}`,
+		},
+		{
+			"an answer", "upstream_failed", "a answered 404",
+			NodeResult{ID: "a", HTTPStatus: 404, Header: http.Header{"X-Trace": {"t-1"}}, Body: json.RawMessage(`{"error": "gone"}`)},
+			`{"code":"upstream_failed","detail":"a answered 404","node":"a","status":404,"headers":{"x-trace":"t-1"},"body":{"error":"gone"}}`,
+		},
+		{
+			"an answer with no body", "upstream_failed", "a answered 404",
+			NodeResult{ID: "a", HTTPStatus: 404},
+			`{"code":"upstream_failed","detail":"a answered 404","node":"a","status":404,"headers":{},"body":null}`,
+		},
+	}
+	for _, tt := range tests {
+		if got, err := ErrorOf(tt.n, tt.code, tt.detail); err != nil || string(got) != tt.want {
+			t.Errorf("%s: %s, %v; want %s", tt.name, got, err, tt.want)
+		}
 	}
 }
 
@@ -682,7 +751,7 @@ func TestRun_CasesAreExits(t *testing.T) {
 	    {"id": "after", "kind": "transform", "expr": "{ 'got': nodes.check.status, 'with': nodes.check.body }"},
 	    {"id": "empty", "kind": "transform", "expr": "{ 'got': nodes.check.status, 'with': nodes.check.body }"}],
 	  "edges": [{"from": "check", "to": "after", "on": 200}, {"from": "check", "to": "empty", "on": 204}],
-	  "response": {"answers": [{"status": 200, "from": "after"}, {"status": 204, "from": "check", "on": 204}, {"status": 400, "from": "check", "on": 400}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "after"}]}, {"status": 204, "lines": [{"from": "check", "on": 204}]}, {"status": 400, "lines": [{"from": "check", "on": 400}]}]}}`)
 	for input, want := range map[string]string{
 		`{"key": 1}`: `400 {"error":"bad key"} (check succeeded, after skipped, empty skipped)`,
 		`{"key": 2}`: `400 {"error":"worse key"} (check succeeded, after skipped, empty skipped)`,
@@ -697,7 +766,7 @@ func TestRun_CasesAreExits(t *testing.T) {
 	// One case alone is an exit too, and its Unhandled takes none holding.
 	one := program(t, "", `{"nodes": [{"id": "respond", "kind": "transform",
 	    "switch": {"cases": [{"when": "input.id = 7", "status": 201, "body": "{ 'id': 7 }"}]}}],
-	  "response": {"answers": [{"status": 201, "from": "respond", "on": 201}, {"status": 422, "from": "respond", "unhandled": true}]}}`)
+	  "response": {"answers": [{"status": 201, "lines": [{"from": "respond", "on": 201}]}, {"status": 422, "lines": [{"from": "respond", "unhandled": true}]}]}}`)
 	for input, want := range map[string]string{`{"id": 7}`: `201 {"id":7}`, `{"id": 8}`: `422 `} {
 		res, _ := execute(t, testEngine(Options{}), one, input)
 		if got := fmt.Sprintf("%d %s", res.Answer, string(res.Output)); res.Status != StatusSucceeded || got != want {
@@ -734,7 +803,7 @@ func TestRun_SwitchFailures(t *testing.T) {
 func TestRun_PicksAnAnswerWithoutABody(t *testing.T) {
 	t.Parallel()
 	p := program(t, "", `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': input.code }"}],
-	  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 409, "from": "a"}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 409, "lines": [{"from": "a"}]}]}}`)
 	res, _ := execute(t, testEngine(Options{}), p, `{"code": 4.09e2}`)
 	if res.Status != StatusSucceeded || res.Answer != 409 || res.Output != nil {
 		t.Errorf("run %s answered %d %s, err %v; want succeeded answering 409 with no body", res.Status, res.Answer, res.Output, res.Err)
@@ -749,7 +818,7 @@ func TestRun_AnswersWithoutAResponse(t *testing.T) {
 	for def, want := range map[string]string{
 		`{` + nodes + `, "output": "nodes.a.body"}`: `200 {"id":7}`,
 		`{` + nodes + `}`: `0 `,
-		`{` + nodes + `, "response": {"answers": [{"status": 201, "from": "a"}]}}`: `201 {"id":7}`,
+		`{` + nodes + `, "response": {"answers": [{"status": 201, "lines": [{"from": "a"}]}]}}`: `201 {"id":7}`,
 	} {
 		res, _ := execute(t, testEngine(Options{}), program(t, "", def), `{}`)
 		if got := fmt.Sprintf("%d %s", res.Answer, string(res.Output)); res.Status != StatusSucceeded || got != want {
@@ -769,7 +838,7 @@ func TestRun_FailsWithoutAnAnswer(t *testing.T) {
 	t.Cleanup(srv.Close)
 	picks := func(expr string) string {
 		return `{"nodes": [{"id": "a", "kind": "transform", "expr": "` + expr + `"}],
-		  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 404, "from": "a"}]}}`
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 404, "lines": [{"from": "a"}]}]}}`
 	}
 	const noStatus = "not an answer: a gave no whole number as its status"
 	tests := []struct {
@@ -777,13 +846,13 @@ func TestRun_FailsWithoutAnAnswer(t *testing.T) {
 	}{
 		{
 			"its node answered another way", `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/"}, "outputs": [{"status": 404}]}],
-		  "response": {"answers": [{"status": 404, "from": "user", "on": 404}]}}`,
+		  "response": {"answers": [{"status": 404, "lines": [{"from": "user", "on": 404}]}]}}`,
 			"no answer: no line into the response was taken",
 		},
 		{
 			"its node was skipped", `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}],
 		  "edges": [{"from": "a", "to": "b", "when": "false"}],
-		  "response": {"answers": [{"status": 200, "from": "b"}]}}`,
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "b"}]}]}}`,
 			"no answer: no line into the response was taken",
 		},
 		{
@@ -812,22 +881,48 @@ func TestRun_FailsWithoutAnAnswer(t *testing.T) {
 	}
 }
 
-// Validation refuses two answers one run could both reach, so a run that
-// reaches two is a backstop, built here past it.
-func TestRun_FailsOnTwoAnswers(t *testing.T) {
+// A run answers with the first answer, top to bottom, that one of its lines
+// reached (plan 14), with that answer's first line reached. A transform
+// that picks among answers reaches only the one it picked.
+func TestRun_AnswersWithTheFirstAnswerReached(t *testing.T) {
 	t.Parallel()
-	var d workflow.Definition
-	if err := json.Unmarshal([]byte(`{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}],
-	  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 400, "from": "b"}]}}`), &d); err != nil {
-		t.Fatal(err)
+	both := func(first, second string) string {
+		return `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}],
+		  "response": {"answers": [` + first + `, ` + second + `]}}`
 	}
-	p, problems := build(&d)
-	if len(problems) != 1 || problems[0].Code != "overlap" {
-		t.Fatalf("problems = %v, want the overlap alone", problems)
+	a200, b400 := `{"status": 200, "lines": [{"from": "a"}]}`, `{"status": 400, "lines": [{"from": "b"}]}`
+	// b and c both fail into the 500, listed first, which answers from the
+	// first of its lines reached, c's.
+	failures := `{"nodes": [{"id": "a", "kind": "transform", "expr": "3"},
+	    {"id": "b", "kind": "transform", "expr": "$number('b')"}, {"id": "c", "kind": "transform", "expr": "$number('c')"}],
+	  "response": {"answers": [{"status": 500, "lines": [{"from": "c", "unhandled": true}, {"from": "b", "unhandled": true}]},
+	    {"status": 200, "lines": [{"from": "a"}]}]}}`
+	// t picks 404 of the 200 and 404 it's joined to; the 500 between them is
+	// reached when u fails.
+	picks := `{"nodes": [{"id": "t", "kind": "transform", "expr": "{ 'status': 404, 'body': 'gone' }"},
+	    {"id": "u", "kind": "transform", "expr": "$number(input.n)"}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "t"}]}, {"status": 500, "lines": [{"from": "u", "unhandled": true}]},
+	    {"status": 404, "lines": [{"from": "t"}]}]}}`
+	tests := []struct {
+		name, def, input string
+		answer           int
+		output, errs     string // errs: the node an error answer passes on
+	}{
+		{"200 listed first", both(a200, b400), `{}`, 200, "1", ""},
+		{"400 listed first", both(b400, a200), `{}`, 400, "2", ""},
+		{"failures first, from the first line reached", failures, `{}`, 500, "", "c"},
+		{"a pick passes over the answers it didn't pick", picks, `{"n": 1}`, 404, `"gone"`, ""},
+		{"an answer above the one picked wins", picks, `{"n": "x"}`, 500, "", "u"},
 	}
-	res, _ := execute(t, testEngine(Options{}), p, `{}`)
-	if res.Status != StatusFailed || res.Err == nil || res.Err.Error() != "two answers: 200 from a and 400 from b were both reached" {
-		t.Errorf("run %s, err %v; want failed on two answers", res.Status, res.Err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			res, _ := execute(t, testEngine(Options{}), program(t, "", tt.def), tt.input)
+			if res.Status != StatusSucceeded || res.Answer != tt.answer || string(res.Output) != tt.output || res.ErrorFrom != tt.errs {
+				t.Errorf("run %s answered %d %s from %q's error, err %v; want %d %s from %q's",
+					res.Status, res.Answer, res.Output, res.ErrorFrom, res.Err, tt.answer, tt.output, tt.errs)
+			}
+		})
 	}
 }
 
@@ -843,21 +938,21 @@ func TestProgram_Unhandled(t *testing.T) {
 	p := program(t, srv.URL, `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/"}},
 	    {"id": "broken", "kind": "transform", "expr": "$number('one')"}],
 	  "edges": [{"from": "user", "to": "broken"}],
-	  "response": {"answers": [{"status": 200, "from": "broken"}],
-	    "unhandled": {"body": "{ 'error': error.code, 'at': error.node, 'user': nodes.user.body.id, 'trace': nodes.user.headers.'x-trace', 'input': input.id }"}}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "broken"}]}],
+	    "errors": {"body": "{ 'error': error.code, 'at': error.node, 'user': nodes.user.body.id, 'trace': nodes.user.headers.'x-trace', 'input': input.id }"}}}`)
 	res, _ := execute(t, testEngine(Options{}), p, `{"id": 3}`)
 	failure := json.RawMessage(`{"code": "workflow_error", "detail": "node broken: expr: …", "node": "broken"}`)
-	body, ok, err := p.Unhandled(t.Context(), json.RawMessage(`{"id": 3}`), res.Nodes, failure)
+	body, ok, err := p.ErrorBody(t.Context(), json.RawMessage(`{"id": 3}`), res.Nodes, failure)
 	if !ok || err != nil || string(body) != `{"error":"workflow_error","at":"broken","user":"8","trace":"t-1","input":3}` {
 		t.Errorf("Unhandled() = %s, %v, %v", body, ok, err)
 	}
 	// Without unhandled there's nothing to evaluate; a broken one says so.
-	if _, ok, err := program(t, "", `{"nodes": []}`).Unhandled(t.Context(), nil, nil, failure); ok || err != nil {
+	if _, ok, err := program(t, "", `{"nodes": []}`).ErrorBody(t.Context(), nil, nil, failure); ok || err != nil {
 		t.Errorf("no unhandled: ok %v, err %v", ok, err)
 	}
 	q := program(t, "", `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}],
-	  "response": {"answers": [{"status": 200, "from": "a"}], "unhandled": {"body": "$number(error.code)"}}}`)
-	if _, ok, err := q.Unhandled(t.Context(), nil, nil, failure); !ok || err == nil || !strings.HasPrefix(err.Error(), "unhandled: ") {
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}], "errors": {"body": "$number(error.code)"}}}`)
+	if _, ok, err := q.ErrorBody(t.Context(), nil, nil, failure); !ok || err == nil || !strings.HasPrefix(err.Error(), "error body: ") {
 		t.Errorf("a broken unhandled: ok %v, err %v", ok, err)
 	}
 }
@@ -978,7 +1073,7 @@ func TestCompile_ChecksJSONSchemas(t *testing.T) {
 		{"a ref inside the schema", `"input_schema": {"$defs": {"id": {"type": "string"}}, "properties": {"user_id": {"$ref": "#/$defs/id"}}}`, ""},
 		{"not a schema", `"input_schema": {"type": 5}`, "/input_schema invalid_schema"},
 		{"output too", `"output_schema": {"minimum": "zero"}`, "/output_schema invalid_schema"},
-		{"an answer's too", `"response": {"answers": [{"status": 200, "from": "a", "schema": {"type": "object"}}, {"status": 404, "from": "a", "schema": {"type": 5}}]}`, "/response/answers/1/schema invalid_schema"},
+		{"an answer's too", `"response": {"answers": [{"status": 200, "lines": [{"from": "a"}], "schema": {"type": "object"}}, {"status": 404, "lines": [{"from": "a"}], "schema": {"type": 5}}]}`, "/response/answers/1/schema invalid_schema"},
 		// The library's default loader reads local files; none may load.
 		{"a ref to a local file", `"input_schema": {"$ref": "file:///etc/passwd"}`, "/input_schema invalid_schema"},
 		{"a ref to a remote schema", `"input_schema": {"$ref": "https://example.com/schema.json"}`, "/input_schema invalid_schema"},

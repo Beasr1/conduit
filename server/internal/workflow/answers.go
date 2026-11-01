@@ -7,23 +7,27 @@ import (
 	"strings"
 )
 
-// group is the answers joined to one output of one node: from node from, on
-// output on, a status, 0 for 2xx and a transform's one output, or
+// group is the lines from one block of one node into answers: from node
+// from, on output on, a status, 0 for 2xx and a transform's one output, or
 // OnUnhandled.
 type group struct {
 	from, on int
-	answers  []int // places in response.answers
+	lines    []lineRef
 }
 
+// lineRef is a line into an answer: the answer's place in response.answers,
+// and the line's place in its lines.
+type lineRef struct{ answer, line int }
+
 // checkResponse checks what the workflow answers. Each answer has a status,
-// listed once, and one line, from a node and an output it has, its
-// Unhandled block among them. A node joined to several answers from one
-// output picks among them, so it's a transform; a switch gives the
-// statuses of the answers it's joined to. Two lines one run could both
-// take are a problem, judged from the graph alone.
+// listed once, and lines into it, each from a node and an output it has, its
+// Unhandled block among them. A run answers with the first answer, top to
+// bottom, that one of its lines reached (plan 14), so two answers one run
+// can reach are no problem; one block joined to two is, as the second is
+// never given.
 // A definition answers through its response, or, kept for the revisions
 // saved with one, its output; not both.
-func (v *validator) checkResponse(d *Definition, index map[string]int, need []route) {
+func (v *validator) checkResponse(d *Definition, index map[string]int) {
 	r := d.Response
 	if r == nil {
 		return
@@ -31,8 +35,8 @@ func (v *validator) checkResponse(d *Definition, index map[string]int, need []ro
 	if d.Output != "" {
 		v.add("/output", "not_allowed", "a definition with a response has no output: the nodes joined to its answers give them")
 	}
-	if r.Unhandled != nil && strings.TrimSpace(r.Unhandled.Body) == "" {
-		v.add("/response/unhandled/body", "required", "unhandled needs a body")
+	if r.Errors != nil && strings.TrimSpace(r.Errors.Body) == "" {
+		v.add("/response/errors/body", "required", "the error body is empty: write one, or remove it to answer errors with problem details")
 	}
 	if len(r.Answers) == 0 {
 		v.add("/response/answers", "required", "a response needs at least one answer")
@@ -52,95 +56,66 @@ func (v *validator) checkResponse(d *Definition, index map[string]int, need []ro
 		default:
 			seen[a.Status] = k
 		}
-		from, ok := index[a.From]
-		switch {
-		case a.From == "":
-			v.add(p+"/from", "required", "join a node to the %d answer", a.Status)
-			continue
-		case !ok:
-			v.add(p+"/from", "unknown_node", "no node has the id %q", a.From)
+		if len(a.Lines) == 0 {
+			v.add(p+"/lines", "required", "join a node to the %d answer", a.Status)
 			continue
 		}
-		if a.Unhandled && a.On != 0 {
-			v.add(p+"/unhandled", "not_allowed", "a line leaves from one block: %s's %d output or its Unhandled", a.From, a.On)
-			continue
+		for j, l := range a.Lines {
+			lp := fmt.Sprintf("%s/lines/%d", p, j)
+			from, ok := index[l.From]
+			switch {
+			case l.From == "":
+				v.add(lp+"/from", "required", "a line into the %d answer needs the node it leaves from", a.Status)
+				continue
+			case !ok:
+				v.add(lp+"/from", "unknown_node", "no node has the id %q", l.From)
+				continue
+			}
+			if l.Unhandled && l.On != 0 {
+				v.add(lp+"/unhandled", "not_allowed", "a line leaves from one block: %s's %d output or its Unhandled", l.From, l.On)
+				continue
+			}
+			if !v.checkOn(lp+"/on", d.Nodes[from], l.Output(), "a line") {
+				continue
+			}
+			on := l.Output()
+			i := slices.IndexFunc(groups, func(g group) bool { return g.from == from && g.on == on })
+			if i < 0 {
+				groups = append(groups, group{from: from, on: on})
+				i = len(groups) - 1
+			}
+			groups[i].lines = append(groups[i].lines, lineRef{answer: k, line: j})
 		}
-		if !v.checkOn(p+"/on", d.Nodes[from], a.Output(), "a line") {
-			continue
-		}
-		on := a.Output()
-		i := slices.IndexFunc(groups, func(g group) bool { return g.from == from && g.on == on })
-		if i < 0 {
-			groups = append(groups, group{from: from, on: on})
-			i = len(groups) - 1
-		}
-		groups[i].answers = append(groups[i].answers, k)
 	}
 	for _, g := range groups {
 		v.checkGroup(d, g)
 	}
-	if need != nil {
-		v.checkReach(d, groups, need)
-	}
 }
 
-// checkGroup checks the answers joined to one output of one node. An http
-// node's result is the response it got, so it gives one answer, and so does
-// a node's Unhandled block, as a failure has no status of the node's own to
-// pick with. A case of a switch exits with its own status, so it gives the
-// answer of that status.
+// checkGroup checks the lines from one block of one node. A run answers with
+// the first answer listed that a line reached, so a block joined to two
+// answers would never give the second, and a block joined twice to one says
+// nothing new. A transform with an expr picks among the answers it's joined
+// to, by the status it gives; a case of a switch exits with its own status,
+// so it gives the answer of that status.
 func (v *validator) checkGroup(d *Definition, g group) {
 	n, answers := d.Nodes[g.from], d.Response.Answers
-	statuses := make([]int, len(g.answers))
-	for i, k := range g.answers {
-		statuses[i] = answers[k].Status
-	}
-	if g.on == OnUnhandled {
-		if len(statuses) > 1 {
-			v.add(fmt.Sprintf("/response/answers/%d/from", g.answers[1]), "not_allowed",
-				"%s's Unhandled is joined to %s: a failure has no status to pick one with, so it gives one answer; to pick among several, join a transform that does",
-				n.ID, statusList(statuses))
+	at := func(r lineRef) string { return fmt.Sprintf("/response/answers/%d/lines/%d/from", r.answer, r.line) }
+	cases := n.Kind == NodeKindTransform && n.Switch != nil && g.on != OnUnhandled
+	picks := n.Kind == NodeKindTransform && n.Switch == nil && g.on != OnUnhandled
+	seen := make(map[int]bool, len(g.lines))
+	for _, r := range g.lines {
+		status := answers[r.answer].Status
+		switch {
+		case seen[r.answer]:
+			v.add(at(r), "duplicate_line", "%s's %s is joined to the %d answer already", n.ID, outputName(g.on), status)
+		case cases && status != g.on:
+			v.add(at(r), "other_status", "%s's case giving %d exits with it, so it joins the %d answer", n.ID, g.on, g.on)
+		case len(seen) > 0 && !cases && !picks:
+			v.add(at(r), "dead_line", "%s's %s gives the %d answer, above, so it never gives %d",
+				n.ID, outputName(g.on), answers[g.lines[0].answer].Status, status)
 		}
-		return
-	}
-	if n.Kind == NodeKindHTTP && len(statuses) > 1 {
-		v.add(fmt.Sprintf("/response/answers/%d/from", g.answers[1]), "not_allowed",
-			"%s's %s output is joined to %s: an http node's result is the response it got, so it gives one answer; to pick among several, join a transform that does",
-			n.ID, outputName(g.on), statusList(statuses))
-	}
-	if n.Kind != NodeKindTransform || n.Switch == nil {
-		return
-	}
-	for _, k := range g.answers {
-		if answers[k].Status != g.on {
-			v.add(fmt.Sprintf("/response/answers/%d/from", k), "other_status",
-				"%s's case giving %d exits with it, so it joins the %d answer", n.ID, g.on, g.on)
-		}
-	}
-}
-
-// checkReach reports two outputs joined to answers that one run could both
-// take. A run takes a line only when its node runs and answers through its
-// output, and an http node runs only when every line into it was taken, a
-// transform when any was, so two lines rest apart only when they need
-// outputs of one node that share none. Conditions aren't read: lines only
-// they keep apart are reported too, as a transform can pick among answers.
-// A line from a node that never runs is that node's problem.
-func (v *validator) checkReach(d *Definition, groups []group, need []route) {
-	answers := d.Response.Answers
-	for i, a := range groups {
-		if need[a.from] == nil {
-			continue
-		}
-		for _, b := range groups[i+1:] {
-			if need[b.from] == nil || apart(with(need[a.from], a), with(need[b.from], b)) {
-				continue
-			}
-			ka, kb := a.answers[0], b.answers[0]
-			v.add(fmt.Sprintf("/response/answers/%d/from", kb), "overlap",
-				"%d (%s) and %d (%s) can both be reached in one run: join both to one transform, which picks the answer",
-				answers[ka].Status, d.Nodes[a.from].ID, answers[kb].Status, d.Nodes[b.from].ID)
-		}
+		seen[r.answer] = true
 	}
 }
 
@@ -154,16 +129,4 @@ func outputName(on int) string {
 		return "Unhandled"
 	}
 	return strconv.Itoa(on)
-}
-
-// statusList is statuses in words: "200", "200 and 404", "200, 404 and 409".
-func statusList(statuses []int) string {
-	words := make([]string, len(statuses))
-	for i, s := range statuses {
-		words[i] = strconv.Itoa(s)
-	}
-	if len(words) < 2 {
-		return strings.Join(words, "")
-	}
-	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }

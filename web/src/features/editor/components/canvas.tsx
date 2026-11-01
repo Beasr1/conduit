@@ -7,19 +7,19 @@ import {
   useReactFlow,
   useStore,
 } from "@xyflow/react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { AddNodeDialog } from "@/features/editor/components/add-node-dialog";
 import { nodeTypes } from "@/features/editor/components/nodes";
 import { ProblemMark } from "@/features/editor/components/problem-mark";
+import { Tour, tourSeen } from "@/features/editor/components/tour";
 import {
   canConnect,
   canJoin,
   connect,
   joinAnswer,
-  leaveAnswer,
-  refusal,
+  leaveLines,
   removeEdges,
   removeNodes,
 } from "@/features/editor/edits";
@@ -41,9 +41,6 @@ import {
 import { useRun, useRunSteps } from "@/features/editor/hooks/use-runs";
 import { type StepRun, takenOf, tookLine } from "@/features/editor/runs";
 import { type Refused, useEditor } from "@/features/editor/store";
-import type { components } from "@/gen/schema";
-
-type Definition = components["schemas"]["Definition"];
 
 // The room kept between a picked step and the canvas's edge.
 const MARGIN = 24;
@@ -61,6 +58,9 @@ export function Canvas() {
   const setPart = useEditor((s) => s.setPart);
   const openPanel = useEditor((s) => s.openPanel);
   const refuse = useEditor((s) => s.refuse);
+  // The tour opens on its own the first time this browser opens a workflow
+  // (plan 13), and Tour in the toolbar opens it again.
+  const [touring, setTouring] = useState(() => !tourSeen());
 
   const flow = useMemo(() => toFlow(draft), [draft]);
   // Only a node that's moving or selected gets a new object, so the rest
@@ -106,17 +106,16 @@ export function Canvas() {
         e.data?.answer === undefined
           ? undefined
           : draft.response?.answers?.[e.data.answer];
+      const into = answer?.lines?.[e.data?.line ?? -1];
       const bad =
         answer === undefined && e.data !== undefined && wrong.has(e.data.index);
       const edge = e.data && draft.edges?.[e.data.index];
       const line = answer
-        ? answer.from === undefined
-          ? undefined
-          : {
-              from: answer.from,
-              on: outputOf(answer),
-              to: `the ${answer.status} answer`,
-            }
+        ? into && {
+            from: into.from,
+            on: outputOf(into),
+            to: `the ${answer.status} answer`,
+          }
         : edge && { from: edge.from, on: outputOf(edge), to: edge.to };
       const answered: StepRun = {
         state:
@@ -205,12 +204,17 @@ export function Canvas() {
       connectOnClick={false}
       // A node keyed with "#" has a missing or shared id, which an edge
       // can't name. An edge leaves from the output whose handle it's drawn
-      // from, and each answer on the response takes one line, into its own
-      // point, whose id is the answer's place.
+      // from, and an answer on the response takes lines from any number of
+      // steps, each once, into its own point, whose id is the answer's place.
       isValidConnection={(c) =>
         !c.source.includes("#") &&
         (c.target === RESPONSE
-          ? canJoin(draft, Number(c.targetHandle))
+          ? canJoin(
+              draft,
+              Number(c.targetHandle),
+              c.source,
+              onOf(c.sourceHandle),
+            )
           : !c.target.includes("#") &&
             canConnect(draft, c.source, c.target, onOf(c.sourceHandle)))
       }
@@ -229,20 +233,27 @@ export function Canvas() {
       // A line the response refuses makes the card say why.
       onConnectStart={() => refuse(undefined)}
       onPaneClick={() => refuse(undefined)}
-      onConnectEnd={(event, state) => refuse(refusedLine(draft, state, event))}
+      onConnectEnd={(event, state) => refuse(refusedLine(state, event))}
       // Edges go first: removing nodes doesn't move the remaining edges, but
       // the indexes here are for the draft as it is now. The lines into the
-      // response's answers aren't edges.
+      // response's answers aren't edges, and go by identity, so several from
+      // one answer go at once.
       onDelete={({ nodes: gone, edges: cut }) =>
         edit((d) =>
           removeNodes(
             removeEdges(
-              cut.reduce(
-                (left, e) =>
-                  e.data?.answer === undefined
-                    ? left
-                    : leaveAnswer(left, e.data.answer),
+              leaveLines(
                 d,
+                cut.flatMap((e) => {
+                  const answer = e.data?.answer;
+                  const l =
+                    answer === undefined
+                      ? undefined
+                      : d.response?.answers?.[answer]?.lines?.[
+                          e.data?.line ?? -1
+                        ];
+                  return l ? [l] : [];
+                }),
               ),
               cut.flatMap((e) =>
                 e.data && e.target !== RESPONSE ? [e.data.index] : [],
@@ -277,19 +288,21 @@ export function Canvas() {
         <Button variant="outline" size="sm" onClick={() => openPanel("runs")}>
           Runs
         </Button>
+        <Button variant="ghost" size="sm" onClick={() => setTouring(true)}>
+          Tour
+        </Button>
       </Panel>
       <KeepPickedInView />
+      <Tour open={touring} onClose={() => setTouring(false)} />
     </ReactFlow>
   );
 }
 
 // refusedLine is a line into the response just refused, for the card to
-// say why: drawn into an answer whose one line is another step's, or let
-// go on the card off an answer's point. Either end can be the card, as a
-// line can be drawn from either end. React Flow names the node only near
-// a point, so a drop anywhere on the card counts.
+// say why: let go on the card off an answer's point. Either end can be the
+// card, as a line can be drawn from either end. React Flow names the node
+// only near a point, so a drop anywhere on the card counts.
 function refusedLine(
-  draft: Definition,
   state: FinalConnectionState,
   event: MouseEvent | TouchEvent,
 ): Refused | undefined {
@@ -300,9 +313,7 @@ function refusedLine(
   if (step === undefined || step === RESPONSE || step.includes("#"))
     return undefined;
   const handle = from === RESPONSE ? state.fromHandle?.id : state.toHandle?.id;
-  if (handle == null) return { step };
-  const answer = Number(handle);
-  return refusal(draft, step, answer) ? { step, answer } : undefined;
+  return handle == null ? { step } : undefined;
 }
 
 // droppedOnCard says whether a drag ended over the response card.

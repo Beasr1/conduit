@@ -34,17 +34,25 @@ type Program struct {
 }
 
 // response is where a run's answer comes from: the answers, each a status
-// and the line it takes, and unhandled, for a run that gives none.
+// and the lines into it, tried top to bottom; the statuses each node that
+// picks among answers picks from; and the error body, for a run that gives
+// none and an answer passed an error straight through.
 type response struct {
-	answers   []answerLine    // in the definition's order
-	unhandled *transform.Expr // nil when there's none
+	answers []answer        // in the definition's order, which a run tries them in
+	picks   map[int][]int   // a transform with an expr joined to several answers: their statuses
+	errors  *transform.Expr // nil when there's none
 }
 
-// answerLine is an answer, given when node from answers through output on:
-// a status, 0 for 2xx and for a transform's one output, or
-// workflow.OnUnhandled.
+// answer is a status, and the lines into it, in the definition's order.
+type answer struct {
+	status int
+	lines  []answerLine
+}
+
+// answerLine is a line into an answer, reached when node from answers
+// through output on: a status, 0 for 2xx and for a transform's one output,
+// or workflow.OnUnhandled.
 type answerLine struct {
-	status   int
 	from, on int
 }
 
@@ -186,20 +194,27 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 		}
 	}
 	if r := d.Response; r != nil {
-		p.response = &response{}
+		p.response = &response{picks: map[int][]int{}}
 		// A from that names no node is a problem, so such a program never runs.
 		for k, a := range r.Answers {
-			from, ok := index[a.From]
-			p.response.answers = append(p.response.answers, answerLine{status: a.Status, from: from, on: a.Output()})
-			if ok && a.Unhandled {
-				p.nodes[from].catches = true
+			ans := answer{status: a.Status}
+			for _, l := range a.Lines {
+				from, ok := index[l.From]
+				ans.lines = append(ans.lines, answerLine{from: from, on: l.Output()})
+				if ok && l.Unhandled {
+					p.nodes[from].catches = true
+				}
+				if ok && !l.Unhandled && d.Nodes[from].Kind == workflow.NodeKindTransform && d.Nodes[from].Switch == nil {
+					p.response.picks[from] = append(p.response.picks[from], a.Status)
+				}
 			}
+			p.response.answers = append(p.response.answers, ans)
 			if len(a.Schema) > 0 {
 				c.jsonSchema(fmt.Sprintf("/response/answers/%d/schema", k), a.Schema)
 			}
 		}
-		if r.Unhandled != nil && r.Unhandled.Body != "" {
-			p.response.unhandled = c.expr("/response/unhandled/body", r.Unhandled.Body)
+		if r.Errors != nil && r.Errors.Body != "" {
+			p.response.errors = c.expr("/response/errors/body", r.Errors.Body)
 		}
 	}
 	for i := range p.nodes {

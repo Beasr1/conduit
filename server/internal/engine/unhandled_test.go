@@ -132,20 +132,23 @@ func TestRun_AnswersThroughUnhandled(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	call := program(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}}],
-	  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 502, "from": "a", "unhandled": true}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 502, "lines": [{"from": "a", "unhandled": true}]}]}}`)
+	// With no body of its own, the block passes its error on, for the
+	// response's error body (plan 12).
 	res, _ := execute(t, testEngine(Options{}), call, `{}`)
-	if res.Status != StatusSucceeded || res.Answer != 502 || string(res.Output) != `{"error": "down"}` || !res.Nodes[0].Caught {
-		t.Errorf("call: run %s answered %d %s, err %v", res.Status, res.Answer, res.Output, res.Err)
+	if res.Status != StatusSucceeded || res.Answer != 502 || res.Output != nil || res.ErrorFrom != "a" || !res.Nodes[0].Caught {
+		t.Errorf("call: run %s answered %d %s from %q's error, err %v", res.Status, res.Answer, res.Output, res.ErrorFrom, res.Err)
 	}
 	// A switch's cases each answer, and its Unhandled block, joined to one
 	// more, takes its case failing.
 	pick := program(t, "", `{"nodes": [{"id": "t", "kind": "transform",
 	    "switch": {"cases": [{"when": "$number(input.n) > 1", "status": 400}, {"when": "true", "status": 200}]}}],
-	  "response": {"answers": [{"status": 200, "from": "t", "on": 200}, {"status": 400, "from": "t", "on": 400}, {"status": 500, "from": "t", "unhandled": true}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "t", "on": 200}]}, {"status": 400, "lines": [{"from": "t", "on": 400}]}, {"status": 500, "lines": [{"from": "t", "unhandled": true}]}]}}`)
 	for input, want := range map[string]int{`{"n": "2"}`: 400, `{"n": "0"}`: 200, `{"n": "two"}`: 500} {
 		res, _ := execute(t, testEngine(Options{}), pick, input)
-		if res.Status != StatusSucceeded || res.Answer != want || (want == 500 && res.Output != nil) {
-			t.Errorf("pick %s: run %s answered %d %s, err %v; want %d", input, res.Status, res.Answer, res.Output, res.Err, want)
+		errs := map[int]string{500: "t"}[want]
+		if res.Status != StatusSucceeded || res.Answer != want || (want == 500 && res.Output != nil) || res.ErrorFrom != errs {
+			t.Errorf("pick %s: run %s answered %d %s from %q's error, err %v; want %d", input, res.Status, res.Answer, res.Output, res.ErrorFrom, res.Err, want)
 		}
 	}
 }
@@ -245,14 +248,14 @@ func TestProgram_UnhandledReadsCaughtNodes(t *testing.T) {
 	p := program(t, srv.URL, `{
 	  "nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}}, {"id": "b", "kind": "transform", "expr": "$number('one')"}],
 	  "edges": [{"from": "a", "to": "b", "unhandled": true}],
-	  "response": {"answers": [{"status": 200, "from": "b"}],
-	    "unhandled": {"body": "{ 'a': nodes.a.error.code, 'status': nodes.a.status, 'failed': error.node }"}}
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "b"}]}],
+	    "errors": {"body": "{ 'a': nodes.a.error.code, 'status': nodes.a.status, 'failed': error.node }"}}
 	}`)
 	res, _ := execute(t, testEngine(Options{}), p, `{}`)
 	if res.Status != StatusFailed || statuses(res) != "a failed, b failed" {
 		t.Fatalf("run %s (%s): %v", res.Status, statuses(res), res.Err)
 	}
-	body, ok, err := p.Unhandled(t.Context(), nil, res.Nodes, json.RawMessage(`{"code": "workflow_error", "detail": "…", "node": "b"}`))
+	body, ok, err := p.ErrorBody(t.Context(), nil, res.Nodes, json.RawMessage(`{"code": "workflow_error", "detail": "…", "node": "b"}`))
 	if !ok || err != nil || string(body) != `{"a":"upstream_failed","status":404,"failed":"b"}` {
 		t.Errorf("Unhandled() = %s, %v, %v", body, ok, err)
 	}
@@ -343,7 +346,7 @@ func TestRun_UnhandledBodyShapesWhatFollows(t *testing.T) {
 	user := `{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/"},
 	  "unhandled": {"body": "{ 'missing': nodes.user.status, 'why': nodes.user.body.error }"}}`
 	answer := program(t, srv.URL, `{"nodes": [`+user+`],
-	  "response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "unhandled": true}]}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}, {"status": 404, "lines": [{"from": "user", "unhandled": true}]}]}}`)
 	res, _ := execute(t, testEngine(Options{}), answer, `{}`)
 	if res.Status != StatusSucceeded || res.Answer != 404 || string(res.Output) != `{"missing":404,"why":"gone"}` {
 		t.Errorf("answer: run %s answered %d %s, err %v", res.Status, res.Answer, res.Output, res.Err)
@@ -362,9 +365,9 @@ func TestRun_UnhandledBodyShapesWhatFollows(t *testing.T) {
 	// The response's Unhandled reads it too.
 	failing := program(t, srv.URL, `{"nodes": [`+user+`, {"id": "b", "kind": "transform", "expr": "$number('one')"}],
 	  "edges": [{"from": "user", "to": "b", "unhandled": true}],
-	  "response": {"answers": [{"status": 200, "from": "b"}], "unhandled": {"body": "nodes.user.body"}}}`)
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "b"}]}], "errors": {"body": "nodes.user.body"}}}`)
 	res, _ = execute(t, testEngine(Options{}), failing, `{}`)
-	body, ok, err := failing.Unhandled(t.Context(), nil, res.Nodes, json.RawMessage(`{"code": "workflow_error", "detail": "…", "node": "b"}`))
+	body, ok, err := failing.ErrorBody(t.Context(), nil, res.Nodes, json.RawMessage(`{"code": "workflow_error", "detail": "…", "node": "b"}`))
 	if !ok || err != nil || string(body) != `{"missing":404,"why":"gone"}` {
 		t.Errorf("Unhandled() = %s, %v, %v", body, ok, err)
 	}

@@ -40,13 +40,14 @@ const greetDef = `{
 // respond follows user either way, through answered, a transform.
 const answersDef = `{
   "nodes": [
-    {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}, "outputs": [{"status": 404}]},
-    {"id": "answered", "kind": "transform", "expr": "nodes.user.status"},
-    {"id": "respond", "kind": "transform",
+    {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}, "outputs": [{"status": 404}],
+     "unhandled": {"fail": true}},
+    {"id": "answered", "kind": "transform", "expr": "nodes.user.status", "unhandled": {"fail": true}},
+    {"id": "respond", "kind": "transform", "unhandled": {"fail": true},
      "expr": "nodes.user.status = 404 ? { 'status': 404, 'body': { 'error': 'no such user' } } : { 'status': 200, 'body': nodes.user.body }"}
   ],
   "edges": [{"from": "user", "to": "answered"}, {"from": "user", "to": "answered", "on": 404}, {"from": "answered", "to": "respond"}],
-  "response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}]}
+  "response": {"answers": [{"status": 200, "lines": [{"from": "respond"}]}, {"status": 404, "lines": [{"from": "respond"}]}]}
 }`
 
 // usersUpstream answers greetDef and answersDef: user 7 at once, user 8
@@ -83,6 +84,18 @@ func published(t *testing.T, base, def string) gen.WorkflowRevision {
 	wr := create(t, strings.ReplaceAll(def, "BASE", base))
 	if r := call(t, http.MethodPost, "/v1/workflows/"+wr.Workflow.ID+"/publish", `{"revision": 1}`); r.status != http.StatusOK {
 		t.Fatalf("publish = %d %s", r.status, r.body)
+	}
+	return wr
+}
+
+// publishedBefore publishes def's first revision as a server did before plan
+// 12's checks, past the API, which now refuses what def lacks. A revision
+// published then is still served.
+func publishedBefore(t *testing.T, base, def string) gen.WorkflowRevision {
+	t.Helper()
+	wr := create(t, strings.ReplaceAll(def, "BASE", base))
+	if _, err := db.Publish(t.Context(), wr.Workflow.ID, 1); err != nil {
+		t.Fatal(err)
 	}
 	return wr
 }
@@ -347,16 +360,21 @@ func TestServe(t *testing.T) {
 	up := usersUpstream(t)
 	greet := published(t, up.URL, greetDef).Workflow.Slug
 	answers := published(t, up.URL, answersDef).Workflow.Slug
-	noBody := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': 204 }"}],
-	  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 204, "from": "a"}]}}`).Workflow.Slug
-	noResponse := published(t, up.URL, `{"nodes": []}`).Workflow.Slug
-	noAnswer := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': 418 }"}],
-	  "response": {"answers": [{"status": 200, "from": "a"}, {"status": 404, "from": "a"}]}}`).Workflow.Slug
+	noBody := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': 204 }", "unhandled": {"fail": true}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 204, "lines": [{"from": "a"}]}]}}`).Workflow.Slug
+	noResponse := publishedBefore(t, up.URL, `{"nodes": []}`).Workflow.Slug
+	noAnswer := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': 418 }", "unhandled": {"fail": true}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 404, "lines": [{"from": "a"}]}]}}`).Workflow.Slug
 	// A failure answers with unhandled's body, at the status of its cause.
-	unhandled := published(t, up.URL, `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}", "timeout_ms": 1000}}],
-	  "response": {"answers": [{"status": 200, "from": "user"}], "unhandled": {"body": "{ 'error': error.code, 'step': error.node }"}}}`).Workflow.Slug
-	broken := published(t, up.URL, `{"nodes": [{"id": "t", "kind": "transform", "expr": "$number('one')"}]}`).Workflow.Slug
+	unhandled := published(t, up.URL, `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}", "timeout_ms": 1000}, "unhandled": {"fail": true}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}], "errors": {"body": "{ 'error': error.code, 'step': error.node }"}}}`).Workflow.Slug
+	broken := publishedBefore(t, up.URL, `{"nodes": [{"id": "t", "kind": "transform", "expr": "$number('one')"}]}`).Workflow.Slug
 	unpublished := create(t, validDef).Workflow.Slug
+	// user's 404 joined straight to an answer, with no error body: problem
+	// details at 404 (plan 12).
+	errorBlock := published(t, up.URL, `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"},
+	    "outputs": [{"status": 404}], "unhandled": {"fail": true}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}, {"status": 404, "lines": [{"from": "user", "on": 404}]}]}}`).Workflow.Slug
 
 	tests := []struct {
 		name, slug, body string
@@ -376,6 +394,7 @@ func TestServe(t *testing.T) {
 		{"an expression fails", broken, ``, 500, "workflow_error t"},
 		{"unhandled answers an upstream's failure", unhandled, `{"user_id": "500"}`, 502, `{"error":"upstream_failed","step":"user"}`},
 		{"and a timeout", unhandled, `{"user_id": "slow"}`, 504, `{"error":"timeout","step":"user"}`},
+		{"an error block answers problem details", errorBlock, `{"user_id": "gone"}`, 404, "upstream_failed user"},
 		{"no such slug", "no-such-slug", ``, 404, "not_found"},
 		{"never published", unpublished, ``, 404, "not_found"},
 	}
@@ -402,7 +421,7 @@ func TestServe(t *testing.T) {
 				t.Errorf("problem %q, want %q: %s", got, tt.want, r.body)
 			}
 			// A run that failed names itself, for GET /v1/runs/{id}.
-			if tt.status >= 500 && !strings.HasPrefix(p.Instance, "/v1/runs/") {
+			if (tt.status >= 500 || tt.slug == errorBlock) && !strings.HasPrefix(p.Instance, "/v1/runs/") {
 				t.Errorf("instance = %q", p.Instance)
 			}
 		})
@@ -421,7 +440,8 @@ func TestServe_BusyAtTheCap(t *testing.T) {
 	t.Cleanup(up.Close)
 	t.Cleanup(func() { close(release) })
 	capped := newRouter(db, runner.Options{MaxRuns: 1}, 0)
-	wr := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}}]}`)
+	wr := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}, "unhandled": {"fail": true}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}]}}`)
 
 	send := func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))

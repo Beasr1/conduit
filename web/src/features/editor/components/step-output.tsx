@@ -1,15 +1,10 @@
 import { useState } from "react";
 
+import { Hint } from "@/components/hint";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { StepConnections } from "@/features/editor/components/step-connections";
-import { StepResponse } from "@/features/editor/components/step-response";
 import { RunGot } from "@/features/editor/components/step-run";
 import { StepSample } from "@/features/editor/components/step-sample";
 import { addOutput } from "@/features/editor/edits";
@@ -22,8 +17,8 @@ const MIN_OUTPUT = 300;
 const MAX_OUTPUT = 599;
 
 // StepOutput is one of an http step's responses, its 2xx or, given a
-// status, one it lists, as its tab shows it: its sample, the connections
-// that leave on it, and how the steps after read it.
+// status, one it lists, as its tab shows it: its sample, under the status
+// that's its condition, and the connections that leave on it.
 export function StepOutput({
   index,
   status,
@@ -43,7 +38,6 @@ export function StepOutput({
           the sample they were given rather than what was typed before. */}
       <StepSample key={kept} index={index} status={status} />
       <StepConnections index={index} on={status} />
-      <StepResponse index={index} />
     </div>
   );
 }
@@ -77,7 +71,13 @@ export function AddResponse({
 
   return (
     <Field data-invalid={error !== undefined}>
-      <FieldLabel htmlFor="step-output-status">Add a response</FieldLabel>
+      <div className="flex items-center gap-1">
+        <FieldLabel htmlFor="step-output-status">Add a response</FieldLabel>
+        <Hint about="Add a response">
+          A status the run goes on from rather than failing. A status with no
+          response goes to Unhandled.
+        </Hint>
+      </div>
       <div className="flex gap-2">
         <Input
           id="step-output-status"
@@ -104,12 +104,6 @@ export function AddResponse({
         </Button>
       </div>
       <FieldError errors={error === undefined ? [] : [{ message: error }]} />
-      <FieldDescription>
-        By its status, as 404, when a run should go on rather than fail. Every
-        HTTP step has 2xx; any status it has no response for goes to its
-        Unhandled, which fails the run unless a line leaves it. Each response is
-        a block on the step, which connections leave from.
-      </FieldDescription>
     </Field>
   );
 }

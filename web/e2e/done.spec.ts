@@ -52,6 +52,13 @@ async function open(page: Page, id: string) {
   return panel;
 }
 
+// failsTheRun has a step's failures fail the run, as each step here does:
+// Publish waits until every step's are decided (plan 12).
+async function failsTheRun(panel: Locator) {
+  await panel.getByRole("tab", { name: "Unhandled" }).click();
+  await panel.getByRole("checkbox", { name: "Fail the run" }).check();
+}
+
 // connect joins a step's 2xx to another step, or to an answer, with
 // Connect to in its 2xx tab.
 async function connect(page: Page, from: string, to: string) {
@@ -74,7 +81,27 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
   await created.getByRole("button", { name: "Create" }).click();
   await expect(page).toHaveURL(/\/workflows\/[0-9a-f-]+$/);
 
-  // Four HTTP steps, each calling the test upstream; crm's URL waits.
+  // The tour offers itself on a first visit: on an empty canvas, two stops,
+  // each beside the part it's about: the response's, left of its card.
+  const tour = page.getByRole("dialog");
+  await expect(tour.getByText("1 of 2")).toBeVisible();
+  await tour.getByRole("button", { name: "Next" }).click();
+  await expect(tour.getByText("2 of 2")).toBeVisible();
+  const card = page.getByTestId("rf__node-#response");
+  await expect
+    .poll(async () => {
+      const [stop, beside] = [
+        await tour.boundingBox(),
+        await card.boundingBox(),
+      ];
+      return !!stop && !!beside && stop.x + stop.width <= beside.x;
+    })
+    .toBe(true);
+  await tour.getByRole("button", { name: "Done" }).click();
+  await expect(tour).toBeHidden();
+
+  // Four HTTP steps, each calling the test upstream and failing the run
+  // with its failures; crm's URL waits.
   for (const id of ["user", "orders", "prefs", "crm"] as const) {
     await page.getByRole("button", { name: "Add HTTP step" }).click();
     const add = page.getByRole("dialog");
@@ -83,12 +110,17 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
     await expect(step(page, id)).toBeVisible();
     if (id === "crm") continue;
     const panel = await open(page, id);
-    await panel.getByLabel("URL").fill(urls[id]);
+    await panel
+      .getByRole("textbox", { name: "URL", exact: true })
+      .fill(urls[id]);
+    await failsTheRun(panel);
   }
   let panel = await open(page, "crm");
   await panel.getByRole("combobox", { name: "Method" }).click();
   await page.getByRole("option", { name: "POST", exact: true }).click();
-  await panel.getByLabel("Request body").fill(crmBody);
+  await panel.getByRole("tab", { name: "Body" }).click();
+  await panel.getByRole("textbox", { name: "Request body" }).fill(crmBody);
+  await failsTheRun(panel);
 
   // Four connections, and crm joined to the 200 answer.
   await connect(page, "user", "orders");
@@ -97,8 +129,9 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
   await connect(page, "prefs", "crm");
   await page.getByTestId("rf__node-#response").getByText("+ Add").click();
   const response = page.getByRole("complementary", { name: "Response" });
-  await response.getByLabel("Add an answer").fill("200");
-  await response.getByLabel("Add an answer").press("Enter");
+  const answer = response.getByRole("textbox", { name: "Add an answer" });
+  await answer.fill("200");
+  await answer.press("Enter");
   await connect(page, "crm", "Response 200");
   await expect(page.locator(".react-flow__edge")).toHaveCount(5);
 
@@ -112,7 +145,7 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
   const problems = page.getByRole("complementary", { name: "Problems" });
   await problems.getByRole("button", { name: /^crm · URL/ }).click();
   panel = page.getByRole("complementary", { name: "HTTP step" });
-  const url = panel.getByLabel("URL");
+  const url = panel.getByRole("textbox", { name: "URL", exact: true });
   await expect(url).toBeFocused();
   await expect(url).toHaveAttribute("aria-invalid", "true");
   await expect(panel.getByRole("alert")).toHaveText("Add a URL.");
@@ -200,6 +233,8 @@ test("a definition made through the API, with no layout, opens laid out", async 
   expect(made.status()).toBe(201);
   const { workflow } = (await made.json()) as { workflow: { id: string } };
 
+  // The tour stays put away: this is about where the steps are drawn.
+  await page.addInitScript(() => localStorage.setItem("conduit.tour", "seen"));
   await signIn(page);
   await page.goto(`/workflows/${workflow.id}`);
   await expect(page.locator(".react-flow__edge")).toHaveCount(4);

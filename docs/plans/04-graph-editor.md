@@ -16,7 +16,13 @@ preview a run by each way (5adbc71). Then the finish (2026-11-01): an
 Input tags a conditional step, a run records the lines it took, two small
 fixes, and Phase E, the browser test. **Done**: the browser test passes in
 `just check`; the leftovers went to plan 07, and headers are held.
-Building Phase A raised question 8, since answered.
+Building Phase A raised question 8, since answered. Plan 12 (2026-11-02)
+changed two of its rules: the response's Unhandled body is the error body
+now, `response.errors`, answering every error an answer passes on too, and
+Publish waits for no loose ends and every step's failures decided. Plan 14
+(2026-11-02) changed one more: an answer takes lines from any number of
+steps, and a run gives the first, top to bottom, that one reached, so two
+answers one run can reach are no longer a problem.
 
 ## Goal
 

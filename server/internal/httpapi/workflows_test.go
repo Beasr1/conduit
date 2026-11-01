@@ -17,7 +17,8 @@ import (
 const validDef = `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'ok': true }"}], "output": "nodes.a.body"}`
 
 // invalidDef has two problems: a bad id and an expression that doesn't compile.
-const invalidDef = `{"nodes": [{"id": "A", "kind": "transform", "expr": "nodes.a."}]}`
+const invalidDef = `{"nodes": [{"id": "A", "kind": "transform", "expr": "nodes.a.", "unhandled": {"fail": true}}],
+  "response": {"answers": [{"status": 200, "lines": [{"from": "A"}]}]}}`
 
 func newSlug(t *testing.T) string {
 	t.Helper()
@@ -275,6 +276,32 @@ func TestPublish(t *testing.T) {
 	}
 	if r := call(t, http.MethodPost, "/v1/workflows/"+id+"/publish", `{"revision": 7}`); r.status != http.StatusNotFound {
 		t.Errorf("publish a revision that doesn't exist = %d, want 404", r.status)
+	}
+}
+
+// What Publish needs besides what a run does (plan 12): a save says it, a
+// run goes ahead without it, and Publish waits for it.
+func TestPublish_WaitsForWhatARunDoesnt(t *testing.T) {
+	t.Parallel()
+	undecided := `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}]}}`
+	wr := create(t, undecided)
+	id := wr.Workflow.ID
+	if got := pointers(gen.Problem{Errors: wr.Revision.Problems}); got != "/nodes/0/unhandled unhandled_undecided" {
+		t.Errorf("saved with problems %q", got)
+	}
+	if r := call(t, http.MethodPost, "/v1/workflows/"+id+"/runs", `{}`); r.status != http.StatusAccepted {
+		t.Errorf("run = %d %s, want 202", r.status, r.body)
+	}
+	r := call(t, http.MethodPost, "/v1/workflows/"+id+"/publish", `{"revision": 1}`)
+	if p := problemOf(t, r); r.status != 422 || pointers(p) != "/nodes/0/unhandled unhandled_undecided" {
+		t.Errorf("publish = %d %+v", r.status, p)
+	}
+	decided := strings.Replace(undecided, `"expr": "1"`, `"expr": "1", "unhandled": {"fail": true}`, 1)
+	if r := call(t, http.MethodPut, "/v1/workflows/"+id+"/draft", decided, "If-Match", `"1"`); r.status != 200 {
+		t.Fatalf("save = %d %s", r.status, r.body)
+	}
+	if r := call(t, http.MethodPost, "/v1/workflows/"+id+"/publish", `{"revision": 2}`); r.status != 200 {
+		t.Errorf("publish once decided = %d %s", r.status, r.body)
 	}
 }
 

@@ -29,9 +29,10 @@ const fieldsOf: Record<string, ReadonlySet<StepField | undefined>> = {
     ...REQUEST_FIELDS,
     "sample",
     "outputs",
+    "unhandled",
     "unhandled_body",
   ]),
-  transform: new Set(["id", "expr", "unhandled_body"]),
+  transform: new Set(["id", "expr", "unhandled", "unhandled_body"]),
 };
 const unknownKind = new Set<StepField | undefined>(["id", "kind"]);
 
@@ -39,10 +40,9 @@ const unknownKind = new Set<StepField | undefined>(["id", "kind"]);
 // has a tab per block it's drawn as: Request, the call and its body; 2xx and
 // each response it lists, with its sample and what follows it; one to add
 // a response; then Unhandled, what takes its failures. The tab open is the
-// editor's part, so a click on a block
-// opens its tab. Its fields are keyed by the step's place in the draft
-// rather than its id, so renaming the step doesn't remount them under the
-// cursor.
+// editor's part, so a click on a block opens its tab. Its fields are keyed
+// by the step's place in the draft rather than its id, so renaming the step
+// doesn't remount them under the cursor.
 export function StepSettings({ index }: { index: number }) {
   const kind: string = useEditor((s) => s.draft.nodes[index]?.kind ?? "");
   const part = useEditor((s) => s.part);
@@ -72,6 +72,7 @@ export function StepSettings({ index }: { index: number }) {
               its label: its own height, a share of the list's, would make
               every one as tall as the rows together. */}
           <TabsList
+            aria-label="Blocks"
             activateOnFocus
             className="flex-wrap group-data-horizontal/tabs:h-auto [&>[data-slot=tabs-trigger]]:h-auto"
           >
@@ -98,7 +99,12 @@ export function StepSettings({ index }: { index: number }) {
             </TabsTrigger>
             <TabsTrigger value="unhandled">
               Unhandled
-              <Marked where={(p) => mine(p) && p.field === "unhandled_body"} />
+              <Marked
+                where={(p) =>
+                  mine(p) &&
+                  (p.field === "unhandled" || p.field === "unhandled_body")
+                }
+              />
             </TabsTrigger>
           </TabsList>
           {/* Each stays mounted while hidden, so what's typed survives a

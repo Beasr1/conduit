@@ -93,7 +93,7 @@ func TestOutcomes(t *testing.T) {
 		    {"id": "z", "kind": "transform", "expr": "3"}, {"id": "t", "kind": "transform", "expr": "4"}],
 		  "edges": [{"from": "in", "to": "a", "when": "false"}, {"from": "a", "to": "m"}, {"from": "in", "to": "m"},
 		    {"from": "m", "to": "t"}, {"from": "check", "to": "t", "on": 200}, {"from": "z", "to": "t"}],
-		  "response": {"answers": [{"status": 500, "from": "check", "unhandled": true}]}}`,
+		  "response": {"answers": [{"status": 500, "lines": [{"from": "check", "unhandled": true}]}]}}`,
 			"t", "a [0] conditional, check [-1 200 404], in [0], m [0], z [0]",
 		},
 		// r needs its required line, which may not come, so r may not either.

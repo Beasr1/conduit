@@ -196,13 +196,19 @@ export const RESPONSE = "#response";
 // A node component finds what to draw through data.index, its place in
 // definition.nodes, and an edge's panel through its place in
 // definition.edges. The response card isn't a node of the definition, nor
-// a line into it an edge: their index is -1, and a line's answer is its
-// place in the response's answers, as is its point's id on the card.
+// a line into it an edge: their index is -1, a line's answer is its place
+// in the response's answers, as is its point's id on the card, and line is
+// its place in the answer's lines.
 export type FlowNode = Node<
   { index: number },
   "http" | "transform" | "unknown" | "response"
 >;
-export type FlowEdge = Edge<{ index: number; answer?: number; way?: boolean }>;
+export type FlowEdge = Edge<{
+  index: number;
+  answer?: number;
+  line?: number;
+  way?: boolean;
+}>;
 
 export interface Flow {
   nodes: FlowNode[];
@@ -292,22 +298,26 @@ export function toFlow(definition: Definition): Flow {
       data: { index: i },
     };
   });
-  // Each answer's line is drawn once its step and the output it leaves on
-  // are there, into the answer's own point, and the layout leaves it out:
+  // Each line into an answer is drawn once its step and the output it leaves
+  // on are there, into the answer's own point, and the layout leaves it out:
   // the card isn't laid out with the steps, but put after them.
   for (const [k, a] of (definition.response?.answers ?? []).entries()) {
-    const source = a.from === undefined ? undefined : keyOf.get(a.from);
-    if (a.from === undefined || source === undefined) continue;
-    const handle = handleOf(a, nodeOf.get(a.from));
-    if (handle === undefined) continue;
-    edges.push({
-      id: `${source}->${RESPONSE}:${k}`,
-      source,
-      target: RESPONSE,
-      sourceHandle: handle,
-      targetHandle: String(k),
-      data: { index: -1, answer: k },
-    });
+    for (const [j, l] of (a.lines ?? []).entries()) {
+      const source = keyOf.get(l.from);
+      const handle = handleOf(l, nodeOf.get(l.from));
+      if (source === undefined || handle === undefined) continue;
+      const id = `${source}->${RESPONSE}:${k}`;
+      const seen = repeats.get(id) ?? 0;
+      repeats.set(id, seen + 1);
+      edges.push({
+        id: seen === 0 ? id : `${id}#${seen}`,
+        source,
+        target: RESPONSE,
+        sourceHandle: handle,
+        targetHandle: String(k),
+        data: { index: -1, answer: k, line: j },
+      });
+    }
   }
   return { nodes, edges, undrawn };
 }

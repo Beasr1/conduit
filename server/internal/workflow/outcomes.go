@@ -86,8 +86,10 @@ func outputsOf(d *Definition, edges []edgeRef) [][]int {
 	}
 	if r := d.Response; r != nil {
 		for _, a := range r.Answers {
-			if j := slices.IndexFunc(d.Nodes, func(n Node) bool { return n.ID == a.From }); j >= 0 && a.Unhandled {
-				catches[j] = true
+			for _, l := range a.Lines {
+				if j := slices.IndexFunc(d.Nodes, func(n Node) bool { return n.ID == l.From }); j >= 0 && l.Unhandled {
+					catches[j] = true
+				}
 			}
 		}
 	}

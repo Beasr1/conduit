@@ -1,12 +1,8 @@
 import { useState } from "react";
 
+import { Hint } from "@/components/hint";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { setField } from "@/features/editor/edits";
 import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
@@ -23,7 +19,7 @@ import { useEditor, useEditorStore } from "@/features/editor/store";
 // makes of the text is applied once it counts, as a JSON Schema does once
 // it's an object. Until then, the stored value stays and the field says why.
 // Nothing typed is eaten, since the field keeps its own text. problems are
-// the server's, about the value held.
+// the server's, about the value held. What it's for is a hint (plan 13).
 export function JsonText<T>({
   id,
   label,
@@ -56,7 +52,10 @@ export function JsonText<T>({
   return (
     <Field data-invalid={said.length > 0}>
       <div className="flex items-center justify-between gap-2">
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
+        <div className="flex items-center gap-1">
+          <FieldLabel htmlFor={id}>{label}</FieldLabel>
+          <Hint about={label}>{description}</Hint>
+        </div>
         <Button
           type="button"
           variant="ghost"
@@ -77,7 +76,6 @@ export function JsonText<T>({
         onChange={(e) => change(e.target.value)}
       />
       <FieldError errors={said} />
-      <FieldDescription>{description}</FieldDescription>
     </Field>
   );
 }

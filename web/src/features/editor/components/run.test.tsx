@@ -229,7 +229,7 @@ test("Run starts the run with its input, and the canvas follows it to its end", 
 test("the response card marks the answer the run gave, and its panel shows it", async () => {
   renderEditor({
     ...branched,
-    response: { answers: [{ status: 201, from: "create_user" }] },
+    response: { answers: [{ status: 201, lines: [{ from: "create_user" }] }] },
   });
   serveRun({ ...ended, answered: 201, output: { id: "10" } });
   await run();
@@ -261,7 +261,7 @@ test("the response card marks the answer the run gave, and its panel shows it", 
 test("a line into the response that a run didn't reach is dashed", async () => {
   renderEditor({
     ...branched,
-    response: { answers: [{ status: 200, from: "orders" }] },
+    response: { answers: [{ status: 200, lines: [{ from: "orders" }] }] },
   });
   serveRun({
     ...ended,
@@ -286,8 +286,8 @@ test("of two answers a step gives, the line into the one the run didn't give is 
     ...branched,
     response: {
       answers: [
-        { status: 200, from: "create_user" },
-        { status: 201, from: "create_user" },
+        { status: 200, lines: [{ from: "create_user" }] },
+        { status: 201, lines: [{ from: "create_user" }] },
       ],
     },
   });
@@ -548,8 +548,8 @@ test("a run that failed, answered by the response's Unhandled, marks that and no
   renderEditor({
     ...branched,
     response: {
-      answers: [{ status: 502, from: "create_user" }],
-      unhandled: { body: "{ 'error': error.code }" },
+      answers: [{ status: 502, lines: [{ from: "create_user" }] }],
+      errors: { body: "{ 'error': error.code }" },
     },
   });
   serveRun({
@@ -570,7 +570,7 @@ test("a run that failed, answered by the response's Unhandled, marks that and no
   await waitFor(() =>
     expect(
       within(card).getByText(", the answer it gave").parentElement?.textContent,
-    ).toBe("Unhandled · your body, the answer it gave"),
+    ).toBe("Unhandled · your error body, the answer it gave"),
   );
   // create_user answered on the line into 502, but the run failed: it
   // took no answer's line.

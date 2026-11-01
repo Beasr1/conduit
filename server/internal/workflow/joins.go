@@ -28,14 +28,13 @@ type conflict struct {
 // every line into it was taken (plan 04, strict joins), and a transform if
 // every required one was and, with none required, any was. edges have no
 // cycle.
-func (v *validator) checkJoins(d *Definition, edges []edgeRef) []route {
+func (v *validator) checkJoins(d *Definition, edges []edgeRef) {
 	in, order := graphOf(len(d.Nodes), edges)
 	need, conflicts := needs(d.Nodes, in, order)
 	for _, c := range conflicts {
 		v.add(fmt.Sprintf("/nodes/%d", c.node), "never_runs", "%s can never run: %s", d.Nodes[c.node].ID, c.words(d))
 	}
 	v.checkTaken(d, in, need)
-	return need
 }
 
 // checkTaken reports each line into a transform that can never be taken

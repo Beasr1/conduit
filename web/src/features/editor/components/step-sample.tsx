@@ -1,9 +1,9 @@
 import { useState } from "react";
 
+import { Hint } from "@/components/hint";
 import { Button } from "@/components/ui/button";
 import {
   Field,
-  FieldDescription,
   FieldError,
   FieldLabel,
   FieldLegend,
@@ -112,9 +112,21 @@ export function StepSample({
   }
 
   return (
-    <FieldSet className="gap-3">
+    // The legend isn't the fieldset's first child, which is what names a
+    // group, so it's named by reference.
+    <FieldSet className="gap-3" aria-labelledby={`${at}-legend`}>
       <div className="flex items-center justify-between gap-2">
-        <FieldLegend variant="label">{title} response</FieldLegend>
+        <div className="flex items-center gap-1">
+          <FieldLegend id={`${at}-legend`} variant="label">
+            When it answers {title}
+          </FieldLegend>
+          <Hint about={`the ${title} sample`}>
+            A sample of what the API answers
+            {status === undefined ? " when it succeeds" : ` with ${status}`}:
+            previews read it, runs don&apos;t. It&apos;s saved in every
+            revision, so make it up or redact it.
+          </Hint>
+        </div>
         {status !== undefined && (
           <Button
             type="button"
@@ -127,14 +139,6 @@ export function StepSample({
           </Button>
         )}
       </div>
-      <FieldDescription>
-        A sample of what the API answers{" "}
-        {status === undefined ? "when it succeeds" : `with ${status}`}: previews
-        read it in place of a real response, and runs ignore it. It&apos;s saved
-        in every revision, so make it up or redact it.
-        {status !== undefined &&
-          " Removing the response removes the connections that leave on it."}
-      </FieldDescription>
       <FieldError errors={asErrors(found)} />
       <Field data-invalid={said.body.length > 0}>
         <div className="flex items-center justify-between gap-2">
@@ -165,9 +169,6 @@ export function StepSample({
           onChange={(e) => change("body", e.target.value)}
         />
         <FieldError errors={said.body} />
-        <FieldDescription>
-          JSON. Empty means no sample, and null an empty body.
-        </FieldDescription>
       </Field>
       {status === undefined && (
         <Field data-invalid={said.status.length > 0}>

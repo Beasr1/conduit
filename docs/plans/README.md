@@ -18,3 +18,6 @@ lives as a row in 00-roadmap.md.
 | 09 | later | Redis cache, cron triggers, durable runs, loops; other step types (database, queue, script, SOAP/XML, gRPC) | parked |
 | 10 | jsonata-editing | a JSONata language package for CodeMirror 6, then the editor uses it; comes after 04 and before 08 | not started |
 | 11 | 11-visual-design.md | the look: calm, precise and simple, with the emphasis on the canvas and the data | brief taken 2026-10-28; starts when 04 is done, before 05 and 10 |
+| 12 | 12-strengthening.md | no loose ends: every way a run goes reaches an answer, every step's failures go where someone chose, one shape for errors | accepted 2026-11-01; built with 13's editor, the browser test deciding each step's failures before Publish: **done** (2026-11-02) |
+| 13 | 13-minimal-editor.md | the editor says only what a field is: two rows of tabs on a step, bare lines and card, a short tour and one-line hints | accepted 2026-11-01; built with 12's editor parts, its panels from 110–436 words down to 14–82, the tour checked in Chromium: **done** (2026-11-02) |
+| 14 | 14-the-response-picks.md | one exit, with nothing to add: an answer takes lines from any number of steps, and a run gives the first, top to bottom, that one reached | accepted and built 2026-11-02 |

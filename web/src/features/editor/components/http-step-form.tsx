@@ -9,12 +9,12 @@ import {
   useWatch,
 } from "react-hook-form";
 
+import { Hint } from "@/components/hint";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Field,
   FieldContent,
-  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -29,6 +29,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Marked } from "@/features/editor/components/problem-mark";
 import { StepBody } from "@/features/editor/components/step-body";
 import { updateNode } from "@/features/editor/edits";
 import {
@@ -46,15 +48,20 @@ import {
   atStep,
   useProblems,
 } from "@/features/editor/hooks/use-problems";
+import type { Place } from "@/features/editor/problems";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 
 // HttpStepForm edits an http step's request: where it goes, what it
 // sends, and how. Each change goes into the draft as it's made, and the
 // canvas follows. The body isn't this form's: StepBody edits it, beside the
-// data it reads, so each field is edited in one place.
+// data it reads, so each field is edited in one place. Its parts are a tab
+// each (plan 13), the open one the editor's, so the problem list can open
+// a field's; each stays mounted, so what's typed survives a switch.
 export function HttpStepForm({ index }: { index: number }) {
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
+  const tab = useEditor((s) => s.requestTab);
+  const setTab = useEditor((s) => s.setRequestTab);
   const [defaultValues] = useState(() =>
     toRequestValues(editor.getState().draft.nodes[index]?.request),
   );
@@ -96,121 +103,171 @@ export function HttpStepForm({ index }: { index: number }) {
   const attempts = useWatch({ control: form.control, name: "attempts" });
   const retries =
     typeof whole(attempts, MIN_ATTEMPTS, MAX_ATTEMPTS) === "number";
+  const at =
+    (...fields: string[]) =>
+    (p: Place) =>
+      p.on === "step" && p.index === index && fields.includes(p.field ?? "");
 
   return (
-    <FieldGroup className="gap-5">
-      <Field data-invalid={said.url.length > 0}>
-        <FieldLabel htmlFor="step-url">URL</FieldLabel>
-        <div className="flex gap-2">
-          <Controller
-            control={form.control}
-            name="method"
-            render={({ field }) => (
-              <Select
-                value={field.value}
-                onValueChange={(method) => field.onChange(method)}
-              >
-                <SelectTrigger
-                  id="step-method"
-                  aria-label="Method"
-                  aria-invalid={found.method.length > 0}
-                  className="font-mono"
+    <Tabs value={tab} onValueChange={(value: string) => setTab(value)}>
+      <TabsList
+        aria-label="Request"
+        activateOnFocus
+        className="flex-wrap group-data-horizontal/tabs:h-auto [&>[data-slot=tabs-trigger]]:h-auto"
+      >
+        <TabsTrigger value="url">
+          URL
+          <Marked where={at("method", "url")} />
+        </TabsTrigger>
+        <TabsTrigger value="headers">
+          Headers
+          <Marked where={at("headers")} />
+        </TabsTrigger>
+        <TabsTrigger value="query">
+          Query
+          <Marked where={at("query")} />
+        </TabsTrigger>
+        <TabsTrigger value="body">
+          Body
+          <Marked where={at("body")} />
+        </TabsTrigger>
+        <TabsTrigger value="retry">
+          Retry
+          <Marked where={at("timeout", "attempts", "idempotent")} />
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="url" keepMounted>
+        <Field data-invalid={said.url.length > 0}>
+          <div className="flex items-center gap-1">
+            <FieldLabel htmlFor="step-url">URL</FieldLabel>
+            <Hint about="URL">
+              Absolute, http or https. {"{{ }}"} holds JSONata, in the path and
+              query only.
+            </Hint>
+          </div>
+          <div className="flex gap-2">
+            <Controller
+              control={form.control}
+              name="method"
+              render={({ field }) => (
+                <Select
+                  value={field.value}
+                  onValueChange={(method) => field.onChange(method)}
                 >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {METHODS.map((m) => (
-                    <SelectItem key={m} value={m} className="font-mono">
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          />
-          <Input
-            id="step-url"
-            className="font-mono"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="https://api.example.com/v1/users"
-            aria-invalid={found.url.length > 0}
-            {...form.register("url")}
-          />
-        </div>
-        <FieldError errors={said.url} />
-        <FieldDescription>
-          Absolute, http or https. {"{{ }}"} holds JSONata, in the path and
-          query only.
-        </FieldDescription>
-      </Field>
-      <Rows
-        form={form}
-        index={index}
-        name="headers"
-        noun="Header"
-        legend="Headers"
-      />
-      <Rows
-        form={form}
-        index={index}
-        name="query"
-        noun="Parameter"
-        legend="Query"
-      />
-      <StepBody index={index} />
-      <div className="grid grid-cols-2 gap-3">
-        <Field data-invalid={said.timeout.length > 0}>
-          <FieldLabel htmlFor="step-timeout">Timeout (ms)</FieldLabel>
-          <Input
-            id="step-timeout"
-            inputMode="numeric"
-            placeholder="30000"
-            aria-invalid={said.timeout.length > 0}
-            {...form.register("timeout")}
-          />
-          <FieldError errors={said.timeout} />
-          <FieldDescription>For each attempt.</FieldDescription>
-        </Field>
-        <Field data-invalid={said.attempts.length > 0}>
-          <FieldLabel htmlFor="step-attempts">Attempts</FieldLabel>
-          <Input
-            id="step-attempts"
-            inputMode="numeric"
-            placeholder="1"
-            aria-invalid={said.attempts.length > 0}
-            {...form.register("attempts")}
-          />
-          <FieldError errors={said.attempts} />
-          <FieldDescription>
-            The first included. Retries follow timeouts, transport errors, 429
-            and 5xx.
-          </FieldDescription>
-        </Field>
-      </div>
-      <Field orientation="horizontal" data-disabled={!retries}>
-        <Controller
-          control={form.control}
-          name="idempotent"
-          render={({ field }) => (
-            <Checkbox
-              id="step-idempotent"
-              checked={field.value}
-              disabled={!retries}
-              onCheckedChange={(on) => field.onChange(on)}
+                  <SelectTrigger
+                    id="step-method"
+                    aria-label="Method"
+                    aria-invalid={found.method.length > 0}
+                    className="font-mono"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {METHODS.map((m) => (
+                      <SelectItem key={m} value={m} className="font-mono">
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             />
-          )}
+            <Input
+              id="step-url"
+              className="font-mono"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="https://api.example.com/v1/users"
+              aria-invalid={found.url.length > 0}
+              {...form.register("url")}
+            />
+          </div>
+          <FieldError errors={said.url} />
+        </Field>
+      </TabsContent>
+      <TabsContent value="headers" keepMounted>
+        <Rows
+          form={form}
+          index={index}
+          name="headers"
+          noun="Header"
+          legend="Headers"
         />
-        <FieldContent>
-          <FieldLabel htmlFor="step-idempotent">Idempotent</FieldLabel>
-          <FieldDescription>
-            The upstream treats a repeat as one request, so POST and PATCH are
-            retried too, with an Idempotency-Key header.
-          </FieldDescription>
-          <FieldError errors={said.idempotent} />
-        </FieldContent>
-      </Field>
-    </FieldGroup>
+      </TabsContent>
+      <TabsContent value="query" keepMounted>
+        <Rows
+          form={form}
+          index={index}
+          name="query"
+          noun="Parameter"
+          legend="Query"
+        />
+      </TabsContent>
+      <TabsContent value="body" keepMounted className="flex flex-col gap-5">
+        <StepBody index={index} />
+      </TabsContent>
+      <TabsContent value="retry" keepMounted>
+        <FieldGroup className="gap-5">
+          <div className="grid grid-cols-2 gap-3">
+            <Field data-invalid={said.timeout.length > 0}>
+              <div className="flex items-center gap-1">
+                <FieldLabel htmlFor="step-timeout">Timeout (ms)</FieldLabel>
+                <Hint about="Timeout">For each attempt.</Hint>
+              </div>
+              <Input
+                id="step-timeout"
+                inputMode="numeric"
+                placeholder="30000"
+                aria-invalid={said.timeout.length > 0}
+                {...form.register("timeout")}
+              />
+              <FieldError errors={said.timeout} />
+            </Field>
+            <Field data-invalid={said.attempts.length > 0}>
+              <div className="flex items-center gap-1">
+                <FieldLabel htmlFor="step-attempts">Attempts</FieldLabel>
+                <Hint about="Attempts">
+                  The first included. Retries follow timeouts, transport errors,
+                  429 and 5xx.
+                </Hint>
+              </div>
+              <Input
+                id="step-attempts"
+                inputMode="numeric"
+                placeholder="1"
+                aria-invalid={said.attempts.length > 0}
+                {...form.register("attempts")}
+              />
+              <FieldError errors={said.attempts} />
+            </Field>
+          </div>
+          <Field orientation="horizontal" data-disabled={!retries}>
+            <Controller
+              control={form.control}
+              name="idempotent"
+              render={({ field }) => (
+                <Checkbox
+                  id="step-idempotent"
+                  checked={field.value}
+                  disabled={!retries}
+                  onCheckedChange={(on) => field.onChange(on)}
+                />
+              )}
+            />
+            <FieldContent>
+              <div className="flex items-center gap-1">
+                <FieldLabel htmlFor="step-idempotent">Idempotent</FieldLabel>
+                <Hint about="Idempotent">
+                  The upstream treats a repeat as one request, so POST and PATCH
+                  are retried too, with an Idempotency-Key header.
+                </Hint>
+              </div>
+              <FieldError errors={said.idempotent} />
+            </FieldContent>
+          </Field>
+        </FieldGroup>
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -248,7 +305,10 @@ function Rows({
   const lower = noun.toLowerCase();
   return (
     <FieldSet className="gap-2">
-      <FieldLegend variant="label">{legend}</FieldLegend>
+      {/* The tab says it; the legend names the rows for a screen reader. */}
+      <FieldLegend variant="label" className="sr-only">
+        {legend}
+      </FieldLegend>
       <FieldError errors={asErrors(homeless)} />
       {fields.map((row, i) => {
         const mine = first(i) ? named(rows[i]?.name ?? "") : [];

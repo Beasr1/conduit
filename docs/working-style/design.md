@@ -72,8 +72,8 @@ any checklist, this file included.
 
 - Name things the way users would. Text on screen says "step" and
   "connection"; code, the API and expressions say "node" and "edge"
-  (`nodes.crm.body`), and wherever an expression is written, the screen
-  explains that once. A step's outputs are its "responses" on screen, each
+  (`nodes.crm.body`), and a step's id shows once how expressions read it,
+  `nodes.crm`, in the code font. A step's outputs are its "responses" on screen, each
   named by its status, `2xx` or `404`; "the response" alone is the card the
   workflow answers with. On the canvas a step is blocks: its request, and a
   block per response.
@@ -82,6 +82,12 @@ any checklist, this file included.
   Docs and code comments say it the same way.
 - Say which way data goes. A body or headers field sits under Request or
   Response, never on its own: a step's "Body" alone was read both ways.
+- Labels, not sentences. A field's label says what it is; what it's for is
+  a hint behind ⓘ beside it, a line or two, there when asked for; how the
+  editor works is the tour's, offered once. Someone who knows what a
+  request is shouldn't read past a paragraph to find a field (plan 13).
+- A status is a condition, so a response's tab leads with it: "When it
+  answers 404", then what follows runs.
 - A button says what it does ("Save", "Publish", "Run"), and what follows
   uses the same word ("Saved", "Published").
 - An error says what happened and how to fix it. It doesn't apologise.

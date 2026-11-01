@@ -159,9 +159,7 @@ test("a response lists the connections that leave on it, each opening its line",
   const panel = await screen.findByRole("complementary", {
     name: "Connection",
   });
-  expect(within(panel).getByText(/^From/).textContent).toBe(
-    "From user, on 404, to crm.",
-  );
+  expect(within(panel).getByText("user 404 → crm")).toBeTruthy();
 });
 
 test("Connect to joins a step on a response, without drawing", async () => {
@@ -190,10 +188,7 @@ test("a transform step lists its connections and connects too", async () => {
   });
   await open("merge");
   // Nothing follows its value, nor its Unhandled.
-  expect(screen.getAllByText(/^None yet/).map((p) => p.textContent)).toEqual([
-    "None yet: connect a step below, or drag from its point on the canvas to the step.",
-    "None yet: connect a step below, or drag from its Unhandled point on the canvas to the step.",
-  ]);
+  expect(screen.getAllByText("None yet.")).toHaveLength(2);
   await choose("Connect to", "crm");
   expect(await screen.findByTestId("rf__edge-merge->crm")).toBeTruthy();
   expect(

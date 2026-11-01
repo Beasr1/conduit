@@ -4,31 +4,36 @@ No-code API orchestration. Users compose upstream API calls into a DAG,
 using a graph editor or a page-by-page builder, and map data between steps
 with JSONata. A Go engine runs it, fanning out in parallel.
 
-**Status: plan 04, the graph editor, is done (2026-11-01): its browser
-test, the Done flow, runs in `just check`. Next: your call between plan 11,
-the visual design, which the plans index puts next, and plan 07.** The web
-app signs in
-with a session cookie, which sign-out or 30 minutes unused ends, lists
-workflows and creates them, and edits, checks, saves and publishes one in graph mode,
-previewing what each step reads and sends over sample data, branching on
-the status a step gets back, and running it with an input, followed live
-on the canvas. A step is drawn as its request and a block per response,
-and a click opens that part. Each answer on the response card takes one
-line, from the step that gives it. A transform's cases are its exits, a
-tab each with its condition, JSONata and status: the first that holds
-answers as an HTTP step does, down its own lines, and none holding fails
-the step into its Unhandled. Unhandled answers a run that gives none. A step's own
-Unhandled block takes its failures, giving a body you write if you write
-one, and the run goes on down its line. An HTTP step runs only when every
-line into it is taken; a transform waits for them all too, and runs if
-every line marked required came and, with none marked, any did, its
-expression making its value from what did. Its preview is a run by each
-line into it, its required ones coming first, over what those runs read,
-merged, and every
-Input tags a step a run may come without, or that may answer more than
-one way. A run records the lines each step's answer took.
-What was built, and why, is in docs/plans/04-graph-editor.md; the bigger
-picture is docs/plans/README.md.
+**Status: plans 12, 13 and 14 are built (2026-11-02), on plan 04's graph
+editor: Publish waits until every way a run can go reaches an answer and
+every step's failures are decided, every error is answered in one shape,
+the response picks its answer top to bottom, and the editor says only what
+a field is, with a short tour and one-line hints. Next: your call between
+plan 11, the visual design, and plan 07.**
+The web app signs in with a session cookie, which sign-out or 30 minutes
+unused ends, lists workflows and creates them, and edits, checks, saves
+and publishes one in graph mode, previewing what each step reads and sends
+over sample data, branching on the status a step gets back, and running it
+with an input, followed live on the canvas. A step is drawn as its request
+and a block per response, and a click opens that part, under two rows of
+tabs. Each answer on the response card takes lines from any number of
+steps, and a run gives the first answer, top to bottom, that one reached. A
+transform's cases are its exits, a tab each with its
+condition, JSONata and status: the first that holds answers as an HTTP
+step does, down its own lines, and none holding fails the step into its
+Unhandled. A step's Unhandled block takes its failures, giving a body you
+write if you write one, and the run goes on down its line; or the step
+fails the run, as chosen. The error body, problem details unless you write
+one, answers a run that gives none, and an answer passing an error on. An
+HTTP step runs only when every line into it is taken; a transform waits
+for them all too, and runs if every line marked required came and, with
+none marked, any did, its expression making its value from what did. Its
+preview is a run by each line into it, over what those runs read, merged,
+and every Input tags a step a run may come without, or that may answer
+more than one way. A run records the lines each step's answer took. What
+was built, and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
+13-minimal-editor.md and 14-the-response-picks.md; the bigger picture is
+docs/plans/README.md.
 
 ## Read before working
 

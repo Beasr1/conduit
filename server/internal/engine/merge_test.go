@@ -43,7 +43,7 @@ func TestRun_ATransformMergesItsLines(t *testing.T) {
 	    {"from": "fallback", "to": "prefs_ok"},
 	    {"from": "prefs_ok", "to": "greet"}
 	  ],
-	  "response": {"answers": [{"status": 200, "from": "greet"}]}
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "greet"}]}]}
 	}`)
 	// prefs answering 2xx takes its line to prefs_ok; answering 400, its line
 	// to fallback, which takes its own to prefs_ok.

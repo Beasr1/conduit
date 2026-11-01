@@ -28,9 +28,7 @@ test("picking a connection opens its condition, and a condition labels it", asyn
   const panel = await screen.findByRole("complementary", {
     name: "Connection",
   });
-  expect(within(panel).getByText(/^From/).textContent).toBe(
-    "From prefs, on 2xx, to crm.",
-  );
+  expect(within(panel).getByText("prefs 2xx → crm")).toBeTruthy();
 
   type("Condition", "nodes.prefs.status = 200");
   expect(await screen.findByText("if")).toBeTruthy();
@@ -71,12 +69,10 @@ test("a connection says which response it leaves from, and whether it's taken", 
   const panel = await screen.findByRole("complementary", {
     name: "Connection",
   });
-  expect(within(panel).getByText(/^From/).textContent).toBe(
-    "From user, on 404, to crm.",
-  );
+  expect(within(panel).getByText("user 404 → crm")).toBeTruthy();
   expect(
     await within(panel).findByText(
-      "Not taken, so crm is skipped: it needs every connection into it.",
+      "Not taken, with these samples, so crm is skipped.",
     ),
   ).toBeTruthy();
   // What the condition reads, the connection's step open.

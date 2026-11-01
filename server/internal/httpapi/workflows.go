@@ -244,14 +244,15 @@ func pageLimit(limit int) (int, error) {
 	return limit, nil
 }
 
-// problemsOf is everything engine.Compile finds wrong with d.
+// problemsOf is everything engine.Compile finds wrong with d, and what
+// workflow.ReadyToPublish says Publish needs besides.
 func problemsOf(d *workflow.Definition) []gen.ProblemError {
 	_, err := engine.Compile(d)
 	var ps workflow.Problems
-	if !errors.As(err, &ps) {
-		return problemErrors(nil)
-	}
-	return problemErrors(ps)
+	errors.As(err, &ps)
+	// What Publish needs besides what a run does (plan 12): listed with the
+	// rest, so a save and a check say them, and Publish refuses them.
+	return problemErrors(append(ps, workflow.ReadyToPublish(d)...))
 }
 
 // problemErrors is ps as the API sends them: [] rather than null when there

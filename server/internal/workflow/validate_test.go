@@ -90,26 +90,28 @@ func TestValidate_AcceptsResponses(t *testing.T) {
 	branches := `[{"from": "user", "to": "found"}, {"from": "user", "to": "gone", "on": 404}]`
 	for name, def := range map[string]string{
 		"one answer": `{"nodes": [{"id": "respond", "kind": "transform", "expr": "1"}],
-			"response": {"answers": [{"status": 200, "from": "respond", "schema": {"type": "object"}}]}}`,
+			"response": {"answers": [{"status": 200, "lines": [{"from": "respond"}], "schema": {"type": "object"}}]}}`,
 		"one node picking among several": `{"nodes": [{"id": "respond", "kind": "transform", "expr": "1"}],
-			"response": {"answers": [{"status": 200, "from": "respond"}, {"status": 400, "from": "respond"}]}}`,
+			"response": {"answers": [{"status": 200, "lines": [{"from": "respond"}]}, {"status": 400, "lines": [{"from": "respond"}]}]}}`,
 		"each output of an http node to its own": `{"nodes": [` + branched + `],
-			"response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "on": 404}]}}`,
+			"response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}, {"status": 404, "lines": [{"from": "user", "on": 404}]}]}}`,
 		"branches one node keeps apart": `{"nodes": [` + branched + `], "edges": ` + branches + `,
-			"response": {"answers": [{"status": 200, "from": "found"}, {"status": 404, "from": "gone"}]}}`,
+			"response": {"answers": [{"status": 200, "lines": [{"from": "found"}]}, {"status": 404, "lines": [{"from": "gone"}]}]}}`,
 		"a switch's cases, each to the answer of its status": `{"nodes": [{"id": "respond", "kind": "transform",
 			"switch": {"cases": [{"name": "gone", "when": "input.id = 0", "status": 404, "body": "{ 'error': 'gone' }"}, {"when": "true", "status": 200}]}}],
-			"response": {"answers": [{"status": 200, "from": "respond", "on": 200}, {"status": 404, "from": "respond", "on": 404}]}}`,
-		"unhandled": `{"nodes": [{"id": "respond", "kind": "transform", "expr": "1"}],
-			"response": {"answers": [{"status": 200, "from": "respond"}], "unhandled": {"body": "{ 'error': error.detail }"}}}`,
+			"response": {"answers": [{"status": 200, "lines": [{"from": "respond", "on": 200}]}, {"status": 404, "lines": [{"from": "respond", "on": 404}]}]}}`,
+		"an error body": `{"nodes": [{"id": "respond", "kind": "transform", "expr": "1"}],
+			"response": {"answers": [{"status": 200, "lines": [{"from": "respond"}]}], "errors": {"body": "{ 'error': error.detail }"}}}`,
+		"a node failing the run, with no body": `{"nodes": [{"id": "respond", "kind": "transform", "expr": "1", "unhandled": {"fail": true}}],
+			"response": {"answers": [{"status": 200, "lines": [{"from": "respond"}]}]}}`,
 		"a node's Unhandled to an answer of its own": `{"nodes": [` + branched + `],
-			"response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "on": 404}, {"status": 502, "from": "user", "unhandled": true}]}}`,
+			"response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}, {"status": 404, "lines": [{"from": "user", "on": 404}]}, {"status": 502, "lines": [{"from": "user", "unhandled": true}]}]}}`,
 		"a switch's Unhandled beside its cases": `{"nodes": [{"id": "respond", "kind": "transform",
 			"switch": {"cases": [{"when": "input.id = 0", "status": 404}, {"when": "true", "status": 200}]}}],
-			"response": {"answers": [{"status": 200, "from": "respond", "on": 200}, {"status": 404, "from": "respond", "on": 404}, {"status": 500, "from": "respond", "unhandled": true}]}}`,
+			"response": {"answers": [{"status": 200, "lines": [{"from": "respond", "on": 200}]}, {"status": 404, "lines": [{"from": "respond", "on": 404}]}, {"status": 500, "lines": [{"from": "respond", "unhandled": true}]}]}}`,
 		"an edge from Unhandled, and one from 2xx, into a transform": `{"nodes": [` + branched + `, {"id": "either_way", "kind": "transform", "expr": "nodes.user"}],
 			"edges": [{"from": "user", "to": "either_way"}, {"from": "user", "to": "either_way", "unhandled": true}, {"from": "either_way", "to": "found"}, {"from": "found", "to": "gone", "unhandled": true}],
-			"response": {"answers": [{"status": 200, "from": "gone"}]}}`,
+			"response": {"answers": [{"status": 200, "lines": [{"from": "gone"}]}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -131,7 +133,7 @@ func TestValidate_CasesAreExits(t *testing.T) {
 		          {"name": "else", "when": "true", "status": 500}]}}`
 	ps := Validate(decode(t, `{"nodes": [`+check+`, {"id": "greet", "kind": "transform", "expr": "1"}, {"id": "fallback", "kind": "http", `+get+`}],
 	  "edges": [{"from": "check", "to": "greet", "on": 200}, {"from": "check", "to": "fallback", "on": 404}],
-	  "response": {"answers": [{"status": 200, "from": "greet"}, {"status": 404, "from": "fallback"}, {"status": 500, "from": "check", "on": 500}]}}`))
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "greet"}]}, {"status": 404, "lines": [{"from": "fallback"}]}, {"status": 500, "lines": [{"from": "check", "on": 500}]}]}}`))
 	if len(ps) > 0 {
 		t.Errorf("Validate() = %v, want no problems", ps)
 	}
@@ -155,7 +157,7 @@ func TestValidate_TwoAnswersInOneRun(t *testing.T) {
 		{"id": "test_400", "kind": "http", ` + get + `}, {"id": "notify", "kind": "http", ` + get + `}, {"id": "bad_400", "kind": "transform", "expr": "2"}]`
 	edges := `{"from": "people", "to": "orders"}, {"from": "people", "to": "prefs"}, {"from": "orders", "to": "crm"}, {"from": "prefs", "to": "crm"},
 		{"from": "crm", "to": "notify"}, {"from": "crm", "to": "bad_400", "on": 400}`
-	response := `{"answers": [{"status": 200, "from": "notify"}, {"status": 400, "from": "bad_400"}]}`
+	response := `{"answers": [{"status": 200, "lines": [{"from": "notify"}]}, {"status": 400, "lines": [{"from": "bad_400"}]}]}`
 	tests := []struct {
 		name, edges, want string
 	}{
@@ -211,7 +213,7 @@ func TestValidate_ATransformMerges(t *testing.T) {
 			{"id": "success_200", "kind": "transform", "expr": "nodes.prefs_ok.body"}],
 		  "edges": [{"from": "prefs", "to": "prefs_ok"}, {"from": "prefs", "to": "test_400", "on": 400},
 		            {"from": "test_400", "to": "prefs_ok"}, {"from": "prefs_ok", "to": "success_200"}],
-		  "response": {"answers": [{"status": 200, "from": "success_200"}, {"status": 502, "from": "test_400", "unhandled": true}]}}`,
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "success_200"}]}, {"status": 502, "lines": [{"from": "test_400", "unhandled": true}]}]}}`,
 		// s1 and s2 each fall back on f1 and f2 on 404, and a fallback that
 		// fails answers itself.
 		"a chain of fallbacks": `{"nodes": [
@@ -220,21 +222,21 @@ func TestValidate_ATransformMerges(t *testing.T) {
 			{"id": "done", "kind": "transform", "expr": "1"}],
 		  "edges": [{"from": "s1", "to": "e1"}, {"from": "s1", "to": "f1", "on": 404}, {"from": "f1", "to": "e1"}, {"from": "e1", "to": "s2"},
 		            {"from": "s2", "to": "e2"}, {"from": "s2", "to": "f2", "on": 404}, {"from": "f2", "to": "e2"}, {"from": "e2", "to": "done"}],
-		  "response": {"answers": [{"status": 200, "from": "done"}, {"status": 502, "from": "f1", "unhandled": true}, {"status": 503, "from": "f2", "unhandled": true}]}}`,
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "done"}]}, {"status": 502, "lines": [{"from": "f1", "unhandled": true}]}, {"status": 503, "lines": [{"from": "f2", "unhandled": true}]}]}}`,
 		// It answers itself, and its Unhandled takes its expr failing.
 		"its answer, and its Unhandled's": `{"nodes": [
 			{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "e", "kind": "transform", "expr": "nodes.a.status", "unhandled": {"body": "null"}}],
 		  "edges": [{"from": "a", "to": "e"}, {"from": "a", "to": "e", "on": 404}],
-		  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 500, "from": "e", "unhandled": true}]}}`,
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "e"}]}, {"status": 500, "lines": [{"from": "e", "unhandled": true}]}]}}`,
 		// Two ways one run can both bring are its expr's business.
 		"ways that both come": `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"},
 			{"id": "e", "kind": "transform", "expr": "[nodes.a.body, nodes.b.body]"}],
 		  "edges": [{"from": "a", "to": "e"}, {"from": "b", "to": "e"}],
-		  "response": {"answers": [{"status": 200, "from": "e"}]}}`,
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "e"}]}]}}`,
 		// Joined to two answers, it picks one.
 		"picking its answer": `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "e", "kind": "transform", "expr": "{ 'status': 201 }"}],
 		  "edges": [{"from": "a", "to": "e"}],
-		  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 201, "from": "e"}]}}`,
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "e"}]}, {"status": 201, "lines": [{"from": "e"}]}]}}`,
 		// success_200 answers by crm or, prefs answering 400, by test_400,
 		// and bad_400, by crm's 400, stays apart from both.
 		"either way to one answer, another kept apart": `{"nodes": [
@@ -244,7 +246,7 @@ func TestValidate_ATransformMerges(t *testing.T) {
 		  "edges": [{"from": "people", "to": "orders"}, {"from": "people", "to": "prefs"}, {"from": "orders", "to": "crm"}, {"from": "prefs", "to": "crm"},
 		            {"from": "prefs", "to": "test_400", "on": 400}, {"from": "crm", "to": "success_200"}, {"from": "test_400", "to": "success_200"},
 		            {"from": "crm", "to": "bad_400", "on": 400}],
-		  "response": {"answers": [{"status": 200, "from": "success_200"}, {"status": 400, "from": "bad_400"}]}}`,
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "success_200"}]}, {"status": 400, "lines": [{"from": "bad_400"}]}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -271,15 +273,16 @@ func TestValidate_RequiredLines(t *testing.T) {
 		{
 			"one required, one not", `{"nodes": [` + nodes + `],
 			  "edges": [{"from": "a", "to": "t", "required": true}, {"from": "b", "to": "t"}],
-			  "response": {"answers": [{"status": 200, "from": "t"}, {"status": 404, "from": "a", "on": 404}]}}`,
+			  "response": {"answers": [{"status": 200, "lines": [{"from": "t"}]}, {"status": 404, "lines": [{"from": "a", "on": 404}]}]}}`,
 			"",
 		},
 		{
-			// Neither required, t can come by b alone, with a's 404.
+			// Neither required, t can come by b alone, with a's 404: a run
+			// that reaches both answers gives the first, 200 (plan 14).
 			"none required", `{"nodes": [` + nodes + `],
 			  "edges": [{"from": "a", "to": "t"}, {"from": "b", "to": "t"}],
-			  "response": {"answers": [{"status": 200, "from": "t"}, {"status": 404, "from": "a", "on": 404}]}}`,
-			"/response/answers/1/from overlap: 200 (t) and 404 (a) can both be reached in one run: join both to one transform, which picks the answer",
+			  "response": {"answers": [{"status": 200, "lines": [{"from": "t"}]}, {"status": 404, "lines": [{"from": "a", "on": 404}]}]}}`,
+			"",
 		},
 		{
 			// t runs only after a's 2xx, so c, after a's 404, never comes to it.
@@ -340,15 +343,15 @@ func TestValidate_ATransformsRoute(t *testing.T) {
 		{
 			"a way that needs nothing of a", `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"}, {"id": "e", "kind": "transform", "expr": "1"}],
 			  "edges": [{"from": "a", "to": "e"}, {"from": "b", "to": "e"}],
-			  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 404, "from": "a", "on": 404}]}}`,
-			"/response/answers/1/from overlap: 200 (e) and 404 (a) can both be reached in one run: join both to one transform, which picks the answer",
+			  "response": {"answers": [{"status": 200, "lines": [{"from": "e"}]}, {"status": 404, "lines": [{"from": "a", "on": 404}]}]}}`,
+			"",
 		},
 		{
 			"ways that never come", `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"},
 			    {"id": "c", "kind": "transform", "expr": "2"}, {"id": "d", "kind": "http", ` + get + `}, {"id": "e", "kind": "transform", "expr": "4"}, {"id": "f", "kind": "transform", "expr": "5"}],
 			  "edges": [{"from": "a", "to": "b"}, {"from": "a", "to": "c", "on": 404}, {"from": "a", "to": "d"}, {"from": "c", "to": "d"},
 			            {"from": "b", "to": "e"}, {"from": "d", "to": "e"}, {"from": "d", "to": "f"}],
-			  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 404, "from": "a", "on": 404}, {"status": 201, "from": "f"}]}}`,
+			  "response": {"answers": [{"status": 200, "lines": [{"from": "e"}]}, {"status": 404, "lines": [{"from": "a", "on": 404}]}, {"status": 201, "lines": [{"from": "f"}]}]}}`,
 			"/nodes/3 never_runs: d can never run: it needs a to answer 2xx and 404",
 		},
 	}
@@ -640,22 +643,27 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 		{
 			name: "an answer no node is joined to",
 			def:  `{"nodes": [], "response": {"answers": [{"status": 200}]}}`,
-			want: []string{"/response/answers/0/from required"},
+			want: []string{"/response/answers/0/lines required"},
+		},
+		{
+			name: "a line that leaves no node",
+			def:  `{"nodes": [], "response": {"answers": [{"status": 200, "lines": [{"from": ""}]}]}}`,
+			want: []string{"/response/answers/0/lines/0/from required"},
 		},
 		{
 			name: "an answer from a node that doesn't exist",
-			def:  `{"nodes": [], "response": {"answers": [{"status": 200, "from": "zz"}]}}`,
-			want: []string{"/response/answers/0/from unknown_node"},
+			def:  `{"nodes": [], "response": {"answers": [{"status": 200, "lines": [{"from": "zz"}]}]}}`,
+			want: []string{"/response/answers/0/lines/0/from unknown_node"},
 		},
 		{
 			name: "an answer on an output its node doesn't have",
-			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `}], "response": {"answers": [{"status": 404, "from": "a", "on": 404}]}}`,
-			want: []string{"/response/answers/0/on unknown_output"},
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `}], "response": {"answers": [{"status": 404, "lines": [{"from": "a", "on": 404}]}]}}`,
+			want: []string{"/response/answers/0/lines/0/on unknown_output"},
 		},
 		{
 			name: "an answer naming a transform's output",
-			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "from": "a", "on": 404}]}}`,
-			want: []string{"/response/answers/0/on not_allowed"},
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "lines": [{"from": "a", "on": 404}]}]}}`,
+			want: []string{"/response/answers/0/lines/0/on not_allowed"},
 		},
 		{
 			name: "a response with no answers",
@@ -664,44 +672,57 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 		},
 		{
 			name: "an answer with no status",
-			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"from": "a"}]}}`,
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"lines": [{"from": "a"}]}]}}`,
 			want: []string{"/response/answers/0/status required"},
 		},
 		{
 			name: "an answer's status outside 200 to 599",
-			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 99, "from": "a"}]}}`,
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 99, "lines": [{"from": "a"}]}]}}`,
 			want: []string{"/response/answers/0/status invalid_status"},
 		},
 		{
 			name: "two answers with one status",
-			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "from": "a"}, {"status": 200, "from": "a"}]}}`,
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 200, "lines": [{"from": "a"}]}]}}`,
 			want: []string{"/response/answers/1/status duplicate_answer"},
 		},
 		{
+			// The first answer always wins, so the second is never given.
 			name: "one output of an http node joined to two answers",
-			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `}], "response": {"answers": [{"status": 200, "from": "a"}, {"status": 201, "from": "a"}]}}`,
-			want: []string{"/response/answers/1/from not_allowed"},
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `}], "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 201, "lines": [{"from": "a"}]}]}}`,
+			want: []string{"/response/answers/1/lines/0/from dead_line"},
 		},
 		{
-			name: "two answers one run could both reach",
+			name: "one output joined twice to one answer",
+			def:  `{"nodes": [{"id": "a", "kind": "http", ` + get + `}], "response": {"answers": [{"status": 200, "lines": [{"from": "a"}, {"from": "a"}]}]}}`,
+			want: []string{"/response/answers/0/lines/1/from duplicate_line"},
+		},
+		{
+			// A run that reaches both gives the first (plan 14).
+			name: "two answers one run can both reach",
 			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}, {"id": "c", "kind": "transform", "expr": "3"}],
 			       "edges": [{"from": "a", "to": "b"}, {"from": "a", "to": "c", "when": "false"}],
-			       "response": {"answers": [{"status": 200, "from": "b"}, {"status": 400, "from": "c"}]}}`,
-			want: []string{"/response/answers/1/from overlap"},
+			       "response": {"answers": [{"status": 200, "lines": [{"from": "b"}]}, {"status": 400, "lines": [{"from": "c"}]}]}}`,
+		},
+		{
+			// Every failure into one answer, from any number of nodes.
+			name: "an answer with lines from several nodes",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}],
+			       "edges": [{"from": "a", "to": "b"}],
+			       "response": {"answers": [{"status": 500, "lines": [{"from": "a", "unhandled": true}, {"from": "b", "unhandled": true}]}, {"status": 200, "lines": [{"from": "b"}]}]}}`,
 		},
 		{
 			name: "a case's exit joined to the answer of another status",
 			def: `{"nodes": [{"id": "a", "kind": "transform", "switch": {"cases": [{"when": "true", "status": 404}, {"when": "true", "status": 200}]}}],
-			       "response": {"answers": [{"status": 200, "from": "a", "on": 404}, {"status": 404, "from": "a", "on": 200}]}}`,
-			want: []string{"/response/answers/0/from other_status", "/response/answers/1/from other_status"},
+			       "response": {"answers": [{"status": 200, "lines": [{"from": "a", "on": 404}]}, {"status": 404, "lines": [{"from": "a", "on": 200}]}]}}`,
+			want: []string{"/response/answers/0/lines/0/from other_status", "/response/answers/1/lines/0/from other_status"},
 		},
 		{
 			name: "lines from a switch naming no case, or a status none gives",
 			def: `{"nodes": [{"id": "a", "kind": "transform", "switch": {"cases": [{"when": "true", "status": 404}, {"when": "true", "status": 200}]}},
 			                 {"id": "b", "kind": "transform", "expr": "1"}, {"id": "c", "kind": "transform", "expr": "2"}],
 			       "edges": [{"from": "a", "to": "b"}, {"from": "a", "to": "c", "on": 418}],
-			       "response": {"answers": [{"status": 404, "from": "a"}, {"status": 418, "from": "a", "on": 418}]}}`,
-			want: []string{"/edges/0/on required", "/edges/1/on unknown_output", "/response/answers/0/on required", "/response/answers/1/on unknown_output"},
+			       "response": {"answers": [{"status": 404, "lines": [{"from": "a"}]}, {"status": 418, "lines": [{"from": "a", "on": 418}]}]}}`,
+			want: []string{"/edges/0/on required", "/edges/1/on unknown_output", "/response/answers/0/lines/0/on required", "/response/answers/1/lines/0/on unknown_output"},
 		},
 		{
 			name: "three cases with one status, and a switch with none",
@@ -729,27 +750,27 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 			name: "answers from a loop",
 			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}],
 			       "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "a"}],
-			       "response": {"answers": [{"status": 200, "from": "a"}, {"status": 400, "from": "b"}]}}`,
+			       "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 400, "lines": [{"from": "b"}]}]}}`,
 			want: []string{"/edges/0 cycle", "/edges/1 cycle"},
 		},
 		{
-			name: "unhandled with no body",
-			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "from": "a"}], "unhandled": {"body": " "}}}`,
-			want: []string{"/response/unhandled/body required"},
+			name: "an error body with no JSONata",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}], "errors": {"body": " "}}}`,
+			want: []string{"/response/errors/body required"},
 		},
 		{
 			name: "a line from both an output and Unhandled",
 			def: `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"}],
 			       "edges": [{"from": "a", "to": "b", "on": 404, "unhandled": true}],
-			       "response": {"answers": [{"status": 200, "from": "b"}, {"status": 404, "from": "a", "on": 404, "unhandled": true}]}}`,
-			want: []string{"/edges/0/unhandled not_allowed", "/response/answers/1/unhandled not_allowed"},
+			       "response": {"answers": [{"status": 200, "lines": [{"from": "b"}]}, {"status": 404, "lines": [{"from": "a", "on": 404, "unhandled": true}]}]}}`,
+			want: []string{"/edges/0/unhandled not_allowed", "/response/answers/1/lines/0/unhandled not_allowed"},
 		},
 		{
 			name: "Unhandled joined to two answers, and twice to one node",
 			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}],
 			       "edges": [{"from": "a", "to": "b", "unhandled": true}, {"from": "a", "to": "b", "unhandled": true}],
-			       "response": {"answers": [{"status": 200, "from": "a"}, {"status": 500, "from": "a", "unhandled": true}, {"status": 503, "from": "a", "unhandled": true}]}}`,
-			want: []string{"/edges/1 duplicate_edge", "/response/answers/2/from not_allowed"},
+			       "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 500, "lines": [{"from": "a", "unhandled": true}]}, {"status": 503, "lines": [{"from": "a", "unhandled": true}]}]}}`,
+			want: []string{"/edges/1 duplicate_edge", "/response/answers/2/lines/0/from dead_line"},
 		},
 		{
 			name: "an Unhandled body with no JSONata",
@@ -765,7 +786,7 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 		},
 		{
 			name: "an output beside a response",
-			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "output": "1", "response": {"answers": [{"status": 200, "from": "a"}]}}`,
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "output": "1", "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}]}}`,
 			want: []string{"/output not_allowed"},
 		},
 		{
@@ -842,7 +863,7 @@ func TestValidate_NeverRuns(t *testing.T) {
 	    {"from": "a", "to": "each_way"}, {"from": "a", "to": "each_way", "on": 404}, {"from": "a", "to": "each_way", "unhandled": true},
 	    {"from": "b", "to": "later"}, {"from": "a", "to": "later", "on": 409},
 	    {"from": "a", "to": "f", "on": 409}, {"from": "a", "to": "conflicted", "on": 404}, {"from": "a", "to": "conflicted"}, {"from": "f", "to": "conflicted"}],
-	  "response": {"answers": [{"status": 201, "from": "b"}, {"status": 200, "from": "d"}]}}`))
+	  "response": {"answers": [{"status": 201, "lines": [{"from": "b"}]}, {"status": 200, "lines": [{"from": "d"}]}]}}`))
 	var got []string
 	for _, p := range ps {
 		got = append(got, p.Pointer+" "+p.Code+": "+p.Detail)

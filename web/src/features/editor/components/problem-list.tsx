@@ -5,6 +5,8 @@ import { useProblems } from "@/features/editor/hooks/use-problems";
 import {
   type Found,
   type Place,
+  REQUEST_FIELDS,
+  requestTabOf,
   type StepField,
   stepPartOf,
 } from "@/features/editor/problems";
@@ -32,6 +34,7 @@ const fieldNames: Record<StepField, string> = {
   case_when: "When",
   case_status: "Status",
   case_body: "Body",
+  unhandled: "Unhandled",
   unhandled_body: "Unhandled · Body",
 };
 
@@ -49,6 +52,7 @@ const fieldIds: Partial<Record<StepField, string>> = {
   sample: "step-sample-body",
   outputs: "step-output-status",
   expr: "step-expr",
+  unhandled: "step-unhandled-fail",
   unhandled_body: "step-unhandled-body",
 };
 
@@ -84,9 +88,11 @@ function fieldOf(
       switch (place.field) {
         case "from":
         case "on":
-          return `response-answer-${place.answer}-from`;
-        case "unhandled":
-          return "response-unhandled";
+          return place.line === undefined
+            ? `response-answer-${place.answer}-remove`
+            : `response-answer-${place.answer}-line-${place.line}`;
+        case "errors":
+          return "response-errors";
         case "answers":
           return "response-add-answer";
         case "status":
@@ -134,6 +140,7 @@ function Entry({ found: { place, code, message } }: { found: Found }) {
   const editor = useEditorStore();
   const draft = useEditor((s) => s.draft);
   const show = useEditor((s) => s.show);
+  const setRequestTab = useEditor((s) => s.setRequestTab);
   const openPanel = useEditor((s) => s.openPanel);
   const edit = useEditor((s) => s.edit);
   const text = (
@@ -178,6 +185,8 @@ function Entry({ found: { place, code, message } }: { found: Found }) {
     else if (place.on === "step") {
       const key = flow.nodes[place.index]?.id;
       if (key) show("nodes", key, stepPartOf(place, draft));
+      if (REQUEST_FIELDS.has(place.field))
+        setRequestTab(requestTabOf(place.field));
     } else if (place.on === "connection") {
       const key = flow.edges.find((e) => e.data?.index === place.index)?.id;
       if (key) show("edges", key);
@@ -227,12 +236,17 @@ function responsePart(
   const status = draft.response?.answers?.[k]?.status;
   switch (place.field) {
     case "from":
-    case "on":
-      return `${status ?? `Answer ${k + 1}`} · its line`;
+    case "on": {
+      const l =
+        place.line === undefined
+          ? undefined
+          : draft.response?.answers?.[k]?.lines?.[place.line];
+      return `${status ?? `Answer ${k + 1}`} · ${l ? `${l.from}'s line` : "its lines"}`;
+    }
     case "answers":
       return "Answers";
-    case "unhandled":
-      return "Unhandled";
+    case "errors":
+      return "Error body";
     case "status":
       return status === undefined ? `Answer ${k + 1}` : `${status} answer`;
     case "schema":

@@ -1,14 +1,10 @@
 import { ArrowDownIcon, ArrowUpIcon } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import { Hint } from "@/components/hint";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,7 +31,7 @@ import {
   updateNode,
 } from "@/features/editor/edits";
 import { whole } from "@/features/editor/fields";
-import { exitsOf, outputOf, wayLabel } from "@/features/editor/flow";
+import { exitsOf } from "@/features/editor/flow";
 import {
   asErrors,
   atStep,
@@ -48,7 +44,6 @@ import type { components } from "@/gen/schema";
 
 type Definition = components["schemas"]["Definition"];
 type Preview = components["schemas"]["Preview"];
-type WayPreview = components["schemas"]["WayPreview"];
 
 // The statuses a case can answer with, as schema/workflow.yaml allows.
 const MIN_STATUS = 200;
@@ -58,8 +53,8 @@ const MAX_STATUS = 599;
 // it reads and what it gives, simulated over the samples, then what follows
 // it and its Unhandled; or its cases, a tab each, each with what it reads.
 // With two or more lines into it, the preview is of a run by each: the step
-// reads what those runs read, merged, and what it gives in each is shown by
-// the line.
+// reads what those runs read, merged, and gives, shown once, what it gives
+// in the first that comes (plan 13).
 export function TransformStepForm({ index }: { index: number }) {
   const cases = useEditor((s) => s.draft.nodes[index]?.switch !== undefined);
   return (
@@ -78,34 +73,10 @@ export function TransformStepForm({ index }: { index: number }) {
   );
 }
 
-// ByWays is what a transform does in a run by each line into it, over the
-// samples: each line by its name, a required one marked so, then what each
-// shows of what the step gives in that run, or that no run comes that way.
-function ByWays({
-  ways,
-  of,
-  each,
-}: {
-  ways: WayPreview[];
-  of: Definition;
-  each: (gives: unknown) => ReactNode;
-}) {
-  return ways.map((w) => {
-    const e = of.edges?.[w.edge];
-    return (
-      <div key={w.edge} className="flex flex-col gap-1.5">
-        <p>
-          By{" "}
-          <span className="font-mono">
-            {e ? wayLabel(of, e.from, outputOf(e)) : `connection ${w.edge + 1}`}
-          </span>
-          {e?.required && " (required)"}
-          {w.skipped && ": no run comes this way with these samples."}
-        </p>
-        {!w.skipped && each(w.gives)}
-      </div>
-    );
-  });
+// givesOf is what a transform gives over the samples: with a run by each
+// line into it, what it gives in the first of those a run comes by.
+function givesOf(p: Preview): unknown {
+  return p.ways === undefined ? p.gives : p.ways.find((w) => !w.skipped)?.gives;
 }
 
 // Value is a transform's value over the samples, or that it gave none.
@@ -141,9 +112,9 @@ function ExpressionForm({ index }: { index: number }) {
       <MappingField
         id="step-expr"
         label="Expression"
-        description={
+        hint={
           <>
-            JSONata over the input. Steps after this one read its value as{" "}
+            JSONata over the input. The steps after read its value as{" "}
             <span className="font-mono">{`nodes.${id}.body`}</span>.
           </>
         }
@@ -154,43 +125,33 @@ function ExpressionForm({ index }: { index: number }) {
         problems={problems}
         preview={preview}
         open={(of) => parents(of, of.nodes[index]?.id)}
-        result={(p, of) =>
+        result={(p) =>
           p.skipped ? (
             <Skipped />
           ) : (
             <>
-              <h3 className="font-medium">It gives</h3>
-              {p.ways === undefined ? (
-                <Value gives={p.gives} />
-              ) : (
-                <ByWays
-                  ways={p.ways}
-                  of={of}
-                  each={(gives) => <Value gives={gives} />}
-                />
-              )}
+              <h3 className="font-medium">Gives</h3>
+              <Value gives={givesOf(p)} />
             </>
           )
         }
       />
       {answers && <WholeRunNote text={expr} />}
-      <section className="flex flex-col gap-1.5 text-sm">
-        <h3 className="font-medium">Cases</h3>
-        <p className="text-muted-foreground">
-          To pick by conditions what it gives and where it goes, use cases: the
-          first whose condition holds runs its JSONata and exits with a status
-          of its own. This expression becomes the first case's body. When no
-          case holds, the step fails, and its Unhandled takes that.
-        </p>
+      <div className="flex items-center gap-1">
         <Button
           variant="outline"
           size="sm"
-          className="self-start"
           onClick={() => edit((d) => toCases(d, index, firstAnswer(d, index)))}
         >
           Use cases
         </Button>
-      </section>
+        <Hint about="cases">
+          Cases pick what it gives and where it goes: the first whose condition
+          holds gives its body and exits with its status. This expression
+          becomes the first case&apos;s body. When none holds, the step fails
+          into its Unhandled.
+        </Hint>
+      </div>
     </>
   );
 }
@@ -240,7 +201,12 @@ function SwitchForm({ index }: { index: number }) {
           </TabsTrigger>
           <TabsTrigger value="unhandled">
             Unhandled
-            <Marked where={(p) => mine(p) && p.field === "unhandled_body"} />
+            <Marked
+              where={(p) =>
+                mine(p) &&
+                (p.field === "unhandled" || p.field === "unhandled_body")
+              }
+            />
           </TabsTrigger>
         </TabsList>
         {/* Each stays mounted while hidden, so what's typed survives a
@@ -345,12 +311,12 @@ function useOthers(
 
 // nextStatus is a new case's status: the first answer's that no line gives
 // yet, nor an exit of the step has, as the case could give it; else the
-// first from 400 up that no exit or answer has. An answer with its line,
-// one from the step's Unhandled among them, isn't the case's to give.
+// first from 400 up that no exit or answer has. An answer with lines, one
+// from the step's Unhandled among them, is another step's to give.
 function nextStatus(d: Definition, index: number): number {
   const given = new Set(exitsOf(d.nodes[index]).map((e) => e.status));
   const answers = d.response?.answers ?? [];
-  const open = answers.filter((a) => a.from === undefined).map((a) => a.status);
+  const open = answers.filter((a) => !a.lines).map((a) => a.status);
   const taken = new Set([...given, ...answers.map((a) => a.status)]);
   const errors = Array.from({ length: MAX_STATUS - 399 }, (_, i) => 400 + i);
   return (
@@ -361,8 +327,8 @@ function nextStatus(d: Definition, index: number): number {
 }
 
 // Holds says, over the samples, what the case at part gives when it's the
-// one that holds; else which one is, or that none is, when the preview says
-// so. With ways, it says what holds in a run by each.
+// one that holds; else which one is, or that none is. With a run by each
+// line into the step, it's the first of those a run comes by (plan 13).
 function Holds({
   index,
   part,
@@ -382,61 +348,24 @@ function Holds({
     useShallow((s) => exitsOf(s.draft.nodes[index]).map((e) => e.label)),
   );
   if (preview.data === undefined) return null;
-  const { preview: p, of } = preview.data;
-  const which = (gives: unknown) =>
-    statuses.findIndex(
-      (status) => status === (gives as { status?: number } | undefined)?.status,
-    );
-  if (p.ways !== undefined && !p.skipped)
-    return (
-      <section className="flex flex-col gap-1.5 text-sm">
-        <h3 className="font-medium">With these samples</h3>
-        <ByWays
-          ways={p.ways}
-          of={of}
-          each={(gives) => {
-            const g = gives as { status?: number; body?: unknown } | undefined;
-            const k = which(gives);
-            if (g === undefined)
-              return (
-                <p className="text-muted-foreground">
-                  Nothing: the problems above say why.
-                </p>
-              );
-            if (k >= 0 && parts[k] !== part)
-              return (
-                <p className="text-muted-foreground">
-                  {labels[k]} holds, not this.
-                </p>
-              );
-            return (
-              <>
-                <p>
-                  It answers {g.status}
-                  {g.body === undefined ? ", with no body." : ":"}
-                </p>
-                {g.body !== undefined && <JsonBlock value={g.body} />}
-              </>
-            );
-          }}
-        />
-      </section>
-    );
-  const k = which(p.gives);
+  const { preview: p } = preview.data;
+  const gives = givesOf(p) as { status?: number; body?: unknown } | undefined;
+  const k = statuses.findIndex((status) => status === gives?.status);
   const none = p.problems.some((pr) => pr.pointer === `/nodes/${index}/switch`);
   return (
     <section className="flex flex-col gap-1.5 text-sm">
-      {!p.skipped && none ? (
+      {p.skipped ? (
+        <Skipped />
+      ) : gives === undefined ? (
         <p className="text-muted-foreground">
-          With these samples, no case holds: the step fails, and its Unhandled
-          takes that.
+          {none
+            ? "No case holds with these samples."
+            : "Gives nothing with these samples."}
         </p>
-      ) : p.skipped || k < 0 || parts[k] === part ? (
-        <Gives preview={p} />
+      ) : k >= 0 && parts[k] !== part ? (
+        <p className="text-muted-foreground">{labels[k]} holds, not this.</p>
       ) : (
-        <p className="text-muted-foreground">
-          With these samples, {labels[k]} holds, not this.
-        </p>
+        <Gives gives={gives} />
       )}
     </section>
   );
@@ -444,21 +373,14 @@ function Holds({
 
 // Gives is what a switch gives over the samples: the status and body of
 // the case that holds.
-function Gives({ preview }: { preview: Preview }) {
-  if (preview.skipped) return <Skipped />;
-  const gives = preview.gives as
-    { status?: number; body?: unknown } | undefined;
+function Gives({ gives }: { gives: { status?: number; body?: unknown } }) {
   return (
     <>
       <h3 className="font-medium">
-        {gives?.status === undefined
-          ? "It gives"
-          : `It answers ${gives.status}`}
+        {gives.status === undefined ? "Gives" : `Gives ${gives.status}`}
       </h3>
-      {gives === undefined ? (
-        <p className="text-muted-foreground">Nothing.</p>
-      ) : gives.body === undefined ? (
-        <p className="text-muted-foreground">With no body.</p>
+      {gives.body === undefined ? (
+        <p className="text-muted-foreground">No body.</p>
       ) : (
         <JsonBlock value={gives.body} />
       )}
@@ -472,11 +394,8 @@ function ExitConnections({ index, part }: { index: number; part: string }) {
   const status = useEditor(
     (s) => exitsOf(s.draft.nodes[index]).find((e) => e.part === part)?.status,
   );
-  const label = useEditor(
-    (s) => exitsOf(s.draft.nodes[index]).find((e) => e.part === part)?.label,
-  );
   if (status === undefined) return null;
-  return <StepConnections index={index} on={status} exit={label} />;
+  return <StepConnections index={index} on={status} />;
 }
 
 // CaseFields edits case k: its name, condition, status and body, and moves
@@ -507,11 +426,7 @@ function CaseFields({
   const n = k + 1;
   return (
     <section className="flex flex-col gap-3 text-sm">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-muted-foreground">
-          Checked {k === 0 ? "first" : "after the cases before it"}: when its
-          condition holds, it gives its body and exits with its status.
-        </p>
+      <div className="flex items-center justify-end gap-2">
         <div className="flex shrink-0 gap-1">
           <Button
             variant="ghost"
@@ -559,7 +474,7 @@ function CaseFields({
       <ExprField
         id={`step-case-${k}-when`}
         label={`Case ${n} when`}
-        description="JSONata over the input, true or false, as a connection's condition is."
+        hint="JSONata over the input, true or false. The first case whose condition holds gives its body and exits with its status."
         initial={c?.when ?? ""}
         apply={(text) =>
           edit((d) => updateCase(d, index, k, (c) => ({ ...c, when: text })))
@@ -579,7 +494,7 @@ function CaseFields({
       <ExprField
         id={`step-case-${k}-body`}
         label={`Case ${n} body`}
-        description="JSONata whose value is the body. Empty sends none."
+        hint="JSONata whose value is the body. Empty sends none."
         initial={c?.body ?? ""}
         apply={(text) =>
           edit((d) => updateCase(d, index, k, (c) => withBody(c, text)))
@@ -614,11 +529,6 @@ function AddCase({ index, relaid }: { index: number; relaid: Relaid }) {
         : [];
   return (
     <section className="flex flex-col gap-3 text-sm">
-      <p className="text-muted-foreground">
-        A new case is checked after the others. Its status names its exit, so no
-        other case has it. When no case holds, the step fails, and its Unhandled
-        takes that.
-      </p>
       <NameField
         id="step-new-case-name"
         label="New case name"
@@ -628,7 +538,15 @@ function AddCase({ index, relaid }: { index: number; relaid: Relaid }) {
         value={name}
       />
       <Field data-invalid={said.length > 0}>
-        <FieldLabel htmlFor="step-new-case-status">New case status</FieldLabel>
+        <div className="flex items-center gap-1">
+          <FieldLabel htmlFor="step-new-case-status">
+            New case status
+          </FieldLabel>
+          <Hint about="a new case">
+            Checked after the others. Its status names its exit, so no other
+            case has it.
+          </Hint>
+        </div>
         <Input
           id="step-new-case-status"
           inputMode="numeric"
@@ -717,7 +635,7 @@ function NameField({
 function ExprField({
   id,
   label,
-  description,
+  hint,
   initial,
   apply,
   problems,
@@ -726,7 +644,7 @@ function ExprField({
 }: {
   id: string;
   label: string;
-  description: string;
+  hint: string;
   initial: string;
   apply: (text: string) => void;
   problems: Found[];
@@ -761,7 +679,10 @@ function ExprField({
 
   return (
     <Field data-invalid={problems.length > 0}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <div className="flex items-center gap-1">
+        <FieldLabel htmlFor={id}>{label}</FieldLabel>
+        <Hint about={label}>{hint}</Hint>
+      </div>
       <Textarea
         id={id}
         ref={field}
@@ -779,7 +700,6 @@ function ExprField({
         }}
       />
       <FieldError errors={asErrors(problems)} />
-      <FieldDescription>{description}</FieldDescription>
     </Field>
   );
 }

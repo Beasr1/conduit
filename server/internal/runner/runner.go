@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/Beasr1/conduit/server/internal/engine"
@@ -101,6 +102,9 @@ type Outcome struct {
 	Answer  int
 	Output  json.RawMessage
 	Failure *Failure // why it didn't
+	// Problem is an answer that passed an error on with no error body to say
+	// it: Conduit's problem details answer it, at Answer's status (plan 12).
+	Problem *Failure
 }
 
 // Start runs a revision of a workflow in the background and returns the run
@@ -362,6 +366,9 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 	var truncated bool
 	var ne *engine.NodeError
 	switch {
+	case res.Status == engine.StatusSucceeded && res.ErrorFrom != "":
+		out.Output, out.Problem = r.passOn(rec, p, run, res, failures[res.ErrorFrom])
+		output, truncated = capped(out.Output)
 	case res.Status == engine.StatusSucceeded:
 		output, truncated = capped(res.Output)
 	case res.Status == engine.StatusCancelled:
@@ -379,18 +386,18 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 			r.log.ErrorContext(ctx, "encode a run's failure", "run", run.ID, "err", err)
 		}
 	}
-	// A run that gave no answer gets its response's unhandled, if it has
+	// A run that gave no answer gets its response's error body, if it has
 	// one. Nobody waits on a cancelled run.
 	if f := out.Failure; f != nil && f.Code != CodeCancelled {
 		dctx, cancel := context.WithTimeout(rec, unhandledTimeout)
-		body, ok, err := p.Unhandled(dctx, run.Input, res.Nodes, errDoc)
+		body, ok, err := p.ErrorBody(dctx, run.Input, res.Nodes, errDoc)
 		cancel()
 		switch {
 		case !ok:
 		case err != nil:
 			// Its author sees why on the run; its caller gets the failure's
 			// own problem.
-			f.Detail += "; unhandled failed too: " + err.Error()
+			f.Detail += "; the error body failed too: " + err.Error()
 			if errDoc, err = json.Marshal(f); err != nil {
 				r.log.ErrorContext(ctx, "encode a run's failure", "run", run.ID, "err", err)
 			}
@@ -414,6 +421,36 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 	out.Run = final
 	r.events.end(run.ID)
 	return out
+}
+
+// passOn says what an answer passing a node's error on answers: the error
+// body over that error, or, with none, the problem details to answer with
+// instead. The error is what the node's error block got, an upstream's
+// status, or the failure its Unhandled block took, caught.
+func (r *Runner) passOn(ctx context.Context, p *engine.Program, run store.Run, res *engine.Result, caught *Failure) (json.RawMessage, *Failure) {
+	i := slices.IndexFunc(res.Nodes, func(n engine.NodeResult) bool { return n.ID == res.ErrorFrom })
+	n := res.Nodes[i]
+	f := Failure{Code: CodeUpstream, Detail: fmt.Sprintf("%s answered %d", n.ID, n.HTTPStatus), Node: n.ID}
+	if caught != nil {
+		f.Code, f.Detail = caught.Code, caught.Detail
+	}
+	doc, err := engine.ErrorOf(n, f.Code, f.Detail)
+	if err != nil {
+		return nil, &f
+	}
+	ctx, cancel := context.WithTimeout(ctx, unhandledTimeout)
+	defer cancel()
+	body, ok, err := p.ErrorBody(ctx, run.Input, res.Nodes, doc)
+	switch {
+	case !ok:
+		return nil, &f
+	case err != nil:
+		// Its author sees why on the run's record; its caller gets the problem.
+		r.log.InfoContext(ctx, "an error body failed", "run", run.ID, "err", err)
+		f.Detail += "; the error body failed too: " + err.Error()
+		return nil, &f
+	}
+	return body, nil
 }
 
 // failure is err as a Failure. Our bug is logged with its stack, since the

@@ -1,8 +1,9 @@
 import { ChevronRightIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
+import { Hint } from "@/components/hint";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Field, FieldLabel } from "@/components/ui/field";
 import {
   Select,
   SelectContent,
@@ -33,17 +34,8 @@ import { useEditor, useEditorStore } from "@/features/editor/store";
 // is edited, and the response's answers it gives; then Connect to, which
 // joins another step on it, or an answer with no line yet, without drawing,
 // as a keyboard can (WCAG 2.5.7). on is the response's status, and none is
-// 2xx, or a transform's one value; UNHANDLED is its Unhandled block. exit
-// is what a transform's case, whose status on is, is called.
-export function StepConnections({
-  index,
-  on,
-  exit,
-}: {
-  index: number;
-  on?: number;
-  exit?: string;
-}) {
+// 2xx, or a transform's one value; UNHANDLED is its Unhandled block.
+export function StepConnections({ index, on }: { index: number; on?: number }) {
   const edit = useEditor((s) => s.edit);
   const from = useEditor((s) => s.draft.nodes[index]?.id ?? "");
   const http = useEditor((s) => s.draft.nodes[index]?.kind === "http");
@@ -68,7 +60,7 @@ export function StepConnections({
       from === ""
         ? []
         : (s.draft.response?.answers ?? []).flatMap((_, k) =>
-            canJoin(s.draft, k) ? [k] : [],
+            canJoin(s.draft, k, from, on) ? [k] : [],
           ),
     ),
   );
@@ -95,41 +87,14 @@ export function StepConnections({
         ? "2xx"
         : "out"
       : String(on);
-  const point = unhandled
-    ? "its Unhandled point"
-    : http
-      ? `the ${handle} point`
-      : exit
-        ? `the ${exit} point`
-        : "its point";
-
   const none = reachable.length === 0 && joinable.length === 0;
 
   return (
     <section className="flex flex-col gap-3 text-sm">
       <div className="flex flex-col gap-1.5">
-        <h3 className="font-medium">
-          {unhandled
-            ? "Then, on Unhandled"
-            : http
-              ? `Then, on ${handle}`
-              : exit
-                ? `Then, on ${exit}`
-                : "Then"}
-        </h3>
+        <h3 className="font-medium">Then</h3>
         {leaving.length === 0 && gives.length === 0 ? (
-          <p className="text-muted-foreground">
-            None yet: connect a step below, or drag from {point} on the canvas
-            to the step.
-            {statuses.length > 0 && joinable.length === 0 && (
-              <>
-                {" "}
-                Each answer on the response takes one line, and has it: to
-                answer from here too, join this step and the one that gives the
-                answer to a transform.
-              </>
-            )}
-          </p>
+          <p className="text-muted-foreground">None yet.</p>
         ) : (
           <ul className="flex flex-col">
             {leaving.map((i) => (
@@ -142,9 +107,17 @@ export function StepConnections({
         )}
       </div>
       <Field>
-        <FieldLabel htmlFor={`step-connect-${handle}`}>
-          {unhandled ? "Connect Unhandled to" : "Connect to"}
-        </FieldLabel>
+        <div className="flex items-center gap-1">
+          <FieldLabel htmlFor={`step-connect-${handle}`}>
+            {unhandled ? "Connect Unhandled to" : "Connect to"}
+          </FieldLabel>
+          <Hint about="Connect to">
+            The step that runs next when this one{" "}
+            {unhandled ? "fails" : "answers this way"}, or an answer of the
+            response for it to give. On the canvas, drag from its point to the
+            step.
+          </Hint>
+        </div>
         <Select<string>
           value={null}
           disabled={none}
@@ -175,12 +148,6 @@ export function StepConnections({
             ))}
           </SelectContent>
         </Select>
-        <FieldDescription>
-          The step picked runs after this one when it{" "}
-          {unhandled ? "fails into Unhandled" : "answers this way"}. Its
-          condition, if it needs one, is the connection&apos;s. Picking an
-          answer of the response makes this step give it.
-        </FieldDescription>
       </Field>
     </section>
   );

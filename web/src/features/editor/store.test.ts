@@ -68,7 +68,7 @@ test("a revision saved with an output opens with it moved into a step", () => {
   const store = createEditorStore({ ...specExample, output: "nodes.crm.body" });
   expect(store.getState().moved).toBe("respond");
   expect(store.getState().draft.response).toEqual({
-    answers: [{ status: 200, from: "respond" }],
+    answers: [{ status: 200, lines: [{ from: "respond" }] }],
   });
   expect(createEditorStore(specExample).getState().moved).toBeUndefined();
 });
@@ -76,8 +76,8 @@ test("a revision saved with an output opens with it moved into a step", () => {
 test("a refused line is told until the next edit, pick or show", () => {
   const store = createEditorStore(specExample);
   const { refuse } = store.getState();
-  refuse({ step: "orders", answer: 0 });
-  expect(store.getState().refused).toEqual({ step: "orders", answer: 0 });
+  refuse({ step: "orders" });
+  expect(store.getState().refused).toEqual({ step: "orders" });
   store.getState().edit((d) => connect(d, "user", "crm"));
   expect(store.getState().refused).toBeUndefined();
   refuse({ step: "orders" });

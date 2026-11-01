@@ -25,7 +25,9 @@ const steps: Definition = {
     },
     { id: "fallback", kind: "transform", expr: "nodes.user.error.code" },
   ],
-  response: { answers: [{ status: 200, from: "user" }, { status: 502 }] },
+  response: {
+    answers: [{ status: 200, lines: [{ from: "user" }] }, { status: 502 }],
+  },
 };
 
 // strip is a step's Unhandled, along the bottom of its card.
@@ -73,14 +75,14 @@ function saves(): Definition[] {
   return saved;
 }
 
-test("every step has an Unhandled strip, which fails the run until a line leaves it", async () => {
+test("every step has an Unhandled strip, not decided until it fails the run or a line leaves it", async () => {
   renderEditor(steps);
   const user = await screen.findByTestId("rf__node-user");
-  expect(strip("user")?.textContent).toBe("Unhandled · fails the run");
-  expect(strip("fallback")?.textContent).toBe("Unhandled · fails the run");
+  expect(strip("user")?.textContent).toBe("Unhandled · not decided");
+  expect(strip("fallback")?.textContent).toBe("Unhandled · not decided");
   expect(strip("user")?.hasAttribute("data-unjoined")).toBe(true);
 
-  // A click on it opens its tab, which says what it takes.
+  // A click on it opens its tab.
   fireEvent.click(within(user).getByText("Unhandled"));
   const panel = await screen.findByRole("complementary", { name: "HTTP step" });
   expect(
@@ -88,18 +90,14 @@ test("every step has an Unhandled strip, which fails the run until a line leaves
       .getByRole("tab", { name: "Unhandled" })
       .getAttribute("aria-selected"),
   ).toBe("true");
-  expect(
-    within(panel).getByText(/^It takes what the step's responses don't/),
-  ).toBeTruthy();
-  expect(
-    within(panel).getByText("nodes.user.error").parentElement?.textContent,
-  ).toBe(
-    "The steps after read the failure as nodes.user.error, { code, detail }, beside status, headers and body when the upstream answered.",
-  );
+  const fail = within(panel).getByRole("checkbox", { name: "Fail the run" });
+  expect(fail.getAttribute("aria-checked")).toBe("false");
 
   // Connect Unhandled to joins a step on it, or an answer with no line.
+  // Every answer, as an answer takes lines from any number of steps.
   expect(await options("Connect Unhandled to")).toEqual([
     "fallback",
+    "Response 200",
     "Response 502",
   ]);
   // Down to the first, and Enter.
@@ -115,36 +113,138 @@ test("every step has an Unhandled strip, which fails the run until a line leaves
       name: "Connection to fallback always",
     }),
   ).toBeTruthy();
+  // The line takes its failures, so the run can't fail with them too.
+  expect(fail.hasAttribute("data-disabled")).toBe(true);
+
+  // What it takes, and how the steps after read it, it says when asked.
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "About Unhandled" }),
+  );
+  expect(
+    await screen.findByText(/^A status with no response, the connection/),
+  ).toBeTruthy();
+  expect(screen.getByText("nodes.user.error")).toBeTruthy();
 });
 
 test("a line from a step's response doesn't join its Unhandled", async () => {
   renderEditor({ ...steps, edges: [{ from: "user", to: "fallback" }] });
   await screen.findByTestId("rf__edge-user->fallback");
-  expect(strip("user")?.textContent).toBe("Unhandled · fails the run");
+  expect(strip("user")?.textContent).toBe("Unhandled · not decided");
 });
 
-test("Unhandled joined straight to an answer is saved so, and warns what callers get", async () => {
+test("Fail the run decides what a step's failures do, and is saved so", async () => {
   renderEditor(steps);
   const saved = saves();
   fireEvent.click(
     within(await screen.findByTestId("rf__node-user")).getByText("Unhandled"),
   );
   const panel = await screen.findByRole("complementary", { name: "HTTP step" });
-  expect(within(panel).queryByText(/^Callers get whatever/)).toBeNull();
-  await choose("Connect Unhandled to", "Response 502");
+  fireEvent.click(
+    within(panel).getByRole("checkbox", { name: "Fail the run" }),
+  );
+  await waitFor(() =>
+    expect(strip("user")?.textContent).toBe("Unhandled · fails the run"),
+  );
+  // The run stops there, so nothing follows it, and it gives no body.
   expect(
-    await within(panel).findByText(/^Callers get whatever the upstream sent/),
+    within(panel).queryByRole("combobox", { name: "Connect Unhandled to" }),
+  ).toBeNull();
+  expect(
+    within(panel).queryByRole("button", { name: "Write a body" }),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(saved[0]?.nodes[0]?.unhandled).toEqual({ fail: true });
+});
+
+test("an Unhandled not decided marks its tab, and the list takes the cursor to Fail the run", async () => {
+  renderEditor(steps, [
+    { pointer: "/nodes/0/unhandled", code: "unhandled_undecided", detail: "" },
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: "1 problem" }));
+  const list = await screen.findByRole("complementary", { name: "Problems" });
+  fireEvent.click(
+    within(list).getByRole("button", {
+      name: "user · UnhandledJoin its Unhandled to a step or an answer, or let it fail the run.",
+    }),
+  );
+  const panel = await screen.findByRole("complementary", { name: "HTTP step" });
+  expect(
+    within(panel)
+      .getByRole("tab", { name: "Unhandled (1 problem)" })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  const fail = within(panel).getByRole("checkbox", { name: "Fail the run" });
+  await waitFor(() => expect(document.activeElement).toBe(fail));
+  expect(fail.getAttribute("aria-invalid")).toBe("true");
+  // Deciding takes the problem away at once, before the next check answers,
+  // which here it never does.
+  server.use(http.post("/api/v1/validate", () => new Promise<never>(() => {})));
+  fireEvent.click(fail);
+  await waitFor(() =>
+    expect(within(panel).queryByText(/^Join its Unhandled/)).toBeNull(),
+  );
+});
+
+test("one saved both failing the run and with a line can still be unchecked", async () => {
+  renderEditor(
+    {
+      ...steps,
+      nodes: steps.nodes.map((n) =>
+        n.id === "user" ? { ...n, unhandled: { fail: true } } : n,
+      ),
+      edges: [{ from: "user", to: "fallback", unhandled: true }],
+    },
+    [
+      {
+        pointer: "/nodes/0/unhandled/fail",
+        code: "unhandled_both",
+        detail: "",
+      },
+    ],
+  );
+  fireEvent.click(
+    within(await screen.findByTestId("rf__node-user")).getByText("Unhandled"),
+  );
+  const panel = await screen.findByRole("complementary", { name: "HTTP step" });
+  expect(
+    within(panel).getByText(
+      "Its Unhandled has a line and fails the run: keep one.",
+    ),
   ).toBeTruthy();
+  const fail = within(panel).getByRole("checkbox", { name: "Fail the run" });
+  expect(fail.hasAttribute("data-disabled")).toBe(false);
+  fireEvent.click(fail);
+  // Its line shows once it doesn't fail the run.
+  expect(
+    await within(panel).findByRole("button", {
+      name: "Connection to fallback always",
+    }),
+  ).toBeTruthy();
+  expect(fail.hasAttribute("data-disabled")).toBe(true);
+});
+
+test("Unhandled joined straight to an answer is saved so", async () => {
+  renderEditor(steps);
+  const saved = saves();
+  fireEvent.click(
+    within(await screen.findByTestId("rf__node-user")).getByText("Unhandled"),
+  );
+  await screen.findByRole("complementary", { name: "HTTP step" });
+  await choose("Connect Unhandled to", "Response 502");
   expect(await screen.findByTestId("rf__edge-user->#response:1")).toBeTruthy();
-  // 502 offers itself no more, as it has its line.
-  expect(await options("Connect Unhandled to")).toEqual(["fallback"]);
+  // 502 offers itself no more, as this block's line is in it.
+  expect(await options("Connect Unhandled to")).toEqual([
+    "fallback",
+    "Response 200",
+  ]);
   fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(saved).toHaveLength(1));
   expect(saved[0]?.response?.answers).toEqual([
-    { status: 200, from: "user" },
-    { status: 502, from: "user", unhandled: true },
+    { status: 200, lines: [{ from: "user" }] },
+    { status: 502, lines: [{ from: "user", unhandled: true }] },
   ]);
 });
 
@@ -152,7 +252,10 @@ test("a transform's panel has its Unhandled, and joining it to an answer adds no
   renderEditor({
     ...steps,
     response: {
-      answers: [{ status: 200, from: "fallback" }, { status: 500 }],
+      answers: [
+        { status: 200, lines: [{ from: "fallback" }] },
+        { status: 500 },
+      ],
     },
   });
   fireEvent.click(await screen.findByText("fallback"));
@@ -160,16 +263,14 @@ test("a transform's panel has its Unhandled, and joining it to an answer adds no
     name: "Transform step",
   });
   expect(
-    within(panel).getByText(/^It takes the step's JSONata failing/),
+    within(panel).getByRole("heading", { name: "When it fails" }),
   ).toBeTruthy();
   await choose("Connect Unhandled to", "Response 500");
   await waitFor(() => expect(strip("fallback")?.textContent).toBe("Unhandled"));
-  // A failure picks no answer, so it's still an expression, and a
-  // transform's failure sends no upstream's body to warn about.
+  // A failure picks no answer, so it's still an expression.
   expect(
     within(panel).getByRole("textbox", { name: "Expression" }),
   ).toBeTruthy();
-  expect(within(panel).queryByText(/^Callers get whatever/)).toBeNull();
 });
 
 test("a click on a transform's strip brings its Unhandled into view", async () => {
@@ -222,9 +323,7 @@ test("Unhandled's own body: written, previewed over a failure made up, and taken
     within(await screen.findByTestId("rf__node-user")).getByText("Unhandled"),
   );
   const panel = await screen.findByRole("complementary", { name: "HTTP step" });
-  fireEvent.click(
-    within(panel).getByRole("button", { name: "Write your own" }),
-  );
+  fireEvent.click(within(panel).getByRole("button", { name: "Write a body" }));
   const body = await within(panel).findByRole("textbox", {
     name: "Unhandled body",
   });
@@ -237,16 +336,14 @@ test("Unhandled's own body: written, previewed over a failure made up, and taken
   ).toBeTruthy();
   expect(within(panel).getByText(/"error": "user failed"/)).toBeTruthy();
   fireEvent.click(
-    within(panel).getByRole("button", {
-      name: "Give what the step got instead",
-    }),
+    within(panel).getByRole("button", { name: "Remove the body" }),
   );
   expect(
-    await within(panel).findByRole("button", { name: "Write your own" }),
+    await within(panel).findByRole("button", { name: "Write a body" }),
   ).toBeTruthy();
 });
 
-test("with a body, Unhandled joined straight to an answer sends that, not what the upstream sent", async () => {
+test("Unhandled's body joined straight to an answer warns when it sends what the run read", async () => {
   renderEditor({
     ...steps,
     nodes: steps.nodes.map((n) =>
@@ -254,8 +351,8 @@ test("with a body, Unhandled joined straight to an answer sends that, not what t
     ),
     response: {
       answers: [
-        { status: 200, from: "user" },
-        { status: 502, from: "user", unhandled: true },
+        { status: 200, lines: [{ from: "user" }] },
+        { status: 502, lines: [{ from: "user", unhandled: true }] },
       ],
     },
   });
@@ -264,7 +361,6 @@ test("with a body, Unhandled joined straight to an answer sends that, not what t
   );
   const panel = await screen.findByRole("complementary", { name: "HTTP step" });
   await within(panel).findByRole("textbox", { name: "Unhandled body" });
-  expect(within(panel).queryByText(/^Callers get whatever/)).toBeNull();
   expect(
     within(panel).getByText(/^This sends callers what the run read/),
   ).toBeTruthy();
@@ -286,9 +382,7 @@ test("a problem in Unhandled's body marks its tab and shows under it", async () 
   expect(tab.textContent).toBe("Unhandled (1 problem)");
   fireEvent.click(tab);
   expect(
-    await within(panel).findByText(
-      "Write its body, or give what the step got instead.",
-    ),
+    await within(panel).findByText("Write its body, or remove it."),
   ).toBeTruthy();
 });
 

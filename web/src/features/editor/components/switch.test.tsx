@@ -20,8 +20,8 @@ const respond: Definition = {
   nodes: [{ id: "respond", kind: "transform", expr: "{ 'id': 1 }" }],
   response: {
     answers: [
-      { status: 200, from: "respond" },
-      { status: 400, from: "respond" },
+      { status: 200, lines: [{ from: "respond" }] },
+      { status: 400, lines: [{ from: "respond" }] },
     ],
   },
 };
@@ -50,8 +50,8 @@ const cased: Definition = {
   edges: [{ from: "respond", to: "fallback", on: 404 }],
   response: {
     answers: [
-      { status: 200, from: "respond", on: 200 },
-      { status: 500, from: "respond", unhandled: true },
+      { status: 200, lines: [{ from: "respond", on: 200 }] },
+      { status: 500, lines: [{ from: "respond", unhandled: true }] },
     ],
   },
 };
@@ -141,8 +141,8 @@ test("Use cases makes the expression the first case's, and each other answer a c
   ]);
   const draft = await save();
   expect(draft?.response?.answers).toEqual([
-    { status: 200, from: "respond", on: 200 },
-    { status: 400, from: "respond", on: 400 },
+    { status: 200, lines: [{ from: "respond", on: 200 }] },
+    { status: 400, lines: [{ from: "respond", on: 400 }] },
   ]);
 });
 
@@ -184,7 +184,7 @@ test("a case's tab names it and sets its exit code, and moves and removes it, it
   expect(draft?.edges).toEqual([{ from: "respond", to: "fallback", on: 410 }]);
   expect(draft?.response?.answers).toEqual([
     { status: 200 },
-    { status: 500, from: "respond", unhandled: true },
+    { status: 500, lines: [{ from: "respond", unhandled: true }] },
   ]);
 });
 
@@ -274,7 +274,7 @@ test("each tab reads for itself: a field picked goes where its cursor was last, 
   );
   // What it gives over the samples: this case holds.
   expect(
-    within(panel).getByRole("heading", { name: "It answers 400" }),
+    within(panel).getByRole("heading", { name: "Gives 400" }),
   ).toBeTruthy();
   expect(within(panel).getByText(/"error": "bad key"/)).toBeTruthy();
   // In Case 2's tab, where its cursor is; Case 1's condition keeps what it
@@ -288,9 +288,7 @@ test("each tab reads for itself: a field picked goes where its cursor was last, 
   tab("Case 1");
   expect(field("Case 1 when")).toHaveProperty("value", "input.key");
   tab("Case 2");
-  expect(
-    within(panel).getByText("With these samples, Case 1 holds, not this."),
-  ).toBeTruthy();
+  expect(within(panel).getByText("Case 1 holds, not this.")).toBeTruthy();
 });
 
 test("a body that sends what the run read is warned about", async () => {
@@ -315,7 +313,7 @@ test("a body that sends what the run read is warned about", async () => {
   expect(within(panel).queryByText(/^This sends callers/)).toBeNull();
 });
 
-test("with no case holding over the samples, each tab says the step fails into its Unhandled", async () => {
+test("with no case holding over the samples, each tab says so", async () => {
   renderEditor(cased);
   server.use(
     http.post("/api/v1/preview", () =>
@@ -335,9 +333,7 @@ test("with no case holding over the samples, each tab says the step fails into i
   const panel = await open();
   // Each case's tab, the hidden one too.
   expect(
-    await within(panel).findAllByText(
-      "With these samples, no case holds: the step fails, and its Unhandled takes that.",
-    ),
+    await within(panel).findAllByText("No case holds with these samples."),
   ).toHaveLength(2);
 });
 
@@ -411,8 +407,8 @@ test("+ Case skips a status an answer has, as the step's Unhandled gives it", as
     ...cased,
     response: {
       answers: [
-        { status: 200, from: "respond", on: 200 },
-        { status: 400, from: "respond", unhandled: true },
+        { status: 200, lines: [{ from: "respond", on: 200 }] },
+        { status: 400, lines: [{ from: "respond", unhandled: true }] },
       ],
     },
   });

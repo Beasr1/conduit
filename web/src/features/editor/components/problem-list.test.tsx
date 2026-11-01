@@ -27,8 +27,13 @@ const urlRequired = {
   detail: "a request needs a url",
 };
 
+// type types into the field labelled label: a tab's panel is named by its
+// tab, so only fields count.
 function type(label: string, value: string) {
-  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  fireEvent.change(
+    screen.getByLabelText(label, { selector: "input, textarea" }),
+    { target: { value } },
+  );
 }
 
 test("a problem shows on its step, its field, its tab and in the list", async () => {
@@ -44,7 +49,11 @@ test("a problem shows on its step, its field, its tab and in the list", async ()
   expect(within(panel).getByLabelText("URL").getAttribute("aria-invalid")).toBe(
     "true",
   );
-  // Seen from the 2xx tab, the Request tab still says it has one.
+  // So does its tab in the Request; seen from the 2xx tab, the Request
+  // tab still says it has one.
+  expect(
+    within(panel).getByRole("tab", { name: "URL (1 problem)" }),
+  ).toBeTruthy();
   fireEvent.click(within(panel).getByRole("tab", { name: "2xx" }));
   expect(
     within(panel).getByRole("tab", { name: "Request (1 problem)" }),
@@ -75,7 +84,7 @@ test("the draft is checked a moment after it changes", async () => {
     }),
   );
   fireEvent.click(await screen.findByText("crm"));
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
 
   type("URL", "");
   expect(await screen.findByText("Add a URL.")).toBeTruthy();
@@ -83,6 +92,44 @@ test("the draft is checked a moment after it changes", async () => {
   type("URL", "https://crm.example.com/v2/contacts");
   await waitFor(() => expect(screen.queryByText("Add a URL.")).toBeNull());
   expect(screen.queryByRole("button", { name: "1 problem" })).toBeNull();
+});
+
+test("a problem in a header opens the Request on Headers, at the header", async () => {
+  renderEditor(
+    {
+      ...specExample,
+      nodes: specExample.nodes.map((n) =>
+        n.id === "crm" && n.request
+          ? { ...n, request: { ...n.request, headers: { "X Bad": "1" } } }
+          : n,
+      ),
+    },
+    [
+      {
+        pointer: "/nodes/3/request/headers/X Bad",
+        code: "invalid_header_name",
+        detail: "not a header name",
+      },
+    ],
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "1 problem" }));
+  const list = await screen.findByRole("complementary", { name: "Problems" });
+  fireEvent.click(
+    within(list).getByRole("button", { name: /^crm · Request header “X Bad”/ }),
+  );
+  const opened = await screen.findByRole("complementary", {
+    name: "HTTP step",
+  });
+  expect(
+    within(opened)
+      .getByRole("tab", { name: "Headers (1 problem)" })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      within(opened).getByRole("textbox", { name: "Header 1 name" }),
+    ),
+  );
 });
 
 test("a connection with a problem says so, and its condition says what", async () => {

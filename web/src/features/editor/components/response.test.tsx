@@ -31,8 +31,8 @@ const answering: Definition = {
   ],
   response: {
     answers: [
-      { status: 200, from: "found" },
-      { status: 404, from: "gone", schema: { type: "object" } },
+      { status: 200, lines: [{ from: "found" }] },
+      { status: 404, lines: [{ from: "gone" }], schema: { type: "object" } },
       { status: 409 },
     ],
   },
@@ -89,9 +89,10 @@ test("the card lists each answer with its point, and the panel the step that giv
   expect(
     within(panel).getByRole("button", { name: "Given by gone" }),
   ).toBeTruthy();
-  expect(within(panel).getByText(/^No line yet/)).toBeTruthy();
-  for (const status of ["400", "401", "404", "500", "502", "503", "504"])
-    expect(within(panel).getByText(status, { selector: "dt" })).toBeTruthy();
+  expect(within(panel).getByText("No line yet.")).toBeTruthy();
+  // Then, a line each, what else a caller can get.
+  expect(within(panel).getByText("500, 502 or 504, by cause")).toBeTruthy();
+  expect(within(panel).getByText("400 401 404 503")).toBeTruthy();
   fireEvent.click(
     within(panel).getByRole("button", { name: "Given by found" }),
   );
@@ -100,13 +101,56 @@ test("the card lists each answer with its point, and the panel the step that giv
   ).toBeTruthy();
 });
 
+// A run gives the first answer, top to bottom, that one of its lines
+// reached (plan 14).
+test("answers are tried top to bottom: numbered, moved, each with its lines", async () => {
+  renderEditor({
+    ...answering,
+    response: {
+      answers: [
+        { status: 200, lines: [{ from: "found" }] },
+        {
+          status: 500,
+          lines: [
+            { from: "found", unhandled: true },
+            { from: "gone", unhandled: true },
+          ],
+        },
+      ],
+    },
+  });
+  const panel = await openResponse();
+  const headings = () =>
+    within(panel)
+      .getAllByRole("heading", { level: 4 })
+      .map((h) => h.textContent);
+  expect(headings()).toEqual(["1. 200", "2. 500"]);
+  const given = (name: string) =>
+    within(panel).queryByRole("button", { name: `Given by ${name}` });
+  expect(given("found on Unhandled")).toBeTruthy();
+  expect(given("gone on Unhandled")).toBeTruthy();
+  fireEvent.click(within(panel).getByRole("button", { name: "Move 500 up" }));
+  await waitFor(() => expect(headings()).toEqual(["1. 500", "2. 200"]));
+  expect(
+    within(panel).getByRole("button", { name: "Move 500 up" }),
+  ).toHaveProperty("disabled", true);
+  // Disconnect takes one line away, and the answer keeps the others.
+  fireEvent.click(
+    within(panel).getByRole("button", {
+      name: "Disconnect gone on Unhandled from 500",
+    }),
+  );
+  await waitFor(() => expect(given("gone on Unhandled")).toBeNull());
+  expect(given("found on Unhandled")).toBeTruthy();
+});
+
 test("an HTTP step that gives an answer opens on the response its line leaves on", async () => {
   renderEditor({
     ...specExample,
     nodes: specExample.nodes.map((n) =>
       n.id === "crm" ? { ...n, outputs: [{ status: 409 }] } : n,
     ),
-    response: { answers: [{ status: 409, from: "crm", on: 409 }] },
+    response: { answers: [{ status: 409, lines: [{ from: "crm", on: 409 }] }] },
   });
   const panel = await openResponse();
   fireEvent.click(
@@ -202,7 +246,7 @@ test("a transform joined to a second answer picks between them with cases", asyn
   renderEditor({
     nodes: [{ id: "respond", kind: "transform", expr: "{ 'id': 7 }" }],
     response: {
-      answers: [{ status: 200, from: "respond" }, { status: 404 }],
+      answers: [{ status: 200, lines: [{ from: "respond" }] }, { status: 404 }],
     },
   });
   fireEvent.click(await screen.findByText("respond"));
@@ -294,16 +338,16 @@ test("the list says where in the response each problem is", async () => {
   renderEditor(
     {
       ...answering,
-      response: { answers: [{ status: 99 }], unhandled: { body: "" } },
+      response: { answers: [{ status: 99 }], errors: { body: "" } },
     },
     [
-      { pointer: "/response/answers/0/from", code: "required", detail: "" },
+      { pointer: "/response/answers/0/lines", code: "required", detail: "" },
       {
         pointer: "/response/answers/0/status",
         code: "invalid_status",
         detail: "",
       },
-      { pointer: "/response/unhandled/body", code: "required", detail: "" },
+      { pointer: "/response/errors/body", code: "required", detail: "" },
     ],
   );
   fireEvent.click(await screen.findByRole("button", { name: "3 problems" }));
@@ -313,9 +357,9 @@ test("the list says where in the response each problem is", async () => {
       .getAllByRole("button", { name: /^Response/ })
       .map((b) => b.textContent),
   ).toEqual([
-    "Response · 99 · its lineJoin a step to this answer: drag from the step's point to the answer's.",
+    "Response · 99 · its linesJoin a step to this answer: drag from the step's point to the answer's.",
     "Response · 99 answerA status from 200 to 599.",
-    "Response · UnhandledWrite its body, or use Conduit's problem details instead.",
+    "Response · Error bodyWrite the error body, or use problem details.",
   ]);
   // A problem in an answer's status opens it, at its Remove.
   fireEvent.click(
@@ -367,7 +411,8 @@ function dragFrom(step: string, over: () => Element | null) {
   }
 }
 
-test("a line let go on an answer that has one says where it's from, until the next pick", async () => {
+// An answer takes lines from any number of steps (plan 14).
+test("a second step's line into an answer is drawn beside the first", async () => {
   renderEditor({
     ...answering,
     nodes: [
@@ -378,21 +423,15 @@ test("a line let go on an answer that has one says where it's from, until the ne
   const status = within(
     await screen.findByTestId("rf__node-#response"),
   ).getByRole("status");
-  expect(status.textContent).toBe("");
   dragFrom(
     "bad_400",
     () => card().querySelector('[data-part="404"] .react-flow__handle') ?? null,
   );
-  await waitFor(() =>
-    expect(status.textContent).toBe(
-      "404 takes one line, from gone. To answer 404 from bad_400 too, join both to a transform, and the transform to the answer.",
-    ),
-  );
-  expect(screen.queryByTestId("rf__edge-bad_400->#response:1")).toBeNull();
-  fireEvent.click(
-    within(screen.getByTestId("rf__node-bad_400")).getByText("bad_400"),
-  );
-  await waitFor(() => expect(status.textContent).toBe(""));
+  expect(
+    await screen.findByTestId("rf__edge-bad_400->#response:1"),
+  ).toBeTruthy();
+  expect(screen.getByTestId("rf__edge-gone->#response:1")).toBeTruthy();
+  expect(status.textContent).toBe("");
   // A line drawn again into the answer it already gives says nothing.
   dragFrom(
     "gone",
@@ -422,43 +461,41 @@ test("a line let go on a card with no answers says to add one", async () => {
   await waitFor(() => expect(status.textContent).toBe(""));
 });
 
-test("a step that leads nowhere, when every answer has its line, says to join both to a transform", async () => {
+test("Connect to offers every answer, those other steps give among them", async () => {
   renderEditor({
     ...answering,
     nodes: [
       ...answering.nodes,
       { id: "bad_400", kind: "transform", expr: "1" },
     ],
-    response: { answers: answering.response?.answers?.slice(0, 2) },
   });
   fireEvent.click(await screen.findByText("bad_400"));
   await screen.findByRole("complementary", { name: "Transform step" });
-  // Its value's, before its Unhandled's.
-  expect(screen.getAllByText(/^None yet/)[0]?.textContent).toBe(
-    "None yet: connect a step below, or drag from its point on the canvas to the step. Each answer on the response takes one line, and has it: to answer from here too, join this step and the one that gives the answer to a transform.",
-  );
+  expect(
+    (await options("Connect to")).filter((o) => o.startsWith("Response")),
+  ).toEqual(["Response 200", "Response 404", "Response 409"]);
 });
 
-test("unhandled answers a run that gives none: written, warned about, and taken away", async () => {
+test("the error body, problem details until written: written, warned about, and taken away", async () => {
   renderEditor(answering);
   const panel = await openResponse();
   expect(strip()?.textContent).toBe("Unhandled · problem details");
-  fireEvent.click(
-    within(panel).getByRole("button", { name: "Write your own" }),
-  );
+  expect(within(panel).getByText("Problem details.")).toBeTruthy();
+  fireEvent.click(within(panel).getByRole("button", { name: "Write it" }));
   const body = await within(panel).findByRole("textbox", {
-    name: "Unhandled body",
+    name: "Error body",
   });
-  expect(body).toHaveProperty("value", "{ 'error': error.detail }");
-  expect(strip()?.textContent).toBe("Unhandled · your body");
+  expect(body).toHaveProperty(
+    "value",
+    "{ 'error': error.code, 'detail': error.detail }",
+  );
+  expect(strip()?.textContent).toBe("Unhandled · your error body");
   fireEvent.change(body, { target: { value: "$$" } });
   expect(
     within(panel).getByText(/^This sends callers what the run read/),
   ).toBeTruthy();
   fireEvent.click(
-    within(panel).getByRole("button", {
-      name: "Use Conduit's problem details instead",
-    }),
+    within(panel).getByRole("button", { name: "Use problem details instead" }),
   );
   await waitFor(() =>
     expect(strip()?.textContent).toBe("Unhandled · problem details"),
@@ -492,7 +529,9 @@ test("a revision saved with an output opens with it moved into a step, to save",
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(screen.queryByText(note)).toBeNull());
   expect(saved[0]?.response).toEqual({
-    answers: [{ status: 200, from: "respond", schema: { type: "object" } }],
+    answers: [
+      { status: 200, lines: [{ from: "respond" }], schema: { type: "object" } },
+    ],
   });
   expect(saved[0]).not.toHaveProperty("output");
 });

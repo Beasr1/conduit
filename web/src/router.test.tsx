@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { expect, test, vi } from "vitest";
+import { beforeAll, expect, test, vi } from "vitest";
 
 import type { components } from "@/gen/schema";
 import { appRoutes, routes, safeFrom, sessionEnded } from "@/router";
@@ -11,6 +11,17 @@ import { server } from "@/test/server";
 // vi.mock is hoisted, so this holds for the whole file.
 vi.mock("@/routes/workflows", () => {
   throw new Error("Failed to fetch dynamically imported module");
+});
+
+// The pages load lazily, as in the app. Imported here first, they're
+// compiled before any test runs, so none is timed on that: the workflow
+// page, the editor and all, took over a second under the full parallel run.
+beforeAll(async () => {
+  await Promise.all([
+    import("@/routes/layout"),
+    import("@/routes/workflow"),
+    import("@/routes/sign-in"),
+  ]);
 });
 
 test.each([

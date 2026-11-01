@@ -45,8 +45,13 @@ async function reopen(id: string) {
   await pick(id);
 }
 
+// type types into the field labelled label, on whichever tab it is: a tab's
+// panel is named by its tab, so only fields count.
 function type(label: string, value: string) {
-  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  fireEvent.change(
+    screen.getByLabelText(label, { selector: "input, textarea" }),
+    { target: { value } },
+  );
 }
 
 test("picking a step opens its settings, and Close puts them away", async () => {
@@ -56,7 +61,7 @@ test("picking a step opens its settings, and Close puts them away", async () => 
     name: "HTTP step",
   });
   expect(within(panel).getByLabelText("Id")).toHaveProperty("value", "crm");
-  expect(within(panel).getByLabelText("URL")).toHaveProperty(
+  expect(within(panel).getByRole("textbox", { name: "URL" })).toHaveProperty(
     "value",
     "https://crm.example.com/v1/contacts",
   );
@@ -86,46 +91,52 @@ test.each(["Close", "Add HTTP step"])(
   },
 );
 
-test("an HTTP step's tabs are its blocks, and its 2xx says how the steps after read it", async () => {
+test("an HTTP step's tabs are its blocks, and its Request's the parts of the call", async () => {
   renderEditor(specExample);
   await pick("crm");
   const panel = await screen.findByRole("complementary", {
     name: "HTTP step",
   });
-  const tab = (name: string) => within(panel).getByRole("tab", { name });
-  expect(
-    within(panel)
+  const tabs = (list: string) =>
+    within(within(panel).getByRole("tablist", { name: list }))
       .getAllByRole("tab")
-      .map((t) => t.textContent),
-  ).toEqual(["Request", "2xx", "+ Response", "Unhandled"]);
+      .map((t) => t.textContent);
+  const tab = (name: string) => within(panel).getByRole("tab", { name });
+  expect(tabs("Blocks")).toEqual(["Request", "2xx", "+ Response", "Unhandled"]);
+  expect(tabs("Request")).toEqual(["URL", "Headers", "Query", "Body", "Retry"]);
   expect(tab("Request").getAttribute("aria-selected")).toBe("true");
+  expect(tab("URL").getAttribute("aria-selected")).toBe("true");
+  fireEvent.click(tab("Retry"));
   type("Timeout (ms)", "30s");
 
+  // A response's tab leads with its condition.
   fireEvent.click(tab("2xx"));
-  expect(within(panel).queryByRole("textbox", { name: "URL" })).toBeNull();
-  // In the open tab: the hidden Unhandled tab names the body too.
-  const open = within(screen.getByRole("tabpanel"));
-  for (const part of ["status", "headers", "body"])
-    expect(open.getByText(`nodes.crm.${part}`)).toBeTruthy();
-  // JSONata reads content-type as a subtraction without them.
+  expect(within(panel).queryByRole("tablist", { name: "Request" })).toBeNull();
   expect(
-    within(panel).getByText("nodes.crm.headers.`content-type`"),
+    within(panel).getByRole("group", { name: "When it answers 2xx" }),
   ).toBeTruthy();
 
-  // Text that doesn't count yet is still there after a switch.
+  // Text that doesn't count yet is still there after a switch, on the tab
+  // it was typed in.
   fireEvent.click(tab("Request"));
   expect(
     within(panel).getByRole("textbox", { name: "Timeout (ms)" }),
   ).toHaveProperty("value", "30s");
 });
 
-test("an arrow key moves to the other tab and opens it", async () => {
+test("an arrow key moves to the next tab and opens it, in either row", async () => {
   renderEditor(specExample);
   await pick("crm");
-  const request = await screen.findByRole("tab", { name: "Request" });
+  const url = await screen.findByRole("tab", { name: "URL" });
+  url.focus();
+  fireEvent.keyDown(url, { key: "ArrowRight" });
+  expect(
+    await screen.findByRole("button", { name: "Add header" }),
+  ).toBeTruthy();
+  const request = screen.getByRole("tab", { name: "Request" });
   request.focus();
   fireEvent.keyDown(request, { key: "ArrowRight" });
-  expect(await screen.findByText("nodes.crm.status")).toBeTruthy();
+  expect(await screen.findByRole("textbox", { name: "2xx body" })).toBeTruthy();
 });
 
 // user answers 2xx or 404.
@@ -209,37 +220,34 @@ test("clicking one point and then another opens each, and connects nothing", asy
 test("editing the call leaves the request body as it was", async () => {
   renderEditor(specExample);
   await pick("crm");
-  fireEvent.change(
-    await screen.findByRole("textbox", { name: "Request body" }),
-    {
-      target: { value: "{ 'a': 1 }" },
-    },
-  );
+  fireEvent.click(await screen.findByRole("tab", { name: "Body" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Request body" }), {
+    target: { value: "{ 'a': 1 }" },
+  });
   type("URL", "https://crm.example.com/v2/contacts");
+  // The Request opens again on the tab it was left on.
   await reopen("crm");
   expect(
     await screen.findByRole("textbox", { name: "Request body" }),
   ).toHaveProperty("value", "{ 'a': 1 }");
 });
 
-test("the 2xx tab reads the step by the id it has now", async () => {
+test("the id says how expressions read the step, by the id it has now", async () => {
   renderEditor(specExample);
   await pick("crm");
-  fireEvent.click(await screen.findByRole("tab", { name: "2xx" }));
-  const id = screen.getByLabelText("Id");
+  const panel = await screen.findByRole("complementary", {
+    name: "HTTP step",
+  });
+  expect(within(panel).getByText("nodes.crm")).toBeTruthy();
   type("Id", "contacts");
-  fireEvent.blur(id);
-  expect(
-    await within(screen.getByRole("tabpanel")).findByText(
-      "nodes.contacts.body",
-    ),
-  ).toBeTruthy();
+  fireEvent.blur(screen.getByRole("textbox", { name: "Id" }));
+  expect(await within(panel).findByText("nodes.contacts")).toBeTruthy();
 });
 
 test("the URL goes into the step as it's typed", async () => {
   renderEditor(specExample);
   await pick("crm");
-  await screen.findByLabelText("URL");
+  await screen.findByRole("textbox", { name: "URL" });
   type("URL", "https://crm.example.com/v2/contacts");
   expect(
     await screen.findByText("POST https://crm.example.com/v2/contacts"),
@@ -289,9 +297,8 @@ test("renaming says where expressions still read the old id", async () => {
 test("removing a header row leaves the other rows as they were", async () => {
   renderEditor(withCrm({ ...crm, headers: { A: "1", B: "2", C: "3" } }));
   await pick("crm");
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Remove header 2" }),
-  );
+  fireEvent.click(await screen.findByRole("tab", { name: "Headers" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove header 2" }));
   expect(screen.getByLabelText("Header 2 name")).toHaveProperty("value", "C");
   expect(screen.getByLabelText("Header 2 value")).toHaveProperty("value", "3");
 
@@ -313,7 +320,8 @@ test("removing a header row leaves the other rows as they were", async () => {
 test("a repeated header name is marked, and the first one counts", async () => {
   renderEditor(withCrm({ ...crm, headers: { A: "1" } }));
   await pick("crm");
-  fireEvent.click(await screen.findByRole("button", { name: "Add header" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Headers" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add header" }));
   type("Header 2 name", "A");
   type("Header 2 value", "2");
   expect(await screen.findByText("Another header has this name.")).toBeTruthy();
@@ -328,7 +336,7 @@ test("a repeated header name is marked, and the first one counts", async () => {
 test("a number is kept once it's a whole number in range", async () => {
   renderEditor(specExample);
   await pick("crm");
-  await screen.findByLabelText("Timeout (ms)");
+  fireEvent.click(await screen.findByRole("tab", { name: "Retry" }));
   type("Timeout (ms)", "30s");
   expect(
     await screen.findByText(/^A whole number of milliseconds/),
@@ -377,8 +385,7 @@ test("a transform step says how the steps after it read its value", async () => 
   const panel = await screen.findByRole("complementary", {
     name: "Transform step",
   });
-  // Its expression says so first; its Unhandled names the same path.
-  expect(within(panel).getAllByText("nodes.merge.body")[0]).toBeTruthy();
+  expect(within(panel).getByText("nodes.merge")).toBeTruthy();
 });
 
 // Looking at a step, or typing what doesn't count yet, mustn't count as
@@ -392,13 +399,18 @@ test("typing that leaves the step as it was changes nothing", async () => {
       <SidePanel workflow="wf-1" />
     </EditorContext>,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Add header" }));
+  const leave = (label: string) => {
+    const field = screen.getByRole("textbox", { name: label });
+    fireEvent.focus(field);
+    fireEvent.blur(field);
+  };
+  leave("Id");
+  leave("URL");
+  fireEvent.click(screen.getByRole("tab", { name: "Headers" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add header" }));
   type("Header 1 value", "no name yet");
+  fireEvent.click(screen.getByRole("tab", { name: "Retry" }));
   type("Timeout (ms)", "30s");
-  for (const label of ["Id", "URL", "Attempts"]) {
-    // By role, which skips the hidden tabs, as a screen reader does.
-    fireEvent.focus(screen.getByRole("textbox", { name: label }));
-    fireEvent.blur(screen.getByRole("textbox", { name: label }));
-  }
+  leave("Attempts");
   expect(store.getState().draft).toBe(specExample);
 });

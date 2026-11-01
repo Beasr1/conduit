@@ -78,11 +78,10 @@ func Validate(d *Definition) Problems {
 	}
 
 	edges, cyclic := v.checkEdges(d.Edges, d.Nodes, index)
-	var need []route // nil on a cycle, whose edges are its problem
-	if !cyclic {
-		need = v.checkJoins(d, edges)
+	if !cyclic { // a cycle's edges are its problem
+		v.checkJoins(d, edges)
 	}
-	v.checkResponse(d, index, need)
+	v.checkResponse(d, index)
 	if len(d.SampleInput) > maxSample {
 		v.add("/sample_input", "too_large", "a sample input is at most %d KiB; this one is %d KiB", maxSample>>10, kib(len(d.SampleInput)))
 	}
@@ -145,7 +144,9 @@ func (v *validator) checkNode(p string, n Node) {
 	case n.Kind == NodeKindTransform:
 		v.add(p+"/outputs", "not_allowed", "a transform node has one output, so it lists none")
 	}
-	if n.Unhandled != nil && strings.TrimSpace(n.Unhandled.Body) == "" {
+	// An Unhandled body is optional now that fail can say what the block does,
+	// but one that's there needs JSONata.
+	if u := n.Unhandled; u != nil && u.Body != "" && strings.TrimSpace(u.Body) == "" {
 		v.add(p+"/unhandled/body", "required", "an Unhandled body needs JSONata: write it, or remove it")
 	}
 }
@@ -379,12 +380,13 @@ func (e Edge) Output() int {
 	return e.On
 }
 
-// Output is the output of from the answer's line leaves from, as an edge's.
-func (a Answer) Output() int {
-	if a.Unhandled {
+// Output is the output of from a line into an answer leaves from, as an
+// edge's.
+func (l AnswerLine) Output() int {
+	if l.Unhandled {
 		return OnUnhandled
 	}
-	return a.On
+	return l.On
 }
 
 type edgeRef struct {

@@ -77,25 +77,21 @@ test("lines into a transform with several are dashed, as each may not come; a lo
   expect(needed.classList.contains("way")).toBe(false);
 });
 
-test("a way's panel says the transform runs if any comes; a lone line's, that it needs it", async () => {
+test("a way's Required says, when asked, what marking it does", async () => {
   renderEditor(merged);
   fireEvent.click(await screen.findByTestId("rf__edge-prefs->prefs_ok"));
   const way = await screen.findByRole("complementary", { name: "Connection" });
   expect(
-    within(way).getByText(
-      /prefs_ok, a transform, runs if any of its ways is taken, once all have ended/,
+    within(way)
+      .getByRole("checkbox", { name: "Required" })
+      .getAttribute("aria-checked"),
+  ).toBe("false");
+  fireEvent.click(within(way).getByRole("button", { name: "About Required" }));
+  expect(
+    await screen.findByText(
+      "prefs_ok runs only once this line came, so its expression can read prefs without checking. Unmarked, prefs_ok may run without it, once another line came.",
     ),
   ).toBeTruthy();
-  fireEvent.click(screen.getByTestId("rf__edge-prefs_ok->greet"));
-  await waitFor(() =>
-    expect(
-      within(
-        screen.getByRole("complementary", { name: "Connection" }),
-      ).getByText(
-        /greet runs only when this is true and its other connections are taken/,
-      ),
-    ).toBeTruthy(),
-  );
 });
 
 // previewing answers each preview with preview, and gives what was asked.
@@ -123,15 +119,9 @@ const mergedReads = {
   },
 };
 
-// byLines is the lines a panel names, each as "By prefs · 2xx" and what
-// follows it in its sentence.
-function byLines(panel: HTMLElement): string[] {
-  return within(panel)
-    .getAllByText(/^By/)
-    .map((p) => p.textContent);
-}
-
-test("its preview reads what the runs by each way read, merged, and gives a value by each", async () => {
+// A transform's preview gives one value, the first run's that comes (plan
+// 13): which way a run came by is the transform's to decide.
+test("its preview reads what the runs by each way read, merged, and gives the first's value", async () => {
   renderEditor(merged);
   const asked = previewing({
     reads: mergedReads,
@@ -144,8 +134,7 @@ test("its preview reads what the runs by each way read, merged, and gives a valu
   });
   const panel = await open("prefs_ok");
   expect(await within(panel).findByText(/"theme": "dark"/)).toBeTruthy();
-  expect(within(panel).getByText(/"theme": "light"/)).toBeTruthy();
-  expect(byLines(panel)).toEqual(["By prefs · 2xx", "By fallback · 2xx"]);
+  expect(within(panel).queryByText(/"theme": "light"/)).toBeNull();
   // There's no run to pick: the preview is of each, asked of the step.
   expect(within(panel).queryByText("Preview a run that comes by")).toBeNull();
   expect(Object.keys(asked.at(-1) ?? {})).toEqual(["definition", "node"]);
@@ -153,24 +142,34 @@ test("its preview reads what the runs by each way read, merged, and gives a valu
   expect(within(panel).getByText("fallback")).toBeTruthy();
 });
 
-test("a way a run can't come by says so, and one that gives nothing says that", async () => {
+test("a way no run comes by gives way to the next, and a run that gives nothing says so", async () => {
   renderEditor(merged);
   previewing({
     reads: mergedReads,
     ways: [
-      { edge: 0, skipped: false },
-      { edge: 2, skipped: true },
+      { edge: 0, skipped: true },
+      { edge: 2, gives: { theme: "light" }, skipped: false },
     ],
     skipped: false,
     problems: [],
   });
   const panel = await open("prefs_ok");
-  await within(panel).findByText("It gives");
-  expect(byLines(panel)).toEqual([
-    "By prefs · 2xx",
-    "By fallback · 2xx: no run comes this way with these samples.",
-  ]);
-  expect(within(panel).getAllByText("Nothing.")).toHaveLength(1);
+  expect(await within(panel).findByText(/"theme": "light"/)).toBeTruthy();
+
+  previewing({
+    reads: mergedReads,
+    ways: [
+      { edge: 0, skipped: false },
+      { edge: 2, gives: { theme: "light" }, skipped: false },
+    ],
+    skipped: false,
+    problems: [],
+  });
+  fireEvent.change(within(panel).getByRole("textbox", { name: "Expression" }), {
+    target: { value: "nodes.prefs.body.none" },
+  });
+  expect(await within(panel).findByText("Nothing.")).toBeTruthy();
+  expect(within(panel).queryByText(/"theme": "light"/)).toBeNull();
 });
 
 test("a transform with one line into it previews one run", async () => {
@@ -182,9 +181,10 @@ test("a transform with one line into it previews one run", async () => {
     problems: [],
   });
   const panel = await open("greet");
-  expect(await within(panel).findByText("It gives")).toBeTruthy();
+  expect(
+    await within(panel).findByRole("heading", { name: "Gives" }),
+  ).toBeTruthy();
   expect(within(panel).getByText('"dark"')).toBeTruthy();
-  expect(within(panel).queryAllByText(/^By/)).toEqual([]);
   expect(asked.at(-1)?.node).toBe("greet");
 });
 
@@ -220,7 +220,7 @@ const cased: Definition = {
   ),
 };
 
-test("each case's tab says what holds in the run by each way", async () => {
+test("each case's tab says what the first run that comes gives, or which case holds instead", async () => {
   renderEditor(cased);
   previewing({
     reads: mergedReads,
@@ -238,22 +238,39 @@ test("each case's tab says what holds in the run by each way", async () => {
   const panel = await open("prefs_ok");
   const shown = () =>
     panel.querySelector<HTMLElement>("[role=tabpanel]:not([hidden])") ?? panel;
-  await within(shown()).findByText("With these samples");
-  expect(byLines(shown())).toEqual(["By prefs · 2xx", "By fallback · 2xx"]);
-  expect(within(shown()).getByText("It answers 200:")).toBeTruthy();
+  expect(
+    await within(shown()).findByRole("heading", { name: "Gives 200" }),
+  ).toBeTruthy();
   expect(within(shown()).getByText(/"theme": "dark"/)).toBeTruthy();
-  expect(within(shown()).getByText("light holds, not this.")).toBeTruthy();
 
   fireEvent.click(within(panel).getByRole("tab", { name: "light" }));
   await waitFor(() =>
     expect(within(shown()).getByText("dark holds, not this.")).toBeTruthy(),
   );
-  expect(
-    within(shown()).getByText("It answers 201, with no body."),
-  ).toBeTruthy();
 });
 
-test("a case's tab says when a run by a way gives nothing", async () => {
+test("a case that holds with no body says so", async () => {
+  renderEditor(cased);
+  previewing({
+    reads: mergedReads,
+    ways: [
+      { edge: 0, skipped: true },
+      { edge: 2, gives: { status: 201 }, skipped: false },
+    ],
+    skipped: false,
+    problems: [],
+  });
+  const panel = await open("prefs_ok");
+  fireEvent.click(within(panel).getByRole("tab", { name: "light" }));
+  const shown = () =>
+    panel.querySelector<HTMLElement>("[role=tabpanel]:not([hidden])") ?? panel;
+  expect(
+    await within(shown()).findByRole("heading", { name: "Gives 201" }),
+  ).toBeTruthy();
+  expect(within(shown()).getByText("No body.")).toBeTruthy();
+});
+
+test("a case's tab says when no case holds", async () => {
   renderEditor(cased);
   previewing({
     reads: mergedReads,
@@ -274,12 +291,8 @@ test("a case's tab says when a run by a way gives nothing", async () => {
   const shown = () =>
     panel.querySelector<HTMLElement>("[role=tabpanel]:not([hidden])") ?? panel;
   expect(
-    await within(shown()).findByText("Nothing: the problems above say why."),
+    await within(shown()).findByText("No case holds with these samples."),
   ).toBeTruthy();
-  expect(byLines(shown())).toEqual([
-    "By prefs · 2xx",
-    "By fallback · 2xx: no run comes this way with these samples.",
-  ]);
 });
 
 // saving has the server keep what Save sends; save clicks it and gives that.
@@ -303,7 +316,7 @@ function saving() {
   };
 }
 
-test("a line into a transform marked required is drawn solid, and the transform needs it", async () => {
+test("a line into a transform marked required is drawn solid, and saved so", async () => {
   renderEditor(merged);
   const save = saving();
   fireEvent.click(await screen.findByTestId("rf__edge-fallback->prefs_ok"));
@@ -319,25 +332,10 @@ test("a line into a transform marked required is drawn solid, and the transform 
   const line = screen.getByTestId("rf__edge-fallback->prefs_ok");
   expect(line.classList.contains("way")).toBe(false);
   expect(line.getAttribute("aria-label")).not.toContain("one of its ways");
-  expect(
-    within(panel).getByText(
-      /prefs_ok runs only when this is true and its other required lines are taken/,
-    ),
-  ).toBeTruthy();
   // The line beside it may still not come.
   expect(
     screen.getByTestId("rf__edge-prefs->prefs_ok").classList.contains("way"),
   ).toBe(true);
-  fireEvent.click(screen.getByTestId("rf__edge-prefs->prefs_ok"));
-  await waitFor(() =>
-    expect(
-      within(
-        screen.getByRole("complementary", { name: "Connection" }),
-      ).getByText(
-        /prefs_ok, a transform, runs once its required lines are taken, with this way or without it/,
-      ),
-    ).toBeTruthy(),
-  );
   const draft = await save();
   expect(draft?.edges?.[2]).toEqual({
     from: "fallback",
@@ -626,10 +624,6 @@ test("a line into a step the run skipped is taken when its step took it", async 
   ).toBe("Connection from fallback to prefs_ok, not taken in this run");
 });
 
-// The paragraph whose words are text, as the screen shows it.
-const said = (text: string) => (_: string, el: Element | null) =>
-  el?.tagName === "P" && el.textContent === text;
-
 test("its Input tags a step a run may come without, and one that may answer either way, and says what to check", async () => {
   renderEditor(merged);
   previewing({
@@ -653,23 +647,16 @@ test("its Input tags a step a run may come without, and one that may answer eith
     expect(beside("nodes.fallback")).toBe("fallbackconditional"),
   );
   expect(beside("nodes.prefs")).toBe("prefs2xx or 400");
+  // What a tag asks of an expression is the Input's hint.
+  fireEvent.click(within(panel).getByRole("button", { name: "About Input" }));
   expect(
-    within(panel).getByText(
-      said(
-        "fallback is conditional: a run can reach this step without it. Check it with $exists(nodes.fallback), or, to run this step only when it comes, mark the line that brings it required.",
-      ),
-    ),
-  ).toBeTruthy();
-  expect(
-    within(panel).getByText(
-      said(
-        "prefs answers 2xx or 400: check nodes.prefs.status before reading its body.",
-      ),
+    await screen.findByText(
+      /^The run's input, and what the steps before got back/,
     ),
   ).toBeTruthy();
 });
 
-test("its Input names several conditional steps at once, and says what to check of one that may fail", async () => {
+test("its Input tags a step that may fail with its Unhandled, and one that's conditional too with both", async () => {
   renderEditor(merged);
   const step = (body: unknown) => ({ status: 200, body });
   previewing({
@@ -682,78 +669,19 @@ test("its Input names several conditional steps at once, and says what to check 
       a: { outputs: [0], conditional: true },
       b: { outputs: [0], conditional: true },
       c: { outputs: [-1, 0], conditional: false },
+      d: { outputs: [-1, 0], conditional: true },
     },
     skipped: false,
     problems: [],
   });
   const panel = await open("greet");
-  expect(
-    await within(panel).findByText(
-      said(
-        "a and b are conditional: a run can reach this step without them. Check one with $exists(nodes.a), or, to run this step only when it comes, mark the line that brings it required.",
-      ),
-    ),
-  ).toBeTruthy();
-  expect(
-    within(panel).getByText(
-      said(
-        "c answers value or Unhandled: check $exists(nodes.c.error) before reading its body.",
-      ),
-    ),
-  ).toBeTruthy();
-});
-
-test("its Input says several steps may answer more than one way, as tagged", async () => {
-  renderEditor(merged);
-  previewing({
-    reads: {
-      input: null,
-      nodes: {
-        prefs: { status: 200, body: null },
-        user: { status: 200, body: null },
-      },
-    },
-    gives: "x",
-    outcomes: {
-      prefs: { outputs: [0, 400], conditional: false },
-      user: { outputs: [0, 404], conditional: false },
-    },
-    skipped: false,
-    problems: [],
-  });
-  const panel = await open("greet");
-  expect(
-    await within(panel).findByText(
-      said(
-        "prefs and user answer more than one way, as tagged: check which before reading a body.",
-      ),
-    ),
-  ).toBeTruthy();
-  expect(within(panel).queryByText(/conditional/)).toBeNull();
-});
-
-// With fallback's line required, every run comes by it, so prefs' 2xx line
-// never comes: its run says so, and fallback's is marked required.
-test("a required line's run is marked so, and one no run comes by says so", async () => {
-  renderEditor({
-    ...merged,
-    edges: (merged.edges ?? []).map((e, i) =>
-      i === 2 ? { ...e, required: true } : e,
-    ),
-  });
-  previewing({
-    reads: mergedReads,
-    ways: [
-      { edge: 0, skipped: true },
-      { edge: 2, gives: { theme: "light" }, skipped: false },
-    ],
-    skipped: false,
-    problems: [],
-  });
-  const panel = await open("prefs_ok");
-  expect(await within(panel).findByText(/"theme": "light"/)).toBeTruthy();
-  expect(byLines(panel)).toEqual([
-    "By prefs · 2xx: no run comes this way with these samples.",
-    "By fallback · 2xx (required)",
-  ]);
+  // Each is folded, as greet has no line from it.
+  const beside = (path: string) =>
+    within(panel).getByRole("button", { name: `Insert ${path}` }).parentElement
+      ?.textContent;
+  await waitFor(() => expect(beside("nodes.a")).toBe("aconditional{…}"));
+  expect(beside("nodes.b")).toBe("bconditional{…}");
+  expect(beside("nodes.c")).toBe("cvalue or Unhandled{…}");
+  expect(beside("nodes.d")).toBe("dconditional · value or Unhandled{…}");
+  expect(beside("nodes.e")).toBe("e{…}");
 });

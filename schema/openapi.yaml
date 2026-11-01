@@ -859,7 +859,7 @@ components:
           description: Absent while the run goes on.
         answered:
           type: integer
-          description: The status of the answer the run gave, its own once it succeeded, or its response's unhandled once it failed, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
+          description: The status of the answer the run gave, its own once it succeeded, or, once it failed, the status by cause its response's error body answered with, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
 
     Run:
       allOf:

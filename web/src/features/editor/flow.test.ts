@@ -13,6 +13,7 @@ import {
   responseCard,
   toFlow,
   UNHANDLED,
+  UNHANDLED_HANDLE,
   wayLabel,
   waysInto,
 } from "@/features/editor/flow";
@@ -177,6 +178,35 @@ test("the response card goes after the rightmost step, level with the middle", (
   expect(responseCard([], 0).position).toEqual({ x: 0, y: 0 });
 });
 
+// An answer takes lines from any number of steps (plan 14), each drawn into
+// its point; two from one step are told apart.
+test("an answer's lines from several steps are each drawn into its point", () => {
+  const flow = toFlow({
+    ...spec,
+    response: {
+      answers: [
+        {
+          status: 500,
+          lines: [
+            { from: "crm", unhandled: true },
+            { from: "user", unhandled: true },
+            { from: "crm" },
+          ],
+        },
+      ],
+    },
+  });
+  expect(
+    flow.edges
+      .filter((e) => e.target === "#response")
+      .map((e) => [e.id, e.sourceHandle, e.data?.line]),
+  ).toEqual([
+    ["crm->#response:0", UNHANDLED_HANDLE, 0],
+    ["user->#response:0", UNHANDLED_HANDLE, 1],
+    ["crm->#response:0#1", "2xx", 2],
+  ]);
+});
+
 test("each answer's line leaves from its step, on its output, into the answer's point", () => {
   const branched = {
     ...spec,
@@ -190,14 +220,14 @@ test("each answer's line leaves from its step, on its output, into the answer's 
     target: "#response",
     sourceHandle,
     targetHandle: String(k),
-    data: { index: -1, answer: k },
+    data: { index: -1, answer: k, line: 0 },
   });
   const flow = toFlow({
     ...branched,
     response: {
       answers: [
-        { status: 200, from: "crm" },
-        { status: 404, from: "user", on: 404 },
+        { status: 200, lines: [{ from: "crm" }] },
+        { status: 404, lines: [{ from: "user", on: 404 }] },
         { status: 409 },
       ],
     },
@@ -211,13 +241,13 @@ test("each answer's line leaves from its step, on its output, into the answer's 
   expect(
     toFlow({
       nodes: [{ id: "a", kind: "transform", expr: "1" }],
-      response: { answers: [{ status: 200, from: "a" }] },
+      response: { answers: [{ status: 200, lines: [{ from: "a" }] }] },
     }).edges,
   ).toEqual([line(0, "a", "out")]);
   // They don't move a step, and none is drawn from a step that isn't there,
   // or on a response its step doesn't have.
   const answers = (from: string, on?: number) => ({
-    answers: [{ status: 200, from, on }],
+    answers: [{ status: 200, lines: [{ from, on }] }],
   });
   expect(toFlow({ ...spec, response: answers("crm") }).nodes).toEqual(
     toFlow(spec).nodes,
@@ -241,8 +271,8 @@ test("a line from a step's Unhandled leaves from its strip", () => {
     ],
     response: {
       answers: [
-        { status: 200, from: "fallback" },
-        { status: 500, from: "fallback", unhandled: true },
+        { status: 200, lines: [{ from: "fallback" }] },
+        { status: 500, lines: [{ from: "fallback", unhandled: true }] },
       ],
     },
   });

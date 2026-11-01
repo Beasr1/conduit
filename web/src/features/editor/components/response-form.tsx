@@ -1,14 +1,10 @@
-import { ChevronRightIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ChevronRightIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import { Hint } from "@/components/hint";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { JsonText } from "@/features/editor/components/json-field";
 import { MappingField } from "@/features/editor/components/mapping-field";
@@ -16,14 +12,14 @@ import { RunAnswered } from "@/features/editor/components/step-run";
 import { WholeRunNote } from "@/features/editor/components/whole-run-note";
 import {
   addAnswer,
-  canJoin,
-  leaveAnswer,
+  leaveLines,
+  moveAnswer,
   removeAnswer,
   setAnswerSchema,
-  setUnhandled,
+  setErrorBody,
 } from "@/features/editor/edits";
 import { readSchema, whole } from "@/features/editor/fields";
-import { toFlow } from "@/features/editor/flow";
+import { outputOf, toFlow, UNHANDLED } from "@/features/editor/flow";
 import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
 import { usePreview } from "@/features/editor/hooks/use-preview";
 import { useEditor, useEditorStore } from "@/features/editor/store";
@@ -32,18 +28,20 @@ import { useEditor, useEditorStore } from "@/features/editor/store";
 const MIN_ANSWER = 200;
 const MAX_ANSWER = 599;
 
-// What a new unhandled body answers with, to edit from.
-const NEW_UNHANDLED = "{ 'error': error.detail }";
+// What a new error body answers with, to edit from.
+const NEW_ERROR_BODY = "{ 'error': error.code, 'detail': error.detail }";
 
 // ResponseForm is the overview of what the workflow's API answers: each
-// answer, the step that gives it by its one line, and the schema its body is
-// promised to match; unhandled, for a run that gives none; and the
-// answers Conduit gives on its own.
+// answer, in the order a run tries them, the steps whose lines give it, and
+// the schema its body is promised to match; the error body; then, a line
+// each, Unhandled, for a run that gives none, and the answers Conduit gives
+// on its own.
 export function ResponseForm() {
   return (
     <>
       <RunAnswered />
       <Answers />
+      <ErrorBody />
       <Unhandled />
       <ConduitAnswers />
     </>
@@ -64,12 +62,14 @@ function Answers() {
   return (
     <section className="flex flex-col gap-3 text-sm">
       <div className="flex flex-col gap-1.5">
-        <h3 className="font-medium">Answers</h3>
-        <p className="text-muted-foreground">
-          Each a status, and the shape a caller gets with it, joined by one line
-          from the step that gives it: its body is that step&apos;s result. A
-          step joined to several answers picks one with its cases.
-        </p>
+        <div className="flex items-center gap-1">
+          <h3 className="font-medium">Answers</h3>
+          <Hint about="Answers">
+            Each a status, joined by lines from the steps that give it. A run
+            gives the first, top to bottom, that one of its lines reached, with
+            that step&apos;s result as the body.
+          </Hint>
+        </div>
         <FieldError errors={asErrors(problems)} />
       </div>
       {statuses.map((status, k) => {
@@ -80,6 +80,7 @@ function Answers() {
             key={n === 0 ? String(status) : `${status}#${n}`}
             index={k}
             status={status}
+            count={statuses.length}
           />
         );
       })}
@@ -88,16 +89,22 @@ function Answers() {
   );
 }
 
-// Answer is one of the workflow's answers: its status, the step whose line
-// gives it, which a click opens on the response the line leaves on, and the
-// schema its body is promised to match.
-function Answer({ index, status }: { index: number; status: number }) {
+// Answer is one of the workflow's answers: its place, as a run tries them
+// top to bottom (plan 14), moved with Move up and down; its status; the
+// lines into it, each opening the step it's from on the block it leaves;
+// and the schema its body is promised to match.
+function Answer({
+  index,
+  status,
+  count,
+}: {
+  index: number;
+  status: number;
+  count: number;
+}) {
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
-  const show = useEditor((s) => s.show);
-  const from = useEditor((s) => s.draft.response?.answers?.[index]?.from);
-  const on = useEditor((s) => s.draft.response?.answers?.[index]?.on);
-  const joined = useEditor((s) => !canJoin(s.draft, index));
+  const lines = useEditor((s) => s.draft.response?.answers?.[index]?.lines);
   const lineProblems = useProblems(
     (p) =>
       p.on === "response" &&
@@ -108,81 +115,148 @@ function Answer({ index, status }: { index: number; status: number }) {
     (p) => p.on === "response" && p.field === "schema" && p.answer === index,
   );
 
-  // The canvas names a step by its key, which toFlow gives it. It's worked
-  // out on a click, not on every draw.
-  function open() {
-    const draft = editor.getState().draft;
-    const at = draft.nodes.findIndex((n) => n.id === from);
-    const key = toFlow(draft).nodes[at]?.id;
-    const http = draft.nodes[at]?.kind === "http";
-    if (key)
-      show(
-        "nodes",
-        key,
-        !http ? "request" : on === undefined ? "2xx" : String(on),
-      );
-  }
-
   return (
     <div className="flex flex-col gap-2 rounded-md border p-3">
       <div className="flex items-center justify-between gap-2">
-        <h4 className="font-mono font-medium">{status}</h4>
-        <Button
-          id={`response-answer-${index}-remove`}
-          variant="ghost"
-          size="xs"
-          aria-label={`Remove the ${status} answer`}
-          onClick={() => edit((d) => removeAnswer(d, index))}
-        >
-          Remove
-        </Button>
-      </div>
-      {joined && from ? (
-        <div className="flex items-center gap-2">
+        <h4 className="font-medium">
+          <span className="text-muted-foreground">{index + 1}.</span>{" "}
+          <span className="font-mono">{status}</span>
+        </h4>
+        <div className="flex shrink-0 gap-1">
           <Button
-            id={`response-answer-${index}-from`}
             variant="ghost"
-            className="h-auto min-w-0 flex-1 justify-start gap-2 py-1.5 text-left font-normal [&_svg]:size-3.5"
-            onClick={open}
+            size="icon-xs"
+            aria-label={`Move ${status} up`}
+            disabled={index === 0}
+            onClick={() => edit((d) => moveAnswer(d, index, index - 1))}
           >
-            {/* The spaces are text of their own: a name drops one at the
-                end of an element's text, and a flex row doesn't draw them. */}
-            <span className="sr-only">Given by</span>{" "}
-            <span className="truncate font-mono">{from}</span>
-            {on !== undefined && (
-              <>
-                {" "}
-                <span className="text-muted-foreground">on {on}</span>
-              </>
-            )}
-            <ChevronRightIcon aria-hidden className="ml-auto" />
+            <ArrowUpIcon />
           </Button>
           <Button
-            variant="outline"
-            size="xs"
-            aria-label={`Disconnect ${from} from ${status}`}
-            onClick={() => edit((d) => leaveAnswer(d, index))}
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Move ${status} down`}
+            disabled={index === count - 1}
+            onClick={() => edit((d) => moveAnswer(d, index, index + 1))}
           >
-            Disconnect
+            <ArrowDownIcon />
+          </Button>
+          <Button
+            id={`response-answer-${index}-remove`}
+            variant="ghost"
+            size="xs"
+            aria-label={`Remove the ${status} answer`}
+            onClick={() => edit((d) => removeAnswer(d, index))}
+          >
+            Remove
           </Button>
         </div>
+      </div>
+      {lines === undefined ? (
+        <p className="text-muted-foreground">No line yet.</p>
       ) : (
-        <p className="text-muted-foreground">
-          No line yet: drag from the step that gives it to its point on the
-          card, or pick Response {status} in that step&apos;s Connect to.
-        </p>
+        <ul className="flex flex-col">
+          {lines.map((l, j) => (
+            <AnswerLine
+              key={`${l.from} ${outputOf(l) ?? ""}`}
+              answer={index}
+              line={j}
+              status={status}
+            />
+          ))}
+        </ul>
       )}
       <FieldError errors={asErrors(lineProblems)} />
       <JsonText
         id={`response-answer-${index}-schema`}
         label={`${status} schema`}
-        description="A JSON Schema the body is promised to match. It's checked when saved; runs don't enforce it yet."
+        description="A JSON Schema the body is promised to match. Checked when saved, not yet on runs."
         initial={editor.getState().draft.response?.answers?.[index]?.schema}
         read={readSchema}
         apply={(value) => edit((d) => setAnswerSchema(d, index, value))}
         problems={schemaProblems}
       />
     </div>
+  );
+}
+
+// AnswerLine is line j into answer k: the step it's from, which a click
+// opens on the block the line leaves, and Disconnect.
+function AnswerLine({
+  answer,
+  line,
+  status,
+}: {
+  answer: number;
+  line: number;
+  status: number;
+}) {
+  const editor = useEditorStore();
+  const edit = useEditor((s) => s.edit);
+  const show = useEditor((s) => s.show);
+  const l = useEditor(
+    (s) => s.draft.response?.answers?.[answer]?.lines?.[line],
+  );
+  if (!l) return null;
+  const on = outputOf(l);
+
+  // The canvas names a step by its key, which toFlow gives it. It's worked
+  // out on a click, not on every draw.
+  function open() {
+    const draft = editor.getState().draft;
+    const at = draft.nodes.findIndex((n) => n.id === l?.from);
+    const key = toFlow(draft).nodes[at]?.id;
+    const http = draft.nodes[at]?.kind === "http";
+    if (key)
+      show(
+        "nodes",
+        key,
+        on === UNHANDLED
+          ? "unhandled"
+          : !http
+            ? "request"
+            : on === undefined
+              ? "2xx"
+              : String(on),
+      );
+  }
+
+  const block =
+    on === UNHANDLED ? "Unhandled" : on === undefined ? undefined : String(on);
+  return (
+    <li className="flex items-center gap-2">
+      <Button
+        id={`response-answer-${answer}-line-${line}`}
+        variant="ghost"
+        className="h-auto min-w-0 flex-1 justify-start gap-2 py-1.5 text-left font-normal [&_svg]:size-3.5"
+        onClick={open}
+      >
+        {/* The spaces are text of their own: a name drops one at the end of
+            an element's text, and a flex row doesn't draw them. */}
+        <span className="sr-only">Given by</span>{" "}
+        <span className="truncate font-mono">{l.from}</span>
+        {block !== undefined && (
+          <>
+            {" "}
+            <span className="text-muted-foreground">on {block}</span>
+          </>
+        )}
+        <ChevronRightIcon aria-hidden className="ml-auto" />
+      </Button>
+      <Button
+        variant="outline"
+        size="xs"
+        aria-label={`Disconnect ${l.from}${block === undefined ? "" : ` on ${block}`} from ${status}`}
+        onClick={() =>
+          edit((d) => {
+            const gone = d.response?.answers?.[answer]?.lines?.[line];
+            return gone ? leaveLines(d, [gone]) : d;
+          })
+        }
+      >
+        Disconnect
+      </Button>
+    </li>
   );
 }
 
@@ -212,7 +286,13 @@ function AddAnswer({ taken }: { taken: number[] }) {
 
   return (
     <Field data-invalid={error !== undefined}>
-      <FieldLabel htmlFor="response-add-answer">Add an answer</FieldLabel>
+      <div className="flex items-center gap-1">
+        <FieldLabel htmlFor="response-add-answer">Add an answer</FieldLabel>
+        <Hint about="Add an answer">
+          By its status, as 404, then join the step that gives it to its point
+          on the card.
+        </Hint>
+      </div>
       <div className="flex gap-2">
         <Input
           ref={input}
@@ -240,66 +320,62 @@ function AddAnswer({ taken }: { taken: number[] }) {
         </Button>
       </div>
       <FieldError errors={error === undefined ? [] : [{ message: error }]} />
-      <FieldDescription>
-        By its status, as 404, then join the step that gives it to its point.
-        Conduit&apos;s own answers, below, are there whatever the workflow says.
-      </FieldDescription>
     </Field>
   );
 }
 
-// Unhandled is what the workflow answers a run that gives none: Conduit's
-// problem details, or a body of the workflow's own, at the status of the
-// failure's cause.
-function Unhandled() {
+// ErrorBody is the workflow's error body (plan 12): what answers each error
+// it passes on without a body of its own, a run that gives no answer, and an
+// error response or an Unhandled joined straight to an answer; unwritten,
+// Conduit's problem details do.
+function ErrorBody() {
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
-  const body = useEditor((s) => s.draft.response?.unhandled?.body);
+  const body = useEditor((s) => s.draft.response?.errors?.body);
   const problems = useProblems(
-    (p) => p.on === "response" && p.field === "unhandled",
+    (p) => p.on === "response" && p.field === "errors",
   );
   const preview = usePreview();
-  const intro = (
-    <p className="text-muted-foreground">
-      A step fails or times out, or no answer is reached: the status is the
-      cause&apos;s, 502 when an upstream failed, 504 when time ran out, 500
-      otherwise.
-    </p>
-  );
   if (body === undefined)
     return (
       <section className="flex flex-col gap-1.5 text-sm">
-        <h3 className="font-medium">Unhandled</h3>
-        {intro}
-        <p className="text-muted-foreground">
-          Its body is Conduit&apos;s problem details, unless you write your own.
-        </p>
+        <div className="flex items-center gap-1">
+          <h3 className="font-medium">Error body</h3>
+          <Hint about="the error body">
+            One body for every error the workflow answers without one of its
+            own: a run that gives no answer, and a step&apos;s error response or
+            Unhandled joined straight to an answer.
+          </Hint>
+        </div>
+        <p className="text-muted-foreground">Problem details.</p>
         <Button
           variant="outline"
           size="sm"
           className="self-start"
-          onClick={() => edit((d) => setUnhandled(d, NEW_UNHANDLED))}
+          onClick={() => edit((d) => setErrorBody(d, NEW_ERROR_BODY))}
         >
-          Write your own
+          Write it
         </Button>
       </section>
     );
   return (
     <section className="flex flex-col gap-1.5 text-sm">
-      <h3 className="font-medium">Unhandled</h3>
-      {intro}
       <MappingField
-        id="response-unhandled"
-        label="Unhandled body"
-        description={
+        id="response-errors"
+        label="Error body"
+        hint={
           <>
-            JSONata over the run as it stood, every step that succeeded, and{" "}
+            One body for every error the workflow answers without one of its
+            own. JSONata over the run as it stood, and{" "}
             <span className="font-mono">error</span>:{" "}
-            <span className="font-mono">{"{ code, detail, node }"}</span>.
+            <span className="font-mono">{"{ code, detail, node }"}</span>, with
+            the upstream&apos;s <span className="font-mono">status</span>,{" "}
+            <span className="font-mono">headers</span> and{" "}
+            <span className="font-mono">body</span> when it answered.
           </>
         }
-        initial={editor.getState().draft.response?.unhandled?.body ?? ""}
-        apply={(text) => edit((d) => setUnhandled(d, text))}
+        initial={editor.getState().draft.response?.errors?.body ?? ""}
+        apply={(text) => edit((d) => setErrorBody(d, text))}
         problems={problems}
         preview={preview}
         open={() => []}
@@ -310,55 +386,60 @@ function Unhandled() {
         variant="ghost"
         size="xs"
         className="self-start"
-        onClick={() => edit((d) => setUnhandled(d, undefined))}
+        onClick={() => edit((d) => setErrorBody(d, undefined))}
       >
-        Use Conduit&apos;s problem details instead
+        Use problem details instead
       </Button>
+    </section>
+  );
+}
+
+// Unhandled says, in a line, what answers a run that gives no answer.
+function Unhandled() {
+  return (
+    <section className="flex items-center gap-1 text-sm">
+      <p>
+        <span className="font-medium">Unhandled</span>{" "}
+        <span className="text-muted-foreground">500, 502 or 504, by cause</span>
+      </p>
+      <Hint about="Unhandled">
+        A run that gives no answer: a step fails it, or no answer is reached.
+        502 when an upstream failed, 504 when time ran out, 500 otherwise. The
+        error body answers it.
+      </Hint>
     </section>
   );
 }
 
 // The answers Conduit gives on its own, and when.
 const conduitAnswers: [number, string][] = [
-  [
-    400,
-    "The input isn't JSON, or doesn't match the input schema. The body says where.",
-  ],
-  [401, "The call has no valid token."],
-  [404, "Nothing is published at the address called."],
-  [
-    500,
-    "The workflow failed on its own: an expression, or no answer reached, or two. The body says why, and links the run, unless Unhandled answers.",
-  ],
-  [
-    502,
-    "An upstream answered with a status its step has no response for, or couldn't be reached. The body names the step and links the run, unless Unhandled answers.",
-  ],
-  [503, "Too many runs at once. Retry-After says when to try again."],
-  [
-    504,
-    "The run, or a step's last attempt, ran out of time. The body links the run, unless Unhandled answers.",
-  ],
+  [400, "the input isn't JSON, or doesn't match the input schema"],
+  [401, "the call has no valid token"],
+  [404, "nothing is published at the address called"],
+  [503, "too many runs at once; Retry-After says when to try again"],
 ];
 
-// ConduitAnswers lists the answers Conduit gives whatever the workflow says,
-// so the card reads as the whole of what a caller can get.
+// ConduitAnswers says, in a line, the answers Conduit gives whatever the
+// workflow says, so the card reads as the whole of what a caller can get.
 function ConduitAnswers() {
   return (
-    <section className="flex flex-col gap-1.5 text-sm">
-      <h3 className="font-medium">Conduit&apos;s own answers</h3>
-      <p className="text-muted-foreground">
-        Each body is problem details, sent as application/problem+json, so a
-        caller tells them from the workflow&apos;s own answers.
+    <section className="flex items-center gap-1 text-sm">
+      <p>
+        <span className="font-medium">Conduit&apos;s own</span>{" "}
+        <span className="font-mono text-muted-foreground">
+          {conduitAnswers.map(([status]) => status).join(" ")}
+        </span>
       </p>
-      <dl className="flex flex-col gap-1">
-        {conduitAnswers.map(([status, when]) => (
-          <div key={status} className="flex gap-3">
-            <dt className="w-8 shrink-0 font-mono">{status}</dt>
-            <dd className="text-muted-foreground">{when}</dd>
-          </div>
-        ))}
-      </dl>
+      <Hint about="Conduit's own answers">
+        <span className="flex flex-col gap-1">
+          {conduitAnswers.map(([status, when]) => (
+            <span key={status}>
+              <span className="font-mono">{status}</span> {when}.
+            </span>
+          ))}
+          <span>Each is problem details, as application/problem+json.</span>
+        </span>
+      </Hint>
     </section>
   );
 }

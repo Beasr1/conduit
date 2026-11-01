@@ -204,25 +204,52 @@ the API is `/api` on the page's own origin.
 - An Input tags each earlier step the preview's `outcomes` says a run may
   come without, "conditional", or that may answer more than one way, "2xx
   or 400" (`outcomeTag`, which names outputs as a way into a step is
-  named), with a note under the tree on what to check.
+  named), and the Input's hint says what to check.
 - A run's lines into steps are taken as the steps' `took` says; lines into
   answers, as the answer the run gave.
+- An answer takes lines from any number of steps, in the order joined, and
+  a run gives the first answer, top to bottom, that one reached (plan 14).
+  Each line is drawn into its answer's point. A block gives one answer:
+  joined to another, its line moves there, but a transform with an
+  expression gets cases, as it picks. Lines go by identity (`leaveLines`),
+  so the canvas deletes several from one answer at once, and every edit of
+  them goes through `mapLines`, so one that changes nothing gives back the
+  draft itself. The response's panel numbers the answers and moves them
+  with Move up and down.
 - Each line into a transform with more than one is one of its ways
   (`data.way`), unless it's marked required: it's dashed until a run says
   whether it came, as dashed means it may not be taken, or wasn't. A
   transform's preview is a run by each line into it, required ones too,
-  the server's `ways`, each named by the line at its place in the draft
-  previewed, so a result reads that draft (a `MappingField`'s `result` gets
-  it), a required line marked so; its Input is what those runs read,
-  merged.
+  the server's `ways`; its Input is what those runs read, merged, and it
+  gives what the first run that comes gives (`givesOf`), as which way a
+  run came is the transform's to decide (plan 13). A `MappingField`'s
+  `result` gets the draft previewed, so a result reads that draft.
 - An HTTP step is drawn as blocks, each saying which part of the step it
   is (`data-part`). The canvas reads the block a click lands in
   (`onNodeClick`), and the store's `part` holds what's open, so the canvas
   and the panel's tabs agree. A click on a point opens rather than
   connects, so `connectOnClick` is off (design.md, the floor).
+- A step's Request is a second row of tabs: URL, Headers, Query, Body and
+  Retry. The one open is the store's (`requestTab`), kept as another step
+  is picked, so the problem list opens the tab a field is on
+  (`requestTabOf`). Each row is a tab list with a name (`aria-label`),
+  Blocks and Request, so a screen reader tells them apart.
+- A step's Unhandled has two places for problems: `unhandled`, what's
+  chosen for its failures (plan 12), and `unhandled_body`, its body.
+- A field is labelled, not explained. What it's for is a `Hint`
+  (`components/hint.tsx`) beside its label: a Base UI Popover with
+  `openOnHover`, which opens on hover or a press. Not a Tooltip, which
+  Base UI turns off on touch (sources.md). A problem stays under its field.
+- The tour (`features/editor/components/tour.tsx`) finds its stops' parts
+  a frame after it opens, and points each stop at the element it found.
+  It gives Base UI the element, not a function: a function anchor is read
+  once, so every stop stayed at the first. It's offered once per browser,
+  remembered in local storage, read and written in `try`, and Tour in the
+  toolbar opens it again.
 - A link that looks like a button is a `Link` styled with
   `buttonVariants()`. A `Button` rendering a link would be announced as a
-  button.
+  button. A trigger rendered as a `Button` takes `render={<Button />}`, as
+  a class built by `buttonVariants()` can't be checked by the linter.
 
 ## Tests
 
@@ -238,7 +265,13 @@ the API is `/api` on the page's own origin.
   nodes before it draws edges.
 - A field on a hidden tab is still in the page, as the tabs stay mounted,
   so a test finds a field by role and label, which skips hidden ones as a
-  screen reader does, rather than by label alone.
+  screen reader does, rather than by label alone. A tab's panel is named
+  by its tab, so to reach a field on a hidden tab by label alone, as a
+  test of what's kept across tabs does, it takes `selector: "input,
+  textarea"`.
+- The tour opens on a first visit, over whatever a test does, so tests
+  start with it seen (`src/test/tour.ts`, a setup file); its own tests
+  forget it.
 - A test fails on any console warning or error it logs
   (`src/test/console.ts`). That's how React, React Router and Base UI
   report misuse. Vitest would only print it, and hides passing tests'
@@ -254,4 +287,6 @@ the API is `/api` on the page's own origin.
   by `vite preview`, whose proxy `CONDUIT_API_ORIGIN` points at the test's
   server. It presses Fit View before clicking a card, as an open panel
   narrows the canvas, and reads a card's run line as it streams ("200")
-  and once recorded ("200, 12 ms").
+  and once recorded ("200, 12 ms"). On its first visit it goes through
+  the tour, checking a stop sits beside its part, which jsdom can't show,
+  and it sets Fail the run on each step before it publishes (plan 12).

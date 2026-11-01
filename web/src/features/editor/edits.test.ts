@@ -10,14 +10,14 @@ import {
   connect,
   joinAnswer,
   joinedTo,
-  leaveAnswer,
+  leaveLines,
+  moveAnswer,
   mentions,
   move,
   moveCase,
   NODE_ID,
   outputToStep,
   reads,
-  refusal,
   removeAnswer,
   removeCase,
   removeEdges,
@@ -26,8 +26,9 @@ import {
   renameNode,
   setAnswerSchema,
   setField,
+  setErrorBody,
+  setStepFails,
   setStepUnhandled,
-  setUnhandled,
   setCaseStatus,
   toCases,
   updateCase,
@@ -94,19 +95,21 @@ test("a step's Unhandled is joined as an output of its own", () => {
   );
   expect(both.response?.answers?.[2]).toEqual({
     status: 500,
-    from: "respond",
-    unhandled: true,
+    lines: [{ from: "respond", unhandled: true }],
   });
   expect(both.nodes[respond]).toEqual(answering.nodes[respond]);
-  // Nor does a second answer on it, which validation refuses.
-  const twice = joinAnswer(addAnswer(both, 503), 3, "respond", UNHANDLED);
-  expect(twice.nodes[respond]).toEqual(answering.nodes[respond]);
+  // Joined to a second answer, it moves there, as one block gives one
+  // answer (plan 14), and still picks nothing.
+  const moved = joinAnswer(addAnswer(both, 503), 3, "respond", UNHANDLED);
+  expect(moved.nodes[respond]).toEqual(answering.nodes[respond]);
+  expect(joinedTo(moved, "respond", UNHANDLED)).toEqual([3]);
   expect(joinedTo(both, "respond")).toEqual([0]);
   expect(joinedTo(both, "respond", UNHANDLED)).toEqual([2]);
-  // Leaving it takes the line away.
-  expect(leaveAnswer(both, 2).response?.answers?.[2]).toStrictEqual({
-    status: 500,
-  });
+  // Leaving it takes the line away; the answer stays.
+  expect(
+    leaveLines(both, both.response?.answers?.[2]?.lines ?? []).response
+      ?.answers?.[2],
+  ).toStrictEqual({ status: 500 });
 });
 
 test("an output is added at the end, and removed with its connections", () => {
@@ -140,33 +143,51 @@ const answering: Definition = {
   response: { answers: [{ status: 200 }, { status: 404 }] },
 };
 
-test("each answer takes one line, from one of a step's outputs", () => {
-  expect(canJoin(answering, 0)).toBe(true);
-  const joined = joinAnswer(answering, 1, "user", 404);
+test("an answer takes lines from any number of steps, each once", () => {
+  expect(canJoin(answering, 0, "user", 404)).toBe(true);
+  const joined = joinAnswer(joinAnswer(answering, 1, "user", 404), 1, "crm");
   expect(joined.response?.answers?.[1]).toEqual({
     status: 404,
-    from: "user",
-    on: 404,
+    lines: [{ from: "user", on: 404 }, { from: "crm" }],
   });
-  expect(canJoin(joined, 1)).toBe(false);
+  expect(canJoin(joined, 1, "user", 404)).toBe(false);
+  expect(joinAnswer(joined, 1, "user", 404)).toBe(joined);
   expect(joinedTo(joined, "user", 404)).toEqual([1]);
   expect(joinedTo(joined, "user")).toEqual([]);
-  // A line from a step that's gone can be drawn again.
-  expect(
-    canJoin(
-      { ...answering, response: { answers: [{ status: 200, from: "gone" }] } },
-      0,
-    ),
-  ).toBe(true);
-  expect(canJoin(answering, 7)).toBe(false);
+  expect(canJoin(answering, 7, "user")).toBe(false);
 });
 
-test("a line drawn into an answer that has one is refused, saying from where", () => {
-  const joined = joinAnswer(answering, 1, "crm");
-  expect(refusal(joined, "orders", 1)).toEqual({ status: 404, from: "crm" });
-  // Not the step it's from already, nor an answer free to join.
-  expect(refusal(joined, "crm", 1)).toBeUndefined();
-  expect(refusal(joined, "orders", 0)).toBeUndefined();
+test("one output gives one answer: joined to another, its line moves there", () => {
+  const moved = joinAnswer(joinAnswer(answering, 0, "crm"), 1, "crm");
+  expect(moved.response?.answers).toEqual([
+    { status: 200 },
+    { status: 404, lines: [{ from: "crm" }] },
+  ]);
+});
+
+test("answers move up and down, as a run tries them in order", () => {
+  expect(
+    moveAnswer(answering, 1, 0).response?.answers?.map((a) => a.status),
+  ).toEqual([404, 200]);
+  expect(moveAnswer(answering, 0, 0)).toBe(answering);
+  expect(moveAnswer(answering, 1, 2)).toBe(answering);
+  expect(moveAnswer(answering, 5, 0)).toBe(answering);
+});
+
+test("lines leave by identity, several from one answer at once", () => {
+  const joined = joinAnswer(
+    joinAnswer(joinAnswer(answering, 1, "user", 404), 1, "crm"),
+    1,
+    "orders",
+  );
+  const lines = joined.response?.answers?.[1]?.lines ?? [];
+  expect(
+    leaveLines(
+      joined,
+      lines.filter((_, j) => j !== 1),
+    ).response?.answers?.[1],
+  ).toEqual({ status: 404, lines: [{ from: "crm" }] });
+  expect(leaveLines(joined, [])).toBe(joined);
 });
 
 test("a transform joined to a second answer picks between them with cases, each answer on its own case's exit", () => {
@@ -185,32 +206,33 @@ test("a transform joined to a second answer picks between them with cases, each 
     },
   });
   expect(second.response?.answers).toEqual([
-    { status: 200, from: "respond", on: 200 },
-    { status: 404, from: "respond", on: 404 },
+    { status: 200, lines: [{ from: "respond", on: 200 }] },
+    { status: 404, lines: [{ from: "respond", on: 404 }] },
   ]);
-  // One with cases is joined from an exit, and its cases stay as they are.
+  // One with cases is joined from an exit, and its cases stay as they are;
+  // the exit's line moves, as one exit gives one answer (plan 14).
   const third = joinAnswer(addAnswer(second, 409), 2, "respond", 404);
   expect(third.nodes[respond]).toEqual(second.nodes[respond]);
-  expect(third.response?.answers?.[2]).toEqual({
-    status: 409,
-    from: "respond",
-    on: 404,
-  });
+  expect(third.response?.answers).toEqual([
+    { status: 200, lines: [{ from: "respond", on: 200 }] },
+    { status: 404 },
+    { status: 409, lines: [{ from: "respond", on: 404 }] },
+  ]);
 });
 
-test("leaving an answer takes its line; the answer stays", () => {
+test("leaving a line takes it; the answer stays", () => {
   const joined = joinAnswer(
     setAnswerSchema(answering, 0, { type: "object" }),
     0,
     "crm",
   );
-  expect(leaveAnswer(joined, 0).response?.answers?.[0]).toStrictEqual({
-    status: 200,
-    schema: { type: "object" },
-  });
-  // Nothing to leave changes nothing.
-  expect(leaveAnswer(answering, 0)).toBe(answering);
-  expect(leaveAnswer(answering, 9)).toBe(answering);
+  expect(
+    leaveLines(joined, joined.response?.answers?.[0]?.lines ?? []).response
+      ?.answers?.[0],
+  ).toStrictEqual({ status: 200, schema: { type: "object" } });
+  // Nothing to leave changes nothing, nor does a line that isn't there.
+  expect(leaveLines(answering, [])).toBe(answering);
+  expect(leaveLines(joined, [{ from: "crm" }])).toBe(joined);
 });
 
 test("answers are added at the end, their schemas set, and removed by place", () => {
@@ -231,11 +253,11 @@ test("answers are added at the end, their schemas set, and removed by place", ()
     { status: 404, schema: { type: "object" } },
     { status: 409 },
   ]);
-  // A response left with neither an answer nor unhandled goes.
+  // A response left with neither an answer nor an error body goes.
   expect(removeAnswer(addAnswer(spec, 200), 0)).not.toHaveProperty("response");
   expect(
-    removeAnswer(setUnhandled(addAnswer(spec, 200), "1"), 0).response,
-  ).toEqual({ answers: [], unhandled: { body: "1" } });
+    removeAnswer(setErrorBody(addAnswer(spec, 200), "1"), 0).response,
+  ).toEqual({ answers: [], errors: { body: "1" } });
 });
 
 test("a step's Unhandled body is set, changed and taken away", () => {
@@ -248,29 +270,62 @@ test("a step's Unhandled body is set, changed and taken away", () => {
   expect(setStepUnhandled(spec, 9, "1")).toBe(spec);
 });
 
-test("unhandled is set, changed and taken away", () => {
-  const set = setUnhandled(spec, "{ 'error': error.detail }");
-  expect(set.response).toEqual({
-    unhandled: { body: "{ 'error': error.detail }" },
+test("a step fails the run on purpose, until a line leaves its Unhandled", () => {
+  const user = spec.nodes.findIndex((n) => n.id === "user");
+  const fails = setStepFails(setStepUnhandled(spec, user, "1"), user, true);
+  // Its body stays, for when it doesn't.
+  expect(fails.nodes[user]?.unhandled).toEqual({ fail: true, body: "1" });
+  expect(setStepFails(fails, user, true)).toBe(fails);
+  expect(setStepFails(fails, user, false).nodes[user]?.unhandled).toEqual({
+    body: "1",
   });
-  expect(setUnhandled(set, "{ 'error': error.detail }")).toBe(set);
-  expect(setUnhandled(set, undefined)).not.toHaveProperty("response");
-  expect(setUnhandled(answering, undefined)).toBe(answering);
+  expect(
+    setStepFails(setStepFails(spec, user, true), user, false).nodes[user],
+  ).toEqual(spec.nodes[user]);
+  expect(setStepFails(spec, user, false)).toBe(spec);
+  expect(setStepFails(spec, 99, true)).toBe(spec);
+  // A line from its Unhandled, to a step or an answer, takes its failures
+  // instead (plan 12); one from a response leaves it failing.
+  const failing = setStepFails(spec, user, true);
+  expect(connect(failing, "user", "crm", UNHANDLED).nodes[user]).toEqual(
+    spec.nodes[user],
+  );
+  expect(connect(failing, "user", "crm").nodes[user]?.unhandled).toEqual({
+    fail: true,
+  });
+  expect(
+    joinAnswer(addAnswer(failing, 500), 0, "user", UNHANDLED).nodes[user],
+  ).toEqual(spec.nodes[user]);
+  expect(
+    joinAnswer(addAnswer(failing, 200), 0, "user").nodes[user]?.unhandled,
+  ).toEqual({ fail: true });
+});
+
+test("the error body is set, changed and taken away", () => {
+  const set = setErrorBody(spec, "{ 'error': error.detail }");
+  expect(set.response).toEqual({
+    errors: { body: "{ 'error': error.detail }" },
+  });
+  expect(setErrorBody(set, "{ 'error': error.detail }")).toBe(set);
+  expect(setErrorBody(set, undefined)).not.toHaveProperty("response");
+  expect(setErrorBody(answering, undefined)).toBe(answering);
 });
 
 test("answers' lines go with their step, and with its outputs", () => {
   const user = branched.nodes.findIndex((n) => n.id === "user");
   const joined = joinAnswer(joinAnswer(answering, 1, "user", 404), 0, "user");
   expect(
-    renameNode(joined, user, "person").response?.answers?.map((a) => a.from),
-  ).toEqual(["person", "person"]);
+    renameNode(joined, user, "person").response?.answers?.map((a) =>
+      a.lines?.map((l) => l.from),
+    ),
+  ).toEqual([["person"], ["person"]]);
   expect(removeNodes(joined, [user]).response?.answers).toEqual([
     { status: 200 },
     { status: 404 },
   ]);
   expect(removeOutput(joined, user, 409).response).toEqual(joined.response);
   expect(removeOutput(joined, user, 404).response?.answers).toEqual([
-    { status: 200, from: "user" },
+    { status: 200, lines: [{ from: "user" }] },
     { status: 404 },
   ]);
 });
@@ -303,8 +358,7 @@ test("a switch's cases are added, changed, moved and removed, their lines going 
   expect(renumbered.nodes[respond]?.switch?.cases?.[1]?.status).toBe(410);
   expect(renumbered.response?.answers?.[1]).toEqual({
     status: 404,
-    from: "respond",
-    on: 410,
+    lines: [{ from: "respond", on: 410 }],
   });
   expect(setCaseStatus(joined, respond, 1, 404)).toBe(joined);
   // Removed, a case takes the lines leaving its exit.
@@ -355,7 +409,9 @@ test("an output moves into a step, respond, joined to the response's one answer,
     { from: "crm", to: "respond" },
   ]);
   expect(moved.response).toEqual({
-    answers: [{ status: 200, from: "respond", schema: { type: "object" } }],
+    answers: [
+      { status: 200, lines: [{ from: "respond" }], schema: { type: "object" } },
+    ],
   });
   // After the rightmost step it reads, level with their middle.
   expect(moved.ui?.positions?.respond).toEqual({ x: 600 + 240 + 80, y: 200 });
@@ -367,7 +423,7 @@ test("an output moves only once, into a step whose id is free", () => {
   const both: Definition = {
     ...spec,
     output: "1",
-    response: { answers: [{ status: 200, from: "crm" }] },
+    response: { answers: [{ status: 200, lines: [{ from: "crm" }] }] },
   };
   expect(outputToStep(both).draft).toBe(both);
   const taken: Definition = {
@@ -541,15 +597,15 @@ test("mentions finds a step read in cases, and in an Unhandled body", () => {
       },
     ],
     response: {
-      answers: [{ status: 200, from: "check", on: 200 }],
-      unhandled: { body: "nodes.user.body" },
+      answers: [{ status: 200, lines: [{ from: "check", on: 200 }] }],
+      errors: { body: "nodes.user.body" },
     },
   };
   expect(mentions(draft, "user")).toEqual([
     "check's case found",
     "check's Case 2",
     "check's Unhandled body",
-    "the response's Unhandled body",
+    "the error body",
   ]);
 });
 

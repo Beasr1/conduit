@@ -500,7 +500,7 @@ export interface components {
              * @description Absent while the run goes on.
              */
             ended_at?: string;
-            /** @description The status of the answer the run gave, its own once it succeeded, or its response's unhandled once it failed, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none. */
+            /** @description The status of the answer the run gave, its own once it succeeded, or, once it failed, the status by cause its response's error body answered with, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none. */
             answered?: number;
         };
         Run: components["schemas"]["RunSummary"] & {
@@ -664,10 +664,12 @@ export interface components {
             /** @description A made-up or redacted response with this status, which previews read. It has no status of its own. */
             sample?: components["schemas"]["Sample"];
         };
-        /** @description What a node gives through its Unhandled block, once the block takes its failure. Without it, the node gives what an http node got back, if anything. */
+        /** @description What a node does with its failures. Its Unhandled block takes them when a line or an answer leaves from it, and gives its body, or, without one, what an http node got back, if anything. With no line from it, they fail the run, and publishing needs that chosen, with fail (plan 12). */
         NodeUnhandled: {
+            /** @description The node's failures fail the run, on purpose, and the response answers by cause with its error body. Not with a line or an answer from the node's Unhandled block, which takes them instead. */
+            fail?: boolean;
             /** @description JSONata over what the node read and its own failure, nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer. Its value is what the nodes after read as nodes.<id>.body, error, status and headers staying as they are, and the body of an answer joined straight to the block. One that fails fails the run. */
-            body: string;
+            body?: string;
         };
         Node: {
             /** @description Unique in the workflow. Expressions read the node's result as nodes.<id>. */
@@ -697,30 +699,35 @@ export interface components {
             /** @description Into a transform node, the edge has to be taken for the node to run, as every edge into an http node has; without it, the transform is skipped. Absent, an edge into a transform may not be taken, its node then missing from what the transform reads. */
             required?: boolean;
         };
+        /** @description A line into an answer, from one block of a node. A run reaches it when its node answered through that block, or failed into its Unhandled. A block is joined to one answer, but for a transform with an expr, which picks among several. */
+        AnswerLine: {
+            /** @description The node the line leaves from. A block joined to one answer gives its node's result as the body; a transform with an expr joined to several from its value picks among them, its result {status, body}, the status one of theirs. A transform's case is joined to the answer of its own status. */
+            from: string;
+            /** @description The output of from that the line leaves from, as an edge's. Absent means an http node's 2xx, the only output of a transform with an expr, or the Unhandled block when unhandled is set. */
+            on?: number;
+            /** @description The line leaves from from's Unhandled block, as an edge can, and on is absent. The answer's body is then what from's Unhandled body gave, or, with none, the response's error body over from's failure. */
+            unhandled?: boolean;
+        };
         Answer: {
             /** @description The HTTP status the answer has. Listed once in a response. */
             status: number;
-            /** @description The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform with an expr, whose result is {status, body}, the status one of theirs. A transform's case is joined to the answer of its own status. */
-            from?: string;
-            /** @description The output of from that the line leaves from, as an edge's. Absent means an http node's 2xx, the only output of a transform with an expr, or the Unhandled block when unhandled is set. */
-            on?: number;
-            /** @description The line leaves from from's Unhandled block, as an edge can, and on is absent. The answer's body is then from's body, what an http node got back with a status it doesn't list, else none. A node's Unhandled block is joined to one answer at most. */
-            unhandled?: boolean;
+            /** @description The lines into the answer, each from a block of a node. A run gives the answer when it reached one of them and no answer listed above it; its first line reached, in this order, gives the body. */
+            lines?: components["schemas"]["AnswerLine"][];
             /** @description A JSON Schema (2020-12) the body is promised to match. Checked when saved, not enforced on runs yet. */
             schema?: {
                 [key: string]: unknown;
             };
         };
-        /** @description What the API answers a run that gives no answer. Its status is the cause's, 502 when an upstream failed, 504 when the run or a node ran out of time, 500 otherwise, and its body is this. */
-        Unhandled: {
-            /** @description JSONata over the run as it stood, every node that succeeded, and error, {code, detail, node}. */
+        /** @description The body of every error the workflow answers without one of its own. A run that gives no answer gets it, at its cause's status, 502 when an upstream failed, 504 when the run or a node ran out of time, 500 otherwise. So does an answer whose line leaves an http node's block for a status of 400 or more, and one joined to a node's Unhandled with no body of its own, each at the answer's status. With none, each is answered with Conduit's problem details. */
+        Errors: {
+            /** @description JSONata over the run as it stood, every node that succeeded, and error, {code, detail, node}, beside the upstream's status, headers and body when it answered. */
             body: string;
         };
-        /** @description What the workflow's API answers. Each answer is a status, joined by one line from the node that gives it; a run that takes one line answers with it. A run that takes none, or lines from two nodes, or in which a node fails, gives no answer, and fails; unhandled, if there is one, answers it. */
+        /** @description What the workflow's API answers. Each answer is a status and the lines into it, each from a block of a node that gives it. A run answers with the first answer, top to bottom, that one of its lines reached (plan 14). A run that reaches none, or in which a node fails the run, gives no answer, and fails; then Conduit answers it, by cause, with the error body. Publishing needs every way a run can go to reach an answer (plan 12). */
         Response: {
-            /** @description The answers the API can give, each a status, the line it takes, and the shape promised with it. */
+            /** @description The answers the API can give, in the order a run tries them, each a status, the lines into it, and the shape promised with it. */
             answers?: components["schemas"]["Answer"][];
-            unhandled?: components["schemas"]["Unhandled"];
+            errors?: components["schemas"]["Errors"];
         };
         /** @description A point on the canvas. A missing coordinate reads as 0. */
         Position: {

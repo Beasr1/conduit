@@ -20,7 +20,7 @@ export function StepBody({ index }: { index: number }) {
     <MappingField
       id="step-body"
       label="Request body"
-      description="JSONata over the input, sent as the JSON body. Empty sends none."
+      hint="JSONata over the input, sent as the JSON body. Empty sends none."
       placeholder='{ "email": nodes.user.body.email }'
       initial={editor.getState().draft.nodes[index]?.request?.body ?? ""}
       apply={(text) =>
@@ -46,7 +46,7 @@ export function StepBody({ index }: { index: number }) {
           <Skipped />
         ) : (
           <>
-            <h3 className="font-medium">It sends</h3>
+            <h3 className="font-medium">Sends</h3>
             {p.sends === undefined ? (
               <p className="text-muted-foreground">
                 Nothing: the request doesn&apos;t render.
