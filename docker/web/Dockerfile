@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Build context is the repo root: docker build -f docker/web/Dockerfile .
 
-FROM node:24.22.0-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS build
+FROM node:24.22.2-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS build
 # corepack runs the pnpm version pinned in package.json's packageManager.
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /web
