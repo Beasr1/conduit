@@ -51,11 +51,12 @@ func document(input json.RawMessage, parts []docPart) ([]byte, error) {
 }
 
 // exec runs node i on its own goroutine and reports back whatever happens,
-// a panic included. A failure of the node's own goes to its Unhandled block
-// when a line leaves that: the node ends failed, giving what the block's
-// body gives, and the run goes on down those lines. The run's end, by its
-// deadline or a failure elsewhere, and a panic, our bug, never do.
-func (r *run) exec(i int, parts []docPart) {
+// a panic included. parts is what it reads, and came, for an either, the
+// edges taken into it. A failure of the node's own goes to its Unhandled
+// block when a line leaves that: the node ends failed, giving what the
+// block's body gives, and the run goes on down those lines. The run's end,
+// by its deadline or a failure elsewhere, and a panic, our bug, never do.
+func (r *run) exec(i int, parts []docPart, came []int) {
 	var o outcome
 	defer func() {
 		if v := recover(); v != nil {
@@ -74,6 +75,8 @@ func (r *run) exec(i int, parts []docPart) {
 		o = r.call(i, doc)
 	case n.kind == workflow.NodeKindTransform:
 		o = r.transform(n, doc)
+	case n.kind == workflow.NodeKindEither:
+		o = r.either(parts, doc, came)
 	}
 	on := outputOf(o.result.HTTPStatus)
 	if o.err != nil {
@@ -370,8 +373,47 @@ func (n *node) give(ctx context.Context, doc []byte) (json.RawMessage, string, e
 	return v, "", err
 }
 
-// bodyEntry is a transform node's part of the data document: its value, as
-// its body.
+// either gives what the way that came into an either gives, over doc, what
+// it reads, parts: its edge's body, or the body of the node it came from,
+// the last of parts, as it is. Two ways coming fail it.
+func (r *run) either(parts []docPart, doc []byte, came []int) outcome {
+	if len(came) > 1 {
+		a, b := r.p.edges[came[0]].from, r.p.edges[came[1]].from
+		return outcome{err: fmt.Errorf("two ways came: from %s and from %s", r.p.nodes[a].id, r.p.nodes[b].id)}
+	}
+	e := r.p.edges[came[0]]
+	from := r.p.nodes[e.from].id
+	o := outcome{result: NodeResult{Way: &Way{From: from, On: e.on}}}
+	v, err := e.gives(r.ctx, doc, parts[len(parts)-1].entry)
+	if err != nil {
+		o.err = fmt.Errorf("the way from %s: body: %w", from, err)
+		return o
+	}
+	o.result.Body, o.entry = v, bodyEntry(v)
+	return o
+}
+
+// gives is what an edge into an either gives when it's the one taken: its
+// body over doc, or else the body in source, its node's part of the data
+// document, null when that has none.
+func (e *edge) gives(ctx context.Context, doc []byte, source json.RawMessage) (json.RawMessage, error) {
+	if e.body != nil {
+		return e.body.Eval(ctx, doc)
+	}
+	var s struct {
+		Body json.RawMessage `json:"body"`
+	}
+	if err := json.Unmarshal(source, &s); err != nil {
+		return nil, err
+	}
+	if s.Body == nil {
+		return json.RawMessage("null"), nil
+	}
+	return s.Body, nil
+}
+
+// bodyEntry is a transform or either node's part of the data document: its
+// value, as its body.
 func bodyEntry(v json.RawMessage) json.RawMessage {
 	return append(append([]byte(`{"body":`), v...), '}')
 }

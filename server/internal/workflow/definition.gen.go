@@ -39,6 +39,7 @@ func (e HTTPRequestMethod) Valid() bool {
 
 // Defines values for NodeKind.
 const (
+	NodeKindEither    NodeKind = "either"
 	NodeKindHTTP      NodeKind = "http"
 	NodeKindTransform NodeKind = "transform"
 )
@@ -46,6 +47,8 @@ const (
 // Valid indicates whether the value is a known member of the NodeKind enum.
 func (e NodeKind) Valid() bool {
 	switch e {
+	case NodeKindEither:
+		return true
 	case NodeKindHTTP:
 		return true
 	case NodeKindTransform:
@@ -60,7 +63,7 @@ type Answer struct {
 	// From The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs.
 	From string `json:"from,omitempty"`
 
-	// On The output of from that the line leaves from, as an edge's. Absent means 2xx, and a transform's only output, or the Unhandled block when unhandled is set.
+	// On The output of from that the line leaves from, as an edge's. Absent means 2xx, and the only output of a transform or an either, or the Unhandled block when unhandled is set.
 	On int `json:"on,omitempty"`
 
 	// Schema A JSON Schema (2020-12) the body is promised to match. Checked when saved, not enforced on runs yet.
@@ -83,7 +86,7 @@ type Case struct {
 	When string `json:"when,omitempty"`
 }
 
-// Definition A workflow. A node runs once its parents have finished, if each of them took an edge into it; one parent's edges into it are alternatives. Otherwise it's skipped.
+// Definition A workflow. A node runs once its parents have finished, if every edge into it was taken; an either node runs if one was, and two fail it. Otherwise it's skipped.
 type Definition struct {
 	Edges []Edge `json:"edges,omitempty"`
 
@@ -109,9 +112,11 @@ type Definition struct {
 
 // Edge defines model for Edge.
 type Edge struct {
+	// Body Only on an edge into an either node. JSONata whose value the either gives when this edge is the one taken; it reads what the condition does, the nodes before the source and the source. Absent, the either gives the source's body as it is.
+	Body string `json:"body,omitempty"`
 	From string `json:"from"`
 
-	// On The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and a transform's only output, or the Unhandled block when unhandled is set.
+	// On The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and the only output of a transform or an either, or the Unhandled block when unhandled is set.
 	On int    `json:"on,omitempty"`
 	To string `json:"to"`
 
@@ -153,7 +158,9 @@ type Node struct {
 	Expr string `json:"expr,omitempty"`
 
 	// ID Unique in the workflow. Expressions read the node's result as nodes.<id>.
-	ID   string   `json:"id"`
+	ID string `json:"id"`
+
+	// Kind An http node calls an upstream, a transform node gives what its JSONata does, and an either node gives what the one edge into it that was taken gives; two taken fail it.
 	Kind NodeKind `json:"kind"`
 
 	// Outputs An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node, and its Unhandled block takes that as it takes every failure of the node's.
@@ -172,7 +179,7 @@ type Node struct {
 	Unhandled *NodeUnhandled `json:"unhandled,omitempty"`
 }
 
-// NodeKind defines model for NodeKind.
+// NodeKind An http node calls an upstream, a transform node gives what its JSONata does, and an either node gives what the one edge into it that was taken gives; two taken fail it.
 type NodeKind string
 
 // NodeUnhandled What a node gives through its Unhandled block, once the block takes its failure. Without it, the node gives what an http node got back, if anything.

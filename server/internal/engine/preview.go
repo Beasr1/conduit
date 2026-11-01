@@ -118,7 +118,7 @@ func SimulateEdge(ctx context.Context, d *workflow.Definition, k int) (pv *Previ
 	}
 	s.run(src)
 	pv.Skipped = s.skipped[src]
-	parts := s.parts(src)
+	parts := s.reads(src)
 	if s.entry[src] != nil {
 		parts = append(parts, docPart{id: s.p.nodes[src].id, entry: s.entry[src]})
 	}
@@ -144,6 +144,9 @@ func SimulateEdge(ctx context.Context, d *workflow.Definition, k int) (pv *Previ
 			break
 		}
 		pv.Taken = &taken
+	}
+	if s.entry[src] != nil && s.p.nodes[e.to].kind == workflow.NodeKindEither {
+		pv.Gives, _ = s.gives(k)
 	}
 	pv.Problems = s.problems
 	return pv, nil
@@ -345,27 +348,67 @@ func (s *sim) runs(target int) bool {
 	return true
 }
 
-// reached says whether a run would start node i, as each step with a
-// connection into it takes one of them. One the preview couldn't run, for
-// want of a sample or a working expression, might, so it counts; one it
-// skipped takes none.
+// reached says whether a run would start node i, as every connection into
+// it is taken, or one into an either is. One from a step the preview
+// couldn't run, for want of a sample or a working expression, might be, so
+// it counts; one from a step it skipped isn't.
 func (s *sim) reached(i int) bool {
 	in := s.p.nodes[i].in
-	for _, k := range in {
+	might := func(k int) bool {
 		from := s.p.edges[k].from
-		switch {
-		case s.skipped[from]:
-			return false
-		case s.entry[from] == nil:
-		case !slices.ContainsFunc(in, func(j int) bool { return s.p.edges[j].from == from && s.taken[j] }):
-			return false
-		}
+		return s.taken[k] || !s.skipped[from] && s.entry[from] == nil
 	}
-	return true
+	if s.p.nodes[i].kind == workflow.NodeKindEither {
+		return slices.ContainsFunc(in, might)
+	}
+	return !slices.ContainsFunc(in, func(k int) bool { return !might(k) })
 }
 
-// parts is what node i's expressions see: its ancestors that ran, as a
-// run's are.
+// reads is what node i's expressions see, as a run's: its ancestors that
+// ran, or, for an either, what the way it came by read and that way's node.
+func (s *sim) reads(i int) []docPart {
+	if k := s.way(i); k >= 0 {
+		from := s.p.edges[k].from
+		return append(s.reads(from), docPart{id: s.p.nodes[from].id, entry: s.entry[from]})
+	}
+	return s.parts(i)
+}
+
+// way is the connection into node i, an either, that the preview took first,
+// in the definition's order, or -1.
+func (s *sim) way(i int) int {
+	if s.p.nodes[i].kind != workflow.NodeKindEither {
+		return -1
+	}
+	for _, k := range s.p.nodes[i].in {
+		if s.taken[k] {
+			return k
+		}
+	}
+	return -1
+}
+
+// gives is what connection k, into an either, gives when it's the one
+// taken, as a run has it: its body over what the connection's condition
+// reads, or its source's body. ok is false when it can't tell, as its
+// problems say: a body that fails, or one that doesn't compile.
+func (s *sim) gives(k int) (v json.RawMessage, ok bool) {
+	e := &s.p.edges[k]
+	if s.d.Edges[k].Body != "" && e.body == nil {
+		return nil, false
+	}
+	doc, err := document(s.input, append(s.reads(e.from), docPart{id: s.p.nodes[e.from].id, entry: s.entry[e.from]}))
+	if err == nil {
+		v, err = e.gives(s.ctx, doc, s.entry[e.from])
+	}
+	if err != nil {
+		s.problem("/edges/"+strconv.Itoa(k)+"/body", "evaluation_failed", "%v", err)
+		return nil, false
+	}
+	return v, true
+}
+
+// parts is node i's ancestors that ran.
 func (s *sim) parts(i int) []docPart {
 	var out []docPart
 	for _, a := range s.p.nodes[i].ancestors {
@@ -413,7 +456,7 @@ func (s *sim) run(i int) {
 		}
 		s.entry[i] = entry
 	case n.kind == workflow.NodeKindTransform && n.whole:
-		doc, err := document(s.input, s.parts(i))
+		doc, err := document(s.input, s.reads(i))
 		var v json.RawMessage
 		part := "/expr"
 		if err == nil {
@@ -421,6 +464,16 @@ func (s *sim) run(i int) {
 		}
 		if err != nil {
 			s.problem("/nodes/"+strconv.Itoa(i)+part, "evaluation_failed", "%s: %v", n.id, err)
+			return
+		}
+		s.entry[i] = bodyEntry(v)
+	case n.kind == workflow.NodeKindEither:
+		k := s.way(i)
+		if k < 0 {
+			return // the ways it might come by couldn't run: their problems say why
+		}
+		v, ok := s.gives(k)
+		if !ok {
 			return
 		}
 		s.entry[i] = bodyEntry(v)
@@ -458,7 +511,7 @@ func (s *sim) sample(i int) (sample *workflow.Sample, pointer string, status int
 // doesn't run isn't its business.
 func (s *sim) conditions(i int) {
 	n := &s.p.nodes[i]
-	doc, docErr := document(s.input, append(s.parts(i), docPart{id: n.id, entry: s.entry[i]}))
+	doc, docErr := document(s.input, append(s.reads(i), docPart{id: n.id, entry: s.entry[i]}))
 	for _, k := range n.out {
 		e := s.p.edges[k]
 		if !s.needed[e.to] || e.on != s.via[i] {
@@ -486,7 +539,7 @@ func (s *sim) step(pv *Preview, t int) {
 	n := &s.p.nodes[t]
 	ptr := "/nodes/" + strconv.Itoa(t)
 	pv.Skipped = !s.reached(t)
-	doc, err := document(s.input, s.parts(t))
+	doc, err := document(s.input, s.reads(t))
 	if err != nil {
 		s.problem(ptr, "evaluation_failed", "%v", err)
 		return
@@ -506,6 +559,10 @@ func (s *sim) step(pv *Preview, t int) {
 		var part string
 		if pv.Gives, part, err = n.give(s.ctx, doc); err != nil {
 			s.problem(ptr+part, "evaluation_failed", "%v", err)
+		}
+	case n.kind == workflow.NodeKindEither:
+		if k := s.way(t); k >= 0 {
+			pv.Gives, _ = s.gives(k)
 		}
 	}
 	if n.unhandled != nil {
@@ -556,7 +613,7 @@ func (s *sim) failed(i int) (json.RawMessage, error) {
 	if err != nil || n.unhandled == nil {
 		return entry, err
 	}
-	doc, err := document(s.input, append(s.parts(i), docPart{id: n.id, entry: entry}))
+	doc, err := document(s.input, append(s.reads(i), docPart{id: n.id, entry: entry}))
 	if err != nil {
 		return nil, err
 	}
@@ -575,7 +632,7 @@ func (s *sim) unhandled(pv *Preview, t int) {
 	entry, err := madeUpFailure(n, nil)
 	var doc json.RawMessage
 	if err == nil {
-		doc, err = document(s.input, append(s.parts(t), docPart{id: n.id, entry: entry}))
+		doc, err = document(s.input, append(s.reads(t), docPart{id: n.id, entry: entry}))
 	}
 	if err != nil {
 		s.problem(ptr, "evaluation_failed", "%v", err)

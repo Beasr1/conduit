@@ -76,7 +76,7 @@ test("a connection says which response it leaves from, and whether it's taken", 
   );
   expect(
     await within(panel).findByText(
-      "Not taken. crm runs only if another connection into it is.",
+      "Not taken, so crm is skipped: it needs every connection into it.",
     ),
   ).toBeTruthy();
   // What the condition reads, the connection's step open.

@@ -46,6 +46,10 @@ const kinds = {
     label: "transform step",
     fresh: (id: string): Node => ({ id, kind: "transform", expr: "" }),
   },
+  either: {
+    label: "Either step",
+    fresh: (id: string): Node => ({ id, kind: "either" }),
+  },
 };
 
 // AddNodeDialog asks for the new node's id, which expressions use to read

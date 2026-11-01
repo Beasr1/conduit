@@ -11,6 +11,7 @@ import {
   responseCard,
   toFlow,
   UNHANDLED,
+  waysInto,
 } from "@/features/editor/flow";
 import type { components } from "@/gen/schema";
 import { specExample as spec } from "@/test/fixtures";
@@ -248,6 +249,64 @@ test("a line from a step's Unhandled leaves from its strip", () => {
     "fallback->#response:1 unhandled",
   ]);
   expect(flow.undrawn).toEqual([2]);
+});
+
+test("an Either step's ways each come into a point of their own, and it grows to fit them", () => {
+  const flow = toFlow({
+    nodes: [
+      {
+        id: "prefs",
+        kind: "http",
+        request: { method: "GET", url: "https://prefs.example.com/v1" },
+        outputs: [{ status: 400 }],
+      },
+      { id: "fallback", kind: "transform", expr: "1" },
+      { id: "prefs_ok", kind: "either" },
+      { id: "greet", kind: "transform", expr: "2" },
+    ],
+    edges: [
+      { from: "prefs", to: "prefs_ok" },
+      { from: "prefs", to: "fallback", on: 400 },
+      { from: "fallback", to: "prefs_ok", body: "1" },
+      { from: "fallback", to: "prefs_ok", unhandled: true },
+      { from: "prefs_ok", to: "greet" },
+    ],
+  });
+  expect(
+    flow.edges.map((e) => `${e.id} ${e.sourceHandle} ${e.targetHandle}`),
+  ).toEqual([
+    "prefs->prefs_ok 2xx way:prefs:0",
+    "prefs->fallback 400 in",
+    "fallback->prefs_ok out way:fallback:0",
+    "fallback->prefs_ok#1 unhandled way:fallback:-1",
+    "prefs_ok->greet out in",
+  ]);
+  // Three ways and + Add, 24 px apiece, above its Unhandled strip; with
+  // none, it's as tall as a transform.
+  expect(flow.nodes.find((n) => n.id === "prefs_ok")).toMatchObject({
+    type: "either",
+    height: 120,
+    measured: { height: 120 },
+  });
+  expect(
+    toFlow({ nodes: [{ id: "e", kind: "either" }] }).nodes[0],
+  ).toMatchObject({ type: "either", height: NODE_HEIGHT + 24 });
+  expect(
+    waysInto(
+      {
+        nodes: [],
+        edges: [
+          { from: "a", to: "e", on: 404 },
+          { from: "a", to: "b" },
+          { from: "b", to: "e", unhandled: true },
+        ],
+      },
+      "e",
+    ),
+  ).toEqual([
+    { index: 0, from: "a", on: 404, handle: "way:a:404" },
+    { index: 2, from: "b", on: UNHANDLED, handle: "way:b:-1" },
+  ]);
 });
 
 test("the editor counts Unhandled beside a step's other outputs", () => {

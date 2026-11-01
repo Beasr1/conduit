@@ -59,6 +59,20 @@ test("a step the server hasn't recorded goes by its last event", () => {
   ).toEqual({ state: "succeeded", status: 201, attempts: 1 });
 });
 
+test("an Either step says which way it came by, recorded or streamed", () => {
+  const came = { from: "prefs", on: 400 };
+  expect(
+    stepRunOf(ended({ attempts: 0, way: came }), undefined, "succeeded"),
+  ).toEqual({ state: "succeeded", attempts: 0, ms: 82, came });
+  expect(
+    stepRunOf(
+      undefined,
+      event({ kind: "succeeded", attempt: 0, way: came }),
+      "running",
+    ),
+  ).toEqual({ state: "succeeded", attempts: 0, came });
+});
+
 test("a step with no event yet waits, and one a run ended without didn't run", () => {
   expect(stepRunOf(undefined, undefined, "running")).toEqual({
     state: "waiting",

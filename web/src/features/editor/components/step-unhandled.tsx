@@ -25,7 +25,8 @@ import { useEditor, useEditorStore } from "@/features/editor/store";
 // view there.
 export function StepUnhandled({ index }: { index: number }) {
   const id = useEditor((s) => s.draft.nodes[index]?.id ?? "");
-  const http = useEditor((s) => s.draft.nodes[index]?.kind === "http");
+  const kind: string = useEditor((s) => s.draft.nodes[index]?.kind ?? "");
+  const http = kind === "http";
   const body = useEditor((s) => s.draft.nodes[index]?.unhandled?.body);
   const answers = useEditor(
     (s) => id !== "" && joinedTo(s.draft, id, UNHANDLED).length > 0,
@@ -53,7 +54,9 @@ export function StepUnhandled({ index }: { index: number }) {
         <p className="text-muted-foreground">
           {http
             ? "It takes what the step's responses don't: a status none of them is for, the connection or a timeout after its retries, a body over the cap or a 2xx body that isn't JSON, an address it may not call, or its JSONata failing."
-            : "It takes the step's JSONata failing: its expression, or a case's condition or body."}{" "}
+            : kind === "either"
+              ? "It takes the step failing: the value of the way that came failing, or two ways coming in one run."
+              : "It takes the step's JSONata failing: its expression, or a case's condition or body."}{" "}
           Joined, the run goes on down the lines from here. With none, the
           failure fails the run, and the response&apos;s Unhandled answers it.
         </p>

@@ -2,8 +2,9 @@ import { useShallow } from "zustand/react/shallow";
 
 import { FieldError } from "@/components/ui/field";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EitherStepForm } from "@/features/editor/components/either-step-form";
 import { HttpStepForm } from "@/features/editor/components/http-step-form";
-import { ProblemMark } from "@/features/editor/components/problem-mark";
+import { Marked } from "@/features/editor/components/problem-mark";
 import { StepIdField } from "@/features/editor/components/step-id-field";
 import { RunSent } from "@/features/editor/components/step-run";
 import {
@@ -12,11 +13,7 @@ import {
 } from "@/features/editor/components/step-output";
 import { StepUnhandled } from "@/features/editor/components/step-unhandled";
 import { TransformStepForm } from "@/features/editor/components/transform-step-form";
-import {
-  asErrors,
-  useProblemCount,
-  useProblems,
-} from "@/features/editor/hooks/use-problems";
+import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
 import {
   type Place,
   REQUEST_FIELDS,
@@ -36,6 +33,7 @@ const fieldsOf: Record<string, ReadonlySet<StepField | undefined>> = {
     "unhandled_body",
   ]),
   transform: new Set(["id", "expr", "unhandled_body"]),
+  either: new Set(["id", "unhandled_body"]),
 };
 const unknownKind = new Set<StepField | undefined>(["id", "kind"]);
 
@@ -130,7 +128,10 @@ export function StepSettings({ index }: { index: number }) {
       {kind === "transform" && (
         <TransformStepForm key={`transform-${index}`} index={index} />
       )}
-      {kind !== "http" && kind !== "transform" && (
+      {kind === "either" && (
+        <EitherStepForm key={`either-${index}`} index={index} />
+      )}
+      {kind !== "http" && kind !== "transform" && kind !== "either" && (
         <p className="text-sm text-muted-foreground">
           The editor doesn&apos;t know steps of the kind “{kind}”. Delete this
           one, or change its kind through the API.
@@ -138,10 +139,4 @@ export function StepSettings({ index }: { index: number }) {
       )}
     </>
   );
-}
-
-// Marked marks a tab whose part of the step has problems.
-function Marked({ where }: { where: (p: Place) => boolean }) {
-  const count = useProblemCount(where);
-  return count > 0 ? <ProblemMark count={count} /> : null;
 }

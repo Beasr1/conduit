@@ -7,7 +7,9 @@ came before C: its samples, previews, outputs by status and a step's blocks
 are committed (f9e7484, e98e50a, 2026-10-30), and so is Phase C, runs
 (ad89609, 2026-10-30), and D's API's answers, after C (8cbc5b1,
 2026-11-01), and a step's Unhandled block (80d55d4), its body (4fb0aec)
-and strict joins (2026-11-01). Phase E, the browser test, is next.
+and strict joins (e898238). Either, a step type that follows whichever of
+its lines comes, is built (2026-11-01); Phase E, the browser test, comes
+after.
 Building Phase A raised question 8, since answered.
 
 ## Goal
@@ -890,7 +892,10 @@ Strict joins, decided with you on 2026-11-01:
   and its Unhandled both to the next step, and the next runs whichever it
   took. Following either of two steps, the any-line rule until now, waits
   for a step type of its own, the Merge above, or an option; Airflow and
-  BPMN both offer that kind too (sources.md).
+  BPMN both offer that kind too (sources.md). Changed the same day, once
+  the Either below was built (your call): every line is needed, and a step
+  that follows whichever of a step's responses comes joins them in an
+  Either first.
 - **What it costs**: a step can't follow both arms of a branch. Your
   success_200, after test_400 (prefs 400) and crm (prefs 2xx), can never
   run, and the editor will say so.
@@ -902,6 +907,97 @@ Strict joins, decided with you on 2026-11-01:
       their routes agree, which ends the false alarms (as built, below).
 - [x] The editor names that problem, "success_200 can never run: it needs
       prefs to answer 400 and 2xx"; the roadmap's rule and plan 02 change.
+
+**Phase D: Either** (2026-11-01, your call, built before Phase E)
+
+Strict joins left your success_200 no way to follow prefs' 2xx and, through
+test_400, its 400 ("we might need to fix it"). Decided with you on
+2026-11-01:
+- **A step type of its own, Either.** It runs once every line into it has
+  ended, with the one that came, and is skipped when none did. Every other
+  step keeps waiting for all, and a transform joined to several steps stays
+  the way to wait for all and combine them, so there's no second new type.
+  Make pairs If-else with a Merge module that "passes data from the active
+  route"; Airflow's own docs warn against its wait-for-all default after a
+  branch; n8n's Merge waits for both inputs, so Merge was turned down as the
+  name (sources.md).
+- **A body per way**: each line into an Either can have a JSONata body, what
+  the Either gives when that line comes; without one it gives the body of
+  the step the line comes from, as it is. The steps after read
+  `nodes.<either>.body` whichever way came, as code reads a variable each
+  arm of an if/else sets (SSA's Φ, sources.md). No bodies, each step after
+  checking which step ran, was the other option.
+- **Two ways one run could both bring are a problem when saved**, as two
+  answers are, but only when no condition lies before either of them (asked
+  again while planning): a switch picks among answers, but a line from one
+  to a step can't follow a case, so steps branch on a body with conditions,
+  which the check can't read. When one does, a run in which both come fails
+  the Either, and its Unhandled block can take that, as a run that reaches
+  two answers fails. Reporting those too, as answers are, and the first
+  way in order winning were the other options.
+- **Ways are edges** (asked while planning): an edge into an Either may have
+  a `body`, so scheduling, cycles, the canvas, deletes, renames, conditions
+  and Connect to work as for any line. Ways listed on the Either, as answers
+  hold their lines, was the other option; it needed a second path through
+  all of those.
+- **One route per step** (asked while planning): an Either's route merges
+  its ways', a step that a way rules out counted as not running, so the
+  checks stay linear. They stay exact when ways part at one step's
+  responses, chains of those included; ways that differ in two steps'
+  answers at once are read as independent, and the check may then report
+  two answers that can't both come, as it does for conditions. A list of
+  routes per step, exact but doubling at each Either, was the other option.
+
+Decided while planning, yours to overrule:
+1. **A way's body reads what its line's condition reads**: the steps before
+   the step it comes from, and that step. A preview of the line shows it as
+   a run gives it.
+2. **An Either has one output**, as a transform has, and an Unhandled block,
+   which takes a body that fails.
+3. **An Either with no line into it is a problem**: it would never run.
+4. **A run records the way that came**, `way` on a node's run and on the
+   event that ends it, the step it came from and its output, so the canvas
+   marks that block, and the others as not come.
+5. **The check's ways and a run's agree on order**: a problem names the
+   later of two ways, and a failing run names both, in the definition's
+   order.
+6. **The never-runs problem names the fix**: "…: to run it after either,
+   join them in an Either".
+
+Decided with you while building (2026-11-01), from your Fixes check:
+- **Every line into a step is needed**, one step's lines included: crm's
+  2xx and 500 into success_200 can't both be taken, as crm answers once, so
+  success_200 can never run, and the check says so, pointing to an Either.
+  An ordinary step is the AND: a line it needs not taken, it's skipped,
+  and its path stops there. The Either is the OR: a way that didn't come
+  counts as null, and it goes on with the one that came. Keeping one step's
+  lines as alternatives was the other option: less to draw for "go on
+  either way", but alternatives would come two ways, and the step after
+  would read bodies of two shapes as one.
+- **An Either waits for every line into it to end** (your point), taken,
+  skipped or failed into Unhandled, before it runs, so it never runs on
+  the first that comes. That was built so from the start.
+- **Dashed means may, or didn't**: while building, a way into an Either is
+  dashed, as it may not be taken, and every other line is solid. While a
+  run is shown, a line is solid when the run took it and dashed when not,
+  so the way that came turns solid. Ways dotted beside untaken lines
+  dashed, and a run fading untaken lines instead, were the other options.
+- [x] Schema: `either` beside `http` and `transform` (D13 amended); `body`
+      on an edge; `way` on a node's run and its event; a line's preview
+      gives what the Either gives.
+- [x] Validation: an Either's own rules, a body only into one, its route,
+      and two ways one run could both bring.
+- [x] The engine runs an Either with the way that came, and a run records
+      it (`node_runs.way`, a migration).
+- [x] Previews: a line into an Either gives its value; the steps after read
+      the way previews take, 2xx first.
+- [x] The editor: the Either card, a block per way and a point to add one;
+      its panel, a tab per way with its body and preview; Add step offers
+      it; a run marks the way that came; problems in the editor's words.
+- [x] Every line needed; ways dashed.
+- [x] Failing tests first; mutation checks; Chromium through nginx.
+- [x] Docs: the roadmap's D13 and rule, plan 02, CLAUDE.md, web.md,
+      sources.md.
 
 **Phase E: the browser test**
 - [ ] Playwright, against the test upstream (built in C), and the Done flow.
@@ -1782,6 +1878,75 @@ were committed (80d55d4, 4fb0aec). Decided while building:
   check opened, nothing saved, success_200 marked, and the problem list
   saying it can never run, and why. No CSP violations and no console
   problems.
+
+## Either, as built
+
+Built on 2026-11-01, after strict joins were committed (e898238). Decided
+while building:
+- **An Either is the engine's third kind.** It joins once every edge into
+  it has ended, as any node does, and runs if one was taken. The scheduler
+  passes it the edges taken: one, and it evaluates that edge's body over
+  what the edge's condition read, the reads of the node it came from and
+  that node, kept for each node as it starts; two, and it fails, "two ways
+  came: from b and from c". With no body, it gives the body in its
+  source's part of the data document, null when that has none, as a
+  transform that failed into Unhandled has.
+- **A way's body failing fails the Either**, "the way from b: body: …", a
+  workflow error its Unhandled block can take, as any node's failure.
+- **A run records the way** as the definition writes the edge, `{from, on,
+  unhandled}`, in `node_runs.way` (migration 20261101120000) and on the
+  event that ends the Either. The canvas marks the block it names, and a
+  line into an Either is taken exactly when it's that way, not guessed.
+- **Its route merges its ways'**: a node every way needs keeps the outputs
+  any allows; a way that rules a node out allows it notRun, a value beside
+  its outputs; a way that does neither drops the node. A way whose node
+  never runs is left out, and an Either with none never runs. The never-
+  runs words say notRun as skipped: "d can never run: it needs t to answer
+  500, and to answer 2xx or be skipped".
+- **A condition before a way leaves it to the run**: a node is conditioned
+  when an edge into it has a condition, or a node before it is.
+- **Previews mirror runs**: an Either reads what its way read; previewing
+  one, or a step after one, takes the way previews take, 2xx first, the
+  first in the definition's order that the preview took; a line into an
+  Either gives what the Either would, its body failing named at the edge.
+- **Its card** has a block per way on its left, each with its point,
+  covering the block (`block-point`, the response card's `answer-point`
+  renamed), named `way:<from>:<output>` so its point and its tab stay as
+  other ways come and go; then + Add; then its id and "Either", or how it
+  went in the run shown; its value leaves from one point on its right.
+- **Its panel** is a tab per way, its value with what it reads and gives
+  over the samples, from the line's preview; + Way, a list of the
+  responses that could join it, so a way is added without dragging (WCAG
+  2.5.7); and Unhandled. What follows it is below the tabs. A line's own
+  panel says it's a way, and opens its value. A problem with a way's value
+  opens that tab from the problem list.
+- **Strict joins' leftovers fixed** (outright bugs): the editor still said
+  the old rule in four places, the preview's skipped note, a run's
+  skipped note, and a connection's description and "Not taken" note; and
+  so did the schema's Definition and Preview.skipped descriptions.
+- **Divergences**: a revision saved with an output now moves it into a
+  `respond` joined to the 2xx of each step it reads, as a step needs every
+  line into it; an output that read a step answering another status gives
+  no answer there. Only a revision saved between outputs by status and the
+  response, one day, has both. A way's label can be cut short on its card,
+  "count · Unh…" beside the mark of the way that came; its tab says it in
+  full.
+- **Seen, not fixed**: `mentions`, which names what still reads a renamed
+  step, reads a way's body now, but still not a step's Unhandled body or
+  a switch's cases. `TestGuardrails` still fails without `-race` (strict
+  joins, above).
+- **Checked**: Go tests under `-race` with the coverage floors (runner
+  92.1%, engine 96.1%, workflow 97.4%); web format, lint, typecheck, 403
+  tests and build. 32 Go mutations in validation, routes, the engine,
+  previews, the runner, the API and the every-line rule: 30 caught, six of
+  them only after a test was added; 2 named a check no route could reach,
+  now deleted. Chromium
+  through nginx, light and dark: a workflow with an Either (its card, its
+  ways dashed and the line on solid, a way's tab and preview, + Way), a
+  run in which a step failed into Unhandled (that way marked and solid, the
+  other dashed as not taken, "It came by count · Unhandled"), and your
+  Fixes check opened, nothing saved: "success_200 can never run: it needs
+  crm to answer 2xx and 500". No CSP violations and no console problems.
 
 ## Out of scope
 

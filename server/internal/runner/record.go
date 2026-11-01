@@ -11,6 +11,7 @@ import (
 
 	"github.com/Beasr1/conduit/server/internal/engine"
 	"github.com/Beasr1/conduit/server/internal/store"
+	"github.com/Beasr1/conduit/server/internal/workflow"
 )
 
 // Codes say why a run or a node didn't succeed, and whose fault it was, as
@@ -50,6 +51,25 @@ type Failure struct {
 	Node   string `json:"node,omitempty"` // on a run's failure: the node that failed it
 	// On a node's failure: its Unhandled block took it, and the run went on.
 	Caught bool `json:"caught,omitempty"`
+}
+
+// Way is the edge an either ran with, as the definition writes it, and as
+// it's recorded and streamed.
+type Way struct {
+	From      string `json:"from"`
+	On        int    `json:"on,omitempty"`
+	Unhandled bool   `json:"unhandled,omitempty"`
+}
+
+// wayOf is the engine's way of an either that ran, nil for any other node.
+func wayOf(w *engine.Way) *Way {
+	switch {
+	case w == nil:
+		return nil
+	case w.On == workflow.OnUnhandled:
+		return &Way{From: w.From, Unhandled: true}
+	}
+	return &Way{From: w.From, On: w.On}
 }
 
 // maxStored caps each body as stored (answer 4). The engine itself works
@@ -198,6 +218,11 @@ func nodeRecord(runID string, n nodeEnd) (store.NodeRun, error) {
 	if n.failure != nil {
 		if rec.Error, err = json.Marshal(n.failure); err != nil {
 			return rec, fmt.Errorf("encode the error: %w", err)
+		}
+	}
+	if w := wayOf(res.Way); w != nil {
+		if rec.Way, err = json.Marshal(w); err != nil {
+			return rec, fmt.Errorf("encode the way: %w", err)
 		}
 	}
 	return rec, nil

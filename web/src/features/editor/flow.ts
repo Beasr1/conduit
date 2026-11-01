@@ -79,22 +79,80 @@ function handleOf(
   return handles.includes(handle) ? handle : undefined;
 }
 
-// hasStrip says whether a step is drawn with its Unhandled strip: an HTTP
-// or transform step is.
-function hasStrip(node: DefinitionNode): boolean {
+// hasStrip says whether a step is drawn with its Unhandled strip: each of
+// the kinds the editor knows is.
+export function hasStrip(node: DefinitionNode): boolean {
   const kind: string = node.kind;
-  return kind === "http" || kind === "transform";
+  return kind === "http" || kind === "transform" || kind === "either";
 }
 
 // heightOf is how tall a node is drawn: an HTTP step's response blocks and
-// its + Add share its right side, each at least HANDLE_GAP tall, so the
-// handles on them are at least that far apart, and its Unhandled strip runs
-// along its bottom, as tall.
-function heightOf(node: DefinitionNode): number {
+// its + Add share its right side, and an Either's ways and its + Add its
+// left, each at least HANDLE_GAP tall, so the handles on them are at least
+// that far apart; its Unhandled strip runs along its bottom, as tall.
+function heightOf(node: DefinitionNode, ways: number): number {
   const strip = hasStrip(node) ? HANDLE_GAP : 0;
-  return (
-    Math.max(NODE_HEIGHT, (handlesOf(node).length + 1) * HANDLE_GAP) + strip
+  const blocks = node.kind === "either" ? ways : handlesOf(node).length;
+  return Math.max(NODE_HEIGHT, (blocks + 1) * HANDLE_GAP) + strip;
+}
+
+// Way is a way into an Either step: an edge into it, by its place in the
+// definition's edges, the step it comes from, the output it leaves, and its
+// handle.
+export interface Way {
+  index: number;
+  from: string;
+  on: number | undefined;
+  handle: string;
+}
+
+// waysInto is the edges into the step with id, in the definition's order:
+// an Either step's ways.
+export function waysInto(definition: Definition, id: string): Way[] {
+  return (definition.edges ?? []).flatMap((e, index) =>
+    e.to === id
+      ? [{ index, from: e.from, on: outputOf(e), handle: wayHandle(e) }]
+      : [],
   );
+}
+
+// wayHandle is a way's point on its Either's card, and the part of the
+// Either's panel it opens: named for the step it comes from and the output
+// it leaves, as a step joins another once per output, so it stays as other
+// ways come and go.
+export function wayHandle(line: {
+  from: string;
+  on?: number;
+  unhandled?: boolean;
+}): string {
+  return `way:${line.from}:${outputOf(line) ?? 0}`;
+}
+
+// wayFromHandle is the way a handle names: the step it comes from, and the
+// output it leaves, as the editor counts it.
+export function wayFromHandle(handle: string): {
+  from: string;
+  on: number | undefined;
+} {
+  const at = handle.lastIndexOf(":");
+  const on = Number(handle.slice(at + 1));
+  return {
+    from: handle.slice("way:".length, at),
+    on: on === 0 ? undefined : on,
+  };
+}
+
+// wayLabel is a way as the screen names it: the step it comes from, and the
+// response it leaves, "prefs · 404", or its Unhandled; a transform's or an
+// Either's one value needs no name.
+export function wayLabel(
+  definition: Definition,
+  from: string,
+  on: number | undefined,
+): string {
+  if (on === UNHANDLED) return `${from} · Unhandled`;
+  const http = definition.nodes.find((n) => n.id === from)?.kind === "http";
+  return http ? `${from} · ${on ?? "2xx"}` : from;
 }
 
 // The response card's key. "#" can't appear in a node id, so the card is
@@ -108,9 +166,9 @@ export const RESPONSE = "#response";
 // place in the response's answers, as is its point's id on the card.
 export type FlowNode = Node<
   { index: number },
-  "http" | "transform" | "unknown" | "response"
+  "http" | "transform" | "either" | "unknown" | "response"
 >;
-export type FlowEdge = Edge<{ index: number; answer?: number }>;
+export type FlowEdge = Edge<{ index: number; answer?: number; way?: boolean }>;
 
 export interface Flow {
   nodes: FlowNode[];
@@ -124,7 +182,8 @@ export interface Flow {
 // toFlow is the canvas's view of a definition: a node for each node, an edge
 // for each edge it can draw, each where the definition places it or, failing
 // that, where the layout does, and the lines into the response's answers,
-// last. The same definition always gives the same picture.
+// last. An edge into an Either step comes into its way's own point. The same
+// definition always gives the same picture.
 export function toFlow(definition: Definition): Flow {
   // A draft may be saved with problems, such as two nodes sharing an id, but
   // the canvas needs a key per node. "#" can't appear in a valid id, so a key
@@ -144,6 +203,7 @@ export function toFlow(definition: Definition): Flow {
   const edges: FlowEdge[] = [];
   const undrawn: number[] = [];
   const repeats = new Map<string, number>();
+  const ways = new Map<string, number>(); // an Either's key → its ways drawn
   for (const [i, e] of (definition.edges ?? []).entries()) {
     const source = keyOf.get(e.from);
     const target = keyOf.get(e.to);
@@ -155,28 +215,36 @@ export function toFlow(definition: Definition): Flow {
     const id = `${source}->${target}`;
     const seen = repeats.get(id) ?? 0;
     repeats.set(id, seen + 1);
+    const either = nodeOf.get(e.to)?.kind === "either";
+    if (either) ways.set(target, (ways.get(target) ?? 0) + 1);
     edges.push({
       id: seen === 0 ? id : `${id}#${seen}`,
       source,
       target,
       sourceHandle: handle,
-      targetHandle: "in",
+      targetHandle: either ? wayHandle(e) : "in",
       // A condition shows as a small label; what it says is in the panel.
       ...(e.when ? { label: "if" } : {}),
-      data: { index: i },
+      data: { index: i, ...(either ? { way: true } : {}) },
     });
   }
 
-  const positions = place(definition, keys, edges);
+  const heights = definition.nodes.map((n, i) =>
+    heightOf(n, ways.get(keys[i] ?? "") ?? 0),
+  );
+  const positions = place(definition, keys, edges, heights);
   const nodes = definition.nodes.map((n, i): FlowNode => {
     const key = keys[i] ?? "";
-    // The type says a kind is http or transform, but a draft saved with
+    // The type says a kind is one the editor knows, but a draft saved with
     // problems can hold any string.
     const kind: string = n.kind;
-    const height = heightOf(n);
+    const height = heights[i] ?? NODE_HEIGHT;
     return {
       id: key,
-      type: kind === "http" || kind === "transform" ? kind : "unknown",
+      type:
+        kind === "http" || kind === "transform" || kind === "either"
+          ? kind
+          : "unknown",
       position: positions.get(key) ?? { x: 0, y: 0 },
       // React Flow draws a node at a size it's given rather than measuring it.
       width: NODE_WIDTH,
@@ -262,6 +330,7 @@ function place(
   definition: Definition,
   keys: string[],
   edges: FlowEdge[],
+  heights: number[],
 ): Map<string, XYPosition> {
   const stored = definition.ui?.positions ?? {};
   const positions = new Map<string, XYPosition>();
@@ -273,7 +342,7 @@ function place(
   const missing = keys.filter((k) => !positions.has(k));
   if (missing.length === 0) return positions;
 
-  const laidOut = layoutAll(keys, definition.nodes.map(heightOf), edges);
+  const laidOut = layoutAll(keys, heights, edges);
   let below = 0;
   if (positions.size > 0) {
     const storedBottom = Math.max(...[...positions.values()].map((p) => p.y));

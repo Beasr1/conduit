@@ -7,7 +7,7 @@ with JSONata. A Go engine runs it, fanning out in parallel.
 **Status: plan 04, the graph editor, is under way: phases A, B and C are
 committed, with phase D's samples, previews, outputs by status and a step's
 blocks, D's answers, a step's Unhandled block, and strict joins
-(2026-11-01). Next: Phase E, the browser test.** The web app signs in
+(2026-11-01); an Either step is built. Next: Phase E, the browser test.** The web app signs in
 with a session cookie, lists workflows and
 creates them, and edits, checks, saves and publishes one in graph mode,
 previewing what each step reads and sends over sample data, branching on
@@ -17,8 +17,9 @@ and a click opens that part. Each answer on the response card takes one
 line, from the step that gives it; a step joined to several picks one with
 its cases, and Unhandled answers a run that gives none. A step's own
 Unhandled block takes its failures, giving a body you write if you write
-one, and the run goes on down its line. A step runs only when each step
-with a line into it took one of them.
+one, and the run goes on down its line. A step runs only when every line
+into it is taken; an Either step runs after whichever of its ways comes,
+each giving a value of its own.
 What is left is in
 docs/plans/04-graph-editor.md; the bigger picture is docs/plans/README.md.
 

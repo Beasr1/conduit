@@ -3,8 +3,10 @@ import type { XYPosition } from "@xyflow/react";
 import {
   freeSpot,
   handlesOf,
+  hasStrip,
   lineFrom,
   NODE_WIDTH,
+  onOf,
   outputOf,
   RANK_GAP,
   toFlow,
@@ -117,6 +119,42 @@ export function connect(
 ): Definition {
   const edge = { from, to, ...lineFrom(on) };
   return { ...d, edges: [...(d.edges ?? []), edge] };
+}
+
+// newWays is the outputs that could join the Either step with id as a
+// way: each other step's, its Unhandled among them, but those joined to it
+// already, and any that would close a loop. A step whose id is missing or
+// shared can't be named by one.
+export function newWays(
+  d: Definition,
+  id: string,
+): { from: string; on: number | undefined }[] {
+  const ids = d.nodes.map((n) => n.id);
+  return d.nodes.flatMap((n) => {
+    if (n.id === "" || ids.indexOf(n.id) !== ids.lastIndexOf(n.id)) return [];
+    const outputs = handlesOf(n).map(onOf);
+    if (hasStrip(n)) outputs.push(UNHANDLED);
+    return outputs
+      .filter((on) => canConnect(d, n.id, id, on))
+      .map((on) => ({ from: n.id, on }));
+  });
+}
+
+// setWayBody gives the edge at index, a way into an Either step, the body
+// the Either gives when it's the way that comes; undefined removes it, so
+// the Either gives the body of the way's step. A body it already has gives
+// back the draft itself.
+export function setWayBody(
+  d: Definition,
+  index: number,
+  body: string | undefined,
+): Definition {
+  return updateEdge(d, index, (e) => {
+    const next = { ...e };
+    if (body === undefined) delete next.body;
+    else next.body = body;
+    return next;
+  });
 }
 
 // joinedTo is the places in the response's answers of those joined to
@@ -396,9 +434,10 @@ function updateSwitch(
 // outputToStep moves a definition's output, kept from the revisions saved
 // with one, into a transform step, respond, joined to the response's one
 // answer, 200, the output schema that answer's. The step runs after the
-// steps the output reads, whichever way each answers, and goes after the
-// rightmost of them that's placed. Without an output, or beside a response,
-// it gives back the draft itself; else the step's id too.
+// 2xx of each step the output reads, as a step needs every line into it,
+// and goes after the rightmost of them that's placed. Without an output,
+// or beside a response, it gives back the draft itself; else the step's id
+// too.
 export function outputToStep(d: Definition): {
   draft: Definition;
   step?: string;
@@ -409,13 +448,7 @@ export function outputToStep(d: Definition): {
   for (let k = 2; ids.has(step); k++) step = `respond_${k}`;
 
   const read = reads(d, d.output);
-  const edges = read.flatMap((from) => {
-    const node = d.nodes.find((n) => n.id === from);
-    return (node ? handlesOf(node) : []).map((h) => {
-      const on = Number(h);
-      return Number.isInteger(on) ? { from, to: step, on } : { from, to: step };
-    });
-  });
+  const edges = read.map((from) => ({ from, to: step }));
   const { output, output_schema: schema, ...rest } = d;
   const moved: Definition = {
     ...rest,
@@ -572,8 +605,10 @@ export function mentions(d: Definition, id: string): string[] {
     check(`${n.id}'s body`, r?.body);
     check(`${n.id}'s expression`, n.expr);
   }
-  for (const e of d.edges ?? [])
+  for (const e of d.edges ?? []) {
     check(`the condition on the edge from ${e.from} to ${e.to}`, e.when);
+    check(`the body on the edge from ${e.from} to ${e.to}`, e.body);
+  }
   check("the workflow's output", d.output);
   return found;
 }

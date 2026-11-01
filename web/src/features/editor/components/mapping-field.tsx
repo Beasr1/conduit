@@ -191,8 +191,8 @@ export function JsonBlock({ value }: { value: unknown }) {
 export function Skipped() {
   return (
     <p>
-      With these samples, a run would skip this step: no connection into it is
-      taken.
+      With these samples, a run would skip this step: a connection it needs
+      isn&apos;t taken.
     </p>
   );
 }

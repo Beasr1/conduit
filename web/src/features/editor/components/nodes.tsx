@@ -15,6 +15,9 @@ import {
   handlesOf,
   UNHANDLED,
   UNHANDLED_HANDLE,
+  wayHandle,
+  wayLabel,
+  waysInto,
 } from "@/features/editor/flow";
 import { atStep, useProblemCount } from "@/features/editor/hooks/use-problems";
 import { useRun, useStepRun } from "@/features/editor/hooks/use-runs";
@@ -217,6 +220,84 @@ function casesLine(s: Switch): string {
   ].join(" · ");
 }
 
+// An Either step runs after whichever of its ways comes: each way is a
+// block on its left, named for the step and response it comes from, with
+// the point its line arrives at, then + Add, where a new line is let go;
+// each point covers its block. Its value goes on from its point on the
+// right, and its Unhandled strip runs along the bottom. While a run is
+// shown, the way that came is marked.
+const EitherNode = memo(function EitherNode({ id, data }: NodeProps<FlowNode>) {
+  const node = useEditor((s) => s.draft.nodes[data.index]);
+  const step = node?.id ?? "";
+  const handles = useEditor(
+    useShallow((s) => waysInto(s.draft, step).map((w) => w.handle)),
+  );
+  const labels = useEditor(
+    useShallow((s) =>
+      waysInto(s.draft, step).map((w) => wayLabel(s.draft, w.from, w.on)),
+    ),
+  );
+  const problems = useProblemCount(atStep(data.index));
+  const run = useStepRun(step);
+  const came = run?.came && wayHandle(run.came);
+  // It grows with its ways, each with its point.
+  const update = useUpdateNodeInternals();
+  const points = handles.join(" ");
+  useEffect(() => update(id), [update, id, points]);
+  if (!node) return null;
+  return (
+    <Card problems={problems} strip={<UnhandledStrip step={node.id} />}>
+      <div className="flex w-32 shrink-0 flex-col border-r font-mono text-xs">
+        {handles.map((h, k) => (
+          <div
+            key={k}
+            data-part={h}
+            className="relative flex flex-1 items-center gap-1 border-b px-2.5 [&_svg]:size-3 [&_svg]:shrink-0"
+          >
+            <Handle
+              type="target"
+              position={Position.Left}
+              id={h}
+              className="block-point"
+            />
+            <span className="truncate">{labels[k]}</span>
+            {h === came && (
+              <>
+                <CheckIcon aria-hidden />
+                <span className="sr-only">, the way that came</span>
+              </>
+            )}
+          </div>
+        ))}
+        <div
+          data-part="add"
+          className="relative flex flex-1 items-center px-2.5 text-muted-foreground"
+        >
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="in"
+            className="block-point"
+          />
+          + Add
+        </div>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 px-3">
+        <span className="flex items-center gap-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0">
+          <span className="truncate font-mono text-sm font-medium">
+            {node.id || "(no id)"}
+          </span>
+          {problems > 0 && <ProblemMark count={problems} />}
+        </span>
+        <span className="truncate text-xs text-muted-foreground [&_svg]:size-3 [&_svg]:shrink-0">
+          {run ? <RunMark run={run} /> : "Either"}
+        </span>
+      </div>
+      <Handle type="source" position={Position.Right} id="out" />
+    </Card>
+  );
+});
+
 // A draft saved with problems can hold a kind the editor doesn't know.
 const UnknownNode = memo(function UnknownNode({ data }: NodeProps<FlowNode>) {
   const node = useEditor((s) => s.draft.nodes[data.index]);
@@ -284,7 +365,7 @@ const ResponseNode = memo(function ResponseNode({ id }: NodeProps<FlowNode>) {
                 type="target"
                 position={Position.Left}
                 id={String(k)}
-                className="answer-point"
+                className="block-point"
               />
               {status}
               {status === answered && (
@@ -375,6 +456,7 @@ function Refusal({ refused: { step, answer } }: { refused: Refused }) {
 export const nodeTypes = {
   http: HttpNode,
   transform: TransformNode,
+  either: EitherNode,
   unknown: UnknownNode,
   response: ResponseNode,
 };

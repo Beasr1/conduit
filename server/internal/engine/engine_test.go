@@ -210,30 +210,27 @@ func TestRun_SkipsCascade(t *testing.T) {
 	}
 }
 
-// A step runs only when each step with a line into it took one of them
-// (plan 04, strict joins): every step's is needed, and one step's lines are
-// alternatives.
+// A step runs only when every line into it was taken (plan 04, strict
+// joins); otherwise it's skipped, and so are the steps after it.
 func TestRun_JoinsNeedEachStep(t *testing.T) {
 	t.Parallel()
 	p := program(t, "", `{
 	  "nodes": [
 	    {"id": "a", "kind": "transform", "expr": "input.a"},
-	    {"id": "b", "kind": "transform", "expr": "$number(input.b)"},
+	    {"id": "b", "kind": "transform", "expr": "input.b"},
 	    {"id": "c", "kind": "transform", "expr": "'c'"},
 	    {"id": "d", "kind": "transform", "expr": "'d'"}
 	  ],
 	  "edges": [
 	    {"from": "a", "to": "c", "when": "nodes.a.body = 1"},
 	    {"from": "b", "to": "c", "when": "nodes.b.body = 1"},
-	    {"from": "b", "to": "c", "unhandled": true},
 	    {"from": "c", "to": "d"}
 	  ]
 	}`)
 	for input, want := range map[string]string{
-		`{"a": 1, "b": "1"}`: "a succeeded, b succeeded, c succeeded, d succeeded",
-		`{"a": 1, "b": "x"}`: "a succeeded, b failed, c succeeded, d succeeded", // b's other line
-		`{"a": 1, "b": "3"}`: "a succeeded, b succeeded, c skipped, d skipped",
-		`{"a": 2, "b": "1"}`: "a succeeded, b succeeded, c skipped, d skipped",
+		`{"a": 1, "b": 1}`: "a succeeded, b succeeded, c succeeded, d succeeded",
+		`{"a": 1, "b": 3}`: "a succeeded, b succeeded, c skipped, d skipped",
+		`{"a": 2, "b": 1}`: "a succeeded, b succeeded, c skipped, d skipped",
 	} {
 		res, rec := execute(t, testEngine(Options{}), p, input)
 		if res.Status != StatusSucceeded || statuses(res) != want {
@@ -629,10 +626,11 @@ func TestRun_AnswersThroughTheLineTaken(t *testing.T) {
 	// Each of user's outputs answers on its own, with what user got.
 	direct := program(t, srv.URL, `{"nodes": [`+user+`],
 	  "response": {"answers": [{"status": 200, "from": "user"}, {"status": 404, "from": "user", "on": 404}]}}`)
-	// A merger reads either answer user gives and picks the status.
-	picked := program(t, srv.URL, `{"nodes": [`+user+`,
+	// A merger reads either answer user gives, through an either, and picks
+	// the status.
+	picked := program(t, srv.URL, `{"nodes": [`+user+`, {"id": "answered", "kind": "either"},
 	    {"id": "respond", "kind": "transform", "expr": "nodes.user.status = 404 ? { 'status': 404, 'body': { 'error': nodes.user.body.error } } : { 'status': 200, 'body': nodes.user.body }"}],
-	  "edges": [{"from": "user", "to": "respond"}, {"from": "user", "to": "respond", "on": 404}],
+	  "edges": [{"from": "user", "to": "answered"}, {"from": "user", "to": "answered", "on": 404}, {"from": "answered", "to": "respond"}],
 	  "response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}]}}`)
 	// One merger per status, kept apart by user's outputs.
 	apart := program(t, srv.URL, `{"nodes": [`+user+`,

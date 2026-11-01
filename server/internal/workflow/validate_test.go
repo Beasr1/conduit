@@ -62,8 +62,8 @@ func TestValidate_AcceptsSamples(t *testing.T) {
 }
 
 // A step can answer through outputs besides 2xx, each with a sample or
-// none, and two steps can be joined once per output: here log follows user
-// whichever way it answered.
+// none, and two steps can be joined once per output: here log, an either,
+// follows user whichever way it answered.
 func TestValidate_AcceptsOutputs(t *testing.T) {
 	t.Parallel()
 	d := decode(t, `{"nodes": [
@@ -71,7 +71,7 @@ func TestValidate_AcceptsOutputs(t *testing.T) {
 		 "outputs": [{"status": 404, "sample": {"headers": {"Content-Type": "application/json"}, "body": {"error": "gone"}}},
 		             {"status": 409}]},
 		{"id": "create", "kind": "transform", "expr": "1"},
-		{"id": "log", "kind": "transform", "expr": "1"}],
+		{"id": "log", "kind": "either"}],
 		"edges": [{"from": "user", "to": "create", "on": 404},
 		          {"from": "user", "to": "log"},
 		          {"from": "user", "to": "log", "on": 404}]}`)
@@ -107,8 +107,8 @@ func TestValidate_AcceptsResponses(t *testing.T) {
 		"a switch's Unhandled beside its cases": `{"nodes": [{"id": "respond", "kind": "transform",
 			"switch": {"cases": [{"when": "input.id = 0", "status": 404}], "otherwise": {"status": 200}}}],
 			"response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}, {"status": 500, "from": "respond", "unhandled": true}]}}`,
-		"an edge from Unhandled, and one from 2xx, to one node": `{"nodes": [` + branched + `],
-			"edges": [{"from": "user", "to": "found"}, {"from": "user", "to": "found", "unhandled": true}, {"from": "found", "to": "gone", "unhandled": true}],
+		"an edge from Unhandled, and one from 2xx, into an either": `{"nodes": [` + branched + `, {"id": "either_way", "kind": "either"}],
+			"edges": [{"from": "user", "to": "either_way"}, {"from": "user", "to": "either_way", "unhandled": true}, {"from": "either_way", "to": "found"}, {"from": "found", "to": "gone", "unhandled": true}],
 			"response": {"answers": [{"status": 200, "from": "gone"}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -150,11 +150,10 @@ func TestValidate_TwoAnswersInOneRun(t *testing.T) {
 			"never reached when transform needs crm's 2xx and its Unhandled", edges + `, {"from": "crm", "to": "test_400", "unhandled": true}, {"from": "test_400", "to": "transform"}`,
 			"/nodes/5 never_runs: transform can never run: it needs crm to answer 2xx and Unhandled",
 		},
-		// transform runs on either of crm's outputs, so its 2xx keeps nothing
-		// apart.
+		// transform needs every line into it, and crm answers one way.
 		{
-			"both reached when transform reads either of crm's outputs", edges + `, {"from": "crm", "to": "transform", "on": 400}`,
-			"/response/answers/1/from overlap: 200 (transform) and 400 (bad_400) can both be reached in one run: merge them into one node",
+			"never reached when transform needs two of crm's outputs", edges + `, {"from": "crm", "to": "transform", "on": 400}`,
+			"/nodes/5 never_runs: transform can never run: it needs crm to answer 2xx and 400",
 		},
 	}
 	for _, tt := range tests {
@@ -169,6 +168,152 @@ func TestValidate_TwoAnswersInOneRun(t *testing.T) {
 				t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), tt.want)
 			}
 		})
+	}
+}
+
+// An either runs after whichever edge into it is taken, each able to give a
+// body of its own, so the nodes after it can follow either arm of a branch.
+// Its route merges its ways', counting a node a way rules out as not
+// running, so the checks stay exact where ways part at one node's outputs,
+// chains of them included.
+func TestValidate_AcceptsEithers(t *testing.T) {
+	t.Parallel()
+	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
+	for name, def := range map[string]string{
+		// prefs answers 2xx or 400; on 400, test_400 gets them another way, and
+		// failing, answers 502 itself.
+		"the arms of a branch": `{"nodes": [
+			{"id": "prefs", "kind": "http", ` + get + `, "outputs": [{"status": 400}]}, {"id": "test_400", "kind": "http", ` + get + `},
+			{"id": "prefs_ok", "kind": "either"}, {"id": "success_200", "kind": "transform", "expr": "nodes.prefs_ok.body"}],
+		  "edges": [{"from": "prefs", "to": "prefs_ok"}, {"from": "prefs", "to": "test_400", "on": 400},
+		            {"from": "test_400", "to": "prefs_ok", "body": "nodes.test_400.body.data"}, {"from": "prefs_ok", "to": "success_200"}],
+		  "response": {"answers": [{"status": 200, "from": "success_200"}, {"status": 502, "from": "test_400", "unhandled": true}]}}`,
+		// s1 and s2 each fall back on f1 and f2 on 404, and a fallback that
+		// fails answers itself.
+		"a chain of fallbacks": `{"nodes": [
+			{"id": "s1", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "f1", "kind": "http", ` + get + `}, {"id": "e1", "kind": "either"},
+			{"id": "s2", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "f2", "kind": "http", ` + get + `}, {"id": "e2", "kind": "either"},
+			{"id": "done", "kind": "transform", "expr": "1"}],
+		  "edges": [{"from": "s1", "to": "e1"}, {"from": "s1", "to": "f1", "on": 404}, {"from": "f1", "to": "e1"}, {"from": "e1", "to": "s2"},
+		            {"from": "s2", "to": "e2"}, {"from": "s2", "to": "f2", "on": 404}, {"from": "f2", "to": "e2"}, {"from": "e2", "to": "done"}],
+		  "response": {"answers": [{"status": 200, "from": "done"}, {"status": 502, "from": "f1", "unhandled": true}, {"status": 503, "from": "f2", "unhandled": true}]}}`,
+		// An either answers itself, and its Unhandled takes its body failing.
+		"an either's answer, and its Unhandled's": `{"nodes": [
+			{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "e", "kind": "either", "unhandled": {"body": "null"}}],
+		  "edges": [{"from": "a", "to": "e", "body": "1"}, {"from": "a", "to": "e", "on": 404, "body": "2"}],
+		  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 500, "from": "e", "unhandled": true}]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if ps := Validate(decode(t, def)); len(ps) > 0 {
+				t.Fatalf("Validate() = %v, want no problems", ps)
+			}
+		})
+	}
+}
+
+// Two ways into an either that one run could both take are a problem, from
+// the graph alone. A condition before either of them may keep them apart,
+// which the check can't read, so it leaves those to the run.
+func TestValidate_TwoWaysInOneRun(t *testing.T) {
+	t.Parallel()
+	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
+	nodes := `[{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"},
+		{"id": "c", "kind": "transform", "expr": "2"}, {"id": "e", "kind": "either"}]`
+	tests := []struct {
+		name, edges, want string
+	}{
+		{"kept apart by a", `{"from": "a", "to": "e"}, {"from": "a", "to": "e", "on": 404}`, ""},
+		{
+			"both come when one follows the other", `{"from": "a", "to": "e"}, {"from": "a", "to": "b"}, {"from": "b", "to": "e"}`,
+			"/edges/2 overlap: two ways can come into e in one run, from a (2xx) and b (2xx), and an either takes one",
+		},
+		{
+			"left to the run when conditions come first", `{"from": "a", "to": "b", "when": "nodes.a.body.x"}, {"from": "a", "to": "c", "when": "$not(nodes.a.body.x)"},
+			{"from": "b", "to": "e"}, {"from": "c", "to": "e"}`, "",
+		},
+		{"left to the run when a way has a condition", `{"from": "a", "to": "e", "when": "nodes.a.body.x"}, {"from": "a", "to": "b"}, {"from": "b", "to": "e"}`, ""},
+		{"left to the run when a condition comes further back", `{"from": "a", "to": "e"}, {"from": "a", "to": "b", "when": "nodes.a.body.x"}, {"from": "b", "to": "c"}, {"from": "c", "to": "e"}`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			for _, p := range Validate(decode(t, `{"nodes": `+nodes+`, "edges": [`+tt.edges+`]}`)) {
+				got = append(got, p.Pointer+" "+p.Code+": "+p.Detail)
+			}
+			if strings.Join(got, "\n") != tt.want {
+				t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), tt.want)
+			}
+		})
+	}
+}
+
+// An either needs of a node only what each way needs of it, or rules out:
+// b can come as a's way doesn't, so e answering is no sign of a's 2xx, and
+// both answers can be reached. A way whose node never runs is left out,
+// so e still needs a's 2xx there, and f, with no other way, never runs.
+func TestValidate_AnEithersRoute(t *testing.T) {
+	t.Parallel()
+	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
+	tests := []struct {
+		name, def, want string
+	}{
+		{
+			"a way that needs nothing of a", `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"}, {"id": "e", "kind": "either"}],
+			  "edges": [{"from": "a", "to": "e", "when": "nodes.a.body.ok"}, {"from": "b", "to": "e"}],
+			  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 404, "from": "a", "on": 404}]}}`,
+			"/response/answers/1/from overlap: 200 (e) and 404 (a) can both be reached in one run: merge them into one node",
+		},
+		{
+			"ways that never come", `{"nodes": [{"id": "a", "kind": "http", ` + get + `, "outputs": [{"status": 404}]}, {"id": "b", "kind": "transform", "expr": "1"},
+			    {"id": "c", "kind": "transform", "expr": "2"}, {"id": "d", "kind": "transform", "expr": "3"}, {"id": "e", "kind": "either"}, {"id": "f", "kind": "either"}],
+			  "edges": [{"from": "a", "to": "b"}, {"from": "a", "to": "c", "on": 404}, {"from": "a", "to": "d"}, {"from": "c", "to": "d"},
+			            {"from": "b", "to": "e"}, {"from": "d", "to": "e"}, {"from": "d", "to": "f"}],
+			  "response": {"answers": [{"status": 200, "from": "e"}, {"status": 404, "from": "a", "on": 404}, {"status": 201, "from": "f"}]}}`,
+			"/nodes/3 never_runs: d can never run: it needs a to answer 2xx and 404",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			for _, p := range Validate(decode(t, tt.def)) {
+				got = append(got, p.Pointer+" "+p.Code+": "+p.Detail)
+			}
+			if strings.Join(got, "\n") != tt.want {
+				t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), tt.want)
+			}
+		})
+	}
+}
+
+// A node after an either that also needs a node the either's ways rule out,
+// or one of them to answer otherwise, can never run; two eithers can leave
+// it only not running.
+func TestValidate_NeverRunsAfterAnEither(t *testing.T) {
+	t.Parallel()
+	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
+	ps := Validate(decode(t, `{"nodes": [
+		{"id": "prefs", "kind": "http", `+get+`, "outputs": [{"status": 400}]}, {"id": "t", "kind": "http", `+get+`, "outputs": [{"status": 500}]},
+		{"id": "e", "kind": "either"}, {"id": "d", "kind": "transform", "expr": "1"}],
+	  "edges": [{"from": "prefs", "to": "e"}, {"from": "prefs", "to": "t", "on": 400}, {"from": "t", "to": "e"},
+	            {"from": "e", "to": "d"}, {"from": "t", "to": "d", "on": 500}]}`))
+	var got []string
+	for _, p := range ps {
+		got = append(got, p.Pointer+" "+p.Code+": "+p.Detail)
+	}
+	want := "/nodes/3 never_runs: d can never run: it needs t to answer 500, and to answer 2xx or be skipped"
+	if strings.Join(got, "\n") != want {
+		t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
+	}
+	ps = Validate(decode(t, `{"nodes": [
+		{"id": "p", "kind": "http", `+get+`, "outputs": [{"status": 400}]}, {"id": "x", "kind": "http", `+get+`, "outputs": [{"status": 404}, {"status": 500}]},
+		{"id": "e1", "kind": "either"}, {"id": "e2", "kind": "either"}, {"id": "d", "kind": "transform", "expr": "1"}],
+	  "edges": [{"from": "p", "to": "x", "on": 400}, {"from": "p", "to": "e1"}, {"from": "x", "to": "e1"}, {"from": "p", "to": "e2"}, {"from": "x", "to": "e2", "on": 404},
+	            {"from": "e1", "to": "d"}, {"from": "e2", "to": "d"}, {"from": "x", "to": "d", "on": 500}]}`))
+	if len(ps) != 1 || ps[0].Detail != "d can never run: it needs x to answer 500, and to be skipped" {
+		t.Errorf("two eithers: problems %v", ps)
 	}
 }
 
@@ -520,6 +665,42 @@ func TestValidate_ReportsEachProblem(t *testing.T) {
 			want: []string{"/nodes/0/unhandled/body required"},
 		},
 		{
+			name: "an either with no edge into it",
+			def:  `{"nodes": [{"id": "e", "kind": "either"}]}`,
+			want: []string{"/nodes/0 required"},
+		},
+		{
+			name: "an either with what other kinds have",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"},
+			                 {"id": "e", "kind": "either", ` + get + `, "expr": "1", "switch": {"otherwise": {"status": 200}}, "sample": {"body": null}, "outputs": [{"status": 404}]}],
+			       "edges": [{"from": "a", "to": "e"}]}`,
+			want: []string{"/nodes/1/request not_allowed", "/nodes/1/expr not_allowed", "/nodes/1/switch not_allowed", "/nodes/1/sample not_allowed", "/nodes/1/outputs not_allowed"},
+		},
+		{
+			name: "a body on an edge into a node that isn't an either",
+			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}], "edges": [{"from": "a", "to": "b", "body": "3"}]}`,
+			want: []string{"/edges/0/body not_allowed"},
+		},
+		{
+			name: "a line from an either naming an output",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "e", "kind": "either"}, {"id": "b", "kind": "transform", "expr": "2"}],
+			       "edges": [{"from": "a", "to": "e"}, {"from": "e", "to": "b", "on": 404}],
+			       "response": {"answers": [{"status": 200, "from": "e", "on": 404}]}}`,
+			want: []string{"/edges/1/on not_allowed", "/response/answers/0/on not_allowed"},
+		},
+		{
+			name: "an either joined to two answers",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "e", "kind": "either"}], "edges": [{"from": "a", "to": "e"}],
+			       "response": {"answers": [{"status": 200, "from": "e"}, {"status": 201, "from": "e"}]}}`,
+			want: []string{"/response/answers/1/from not_allowed"},
+		},
+		{
+			name: "two ways one run could both take",
+			def: `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}, {"id": "b", "kind": "transform", "expr": "2"}, {"id": "e", "kind": "either"}],
+			       "edges": [{"from": "a", "to": "e"}, {"from": "a", "to": "b"}, {"from": "b", "to": "e"}]}`,
+			want: []string{"/edges/2 overlap"},
+		},
+		{
 			name: "an output beside a response",
 			def:  `{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], "output": "1", "response": {"answers": [{"status": 200, "from": "a"}]}}`,
 			want: []string{"/output not_allowed"},
@@ -585,17 +766,17 @@ func TestProblems_Error(t *testing.T) {
 
 // A step whose lines need outputs of one step that share none can never
 // run, and says so, whichever line it finds that on; the steps after it
-// can't either, aren't named again, and their answers are no overlap. One
-// step's lines into another are alternatives.
+// can't either, aren't named again, and their answers are no overlap. Two
+// of one step's lines into another can never both be taken.
 func TestValidate_NeverRuns(t *testing.T) {
 	t.Parallel()
 	get := `"request": {"method": "GET", "url": "https://api.example.com/v1"}`
 	step := func(id string) string { return `{"id": "` + id + `", "kind": "transform", "expr": "1"}` }
 	ps := Validate(decode(t, `{"nodes": [{"id": "a", "kind": "http", `+get+`, "outputs": [{"status": 404}, {"status": 409}]},
-		`+step("b")+`, `+step("c")+`, `+step("d")+`, `+step("either")+`, `+step("later")+`, `+step("conflicted")+`, `+step("f")+`],
+		`+step("b")+`, `+step("c")+`, `+step("d")+`, `+step("each_way")+`, `+step("later")+`, `+step("conflicted")+`, `+step("f")+`],
 	  "edges": [
 	    {"from": "a", "to": "b"}, {"from": "a", "to": "c", "on": 404}, {"from": "b", "to": "c"}, {"from": "c", "to": "d"},
-	    {"from": "a", "to": "either"}, {"from": "a", "to": "either", "on": 404}, {"from": "a", "to": "either", "unhandled": true},
+	    {"from": "a", "to": "each_way"}, {"from": "a", "to": "each_way", "on": 404}, {"from": "a", "to": "each_way", "unhandled": true},
 	    {"from": "b", "to": "later"}, {"from": "a", "to": "later", "on": 409},
 	    {"from": "a", "to": "f", "on": 409}, {"from": "a", "to": "conflicted", "on": 404}, {"from": "a", "to": "conflicted"}, {"from": "f", "to": "conflicted"}],
 	  "response": {"answers": [{"status": 201, "from": "b"}, {"status": 200, "from": "d"}]}}`))
@@ -604,9 +785,10 @@ func TestValidate_NeverRuns(t *testing.T) {
 		got = append(got, p.Pointer+" "+p.Code+": "+p.Detail)
 	}
 	want := []string{
+		"/nodes/4 never_runs: each_way can never run: it needs a to answer 2xx and 404",
 		"/nodes/2 never_runs: c can never run: it needs a to answer 404 and 2xx",
 		"/nodes/5 never_runs: later can never run: it needs a to answer 2xx and 409",
-		"/nodes/6 never_runs: conflicted can never run: it needs a to answer 2xx or 404 and 409",
+		"/nodes/6 never_runs: conflicted can never run: it needs a to answer 404 and 2xx",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

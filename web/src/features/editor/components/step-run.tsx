@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { JsonBlock } from "@/features/editor/components/mapping-field";
 import { withSample } from "@/features/editor/components/step-sample";
 import { updateNode } from "@/features/editor/edits";
+import { outputOf, wayLabel } from "@/features/editor/flow";
 import { useRun, useStepRun } from "@/features/editor/hooks/use-runs";
 import { runSaid, said, type StepRun } from "@/features/editor/runs";
 import { useEditor } from "@/features/editor/store";
@@ -89,7 +90,7 @@ export function RunSent({ index }: { index: number }) {
     <InRun title={`In this run: ${said(run)}`}>
       {run.state === "skipped" && (
         <p className="text-muted-foreground">
-          No line into it was taken, so it didn&apos;t run.
+          A line it needs wasn&apos;t taken, so it didn&apos;t run.
         </p>
       )}
       {run.error && <p className="text-destructive">{run.error.detail}</p>}
@@ -165,17 +166,25 @@ export function RunGot({
   );
 }
 
-// RunGave is what a transform step gave in the run shown. One whose
-// Unhandled block took its failure gave nothing of its own: its Unhandled
-// says what the block did.
+// RunGave is what a transform or Either step gave in the run shown, and
+// the way an Either came by. One whose Unhandled block took its failure
+// gave nothing of its own: its Unhandled says what the block did.
 export function RunGave({ index }: { index: number }) {
   const step = useEditor((s) => s.draft.nodes[index]?.id ?? "");
   const run = useStepRun(step);
+  const came = useEditor((s) =>
+    run?.came ? wayLabel(s.draft, run.came.from, outputOf(run.came)) : "",
+  );
   const gave = useRecorded(step)?.response;
   if (!run) return null;
   return (
     <InRun title={`In this run: ${said(run)}`}>
       {run.error && <p className="text-destructive">{run.error.detail}</p>}
+      {came && (
+        <p>
+          It came by <span className="font-mono">{came}</span>.
+        </p>
+      )}
       {gave && run.state === "succeeded" && (
         <>
           <p>It gave</p>

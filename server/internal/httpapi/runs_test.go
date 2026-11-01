@@ -35,14 +35,16 @@ const greetDef = `{
   "input_schema": {"type": "object", "required": ["user_id"], "properties": {"user_id": {"type": "string"}}}
 }`
 
-// answersDef answers 200 with the user, or 404 when the users API has none.
+// answersDef answers 200 with the user, or 404 when the users API has none:
+// respond follows user either way, through an either.
 const answersDef = `{
   "nodes": [
     {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}, "outputs": [{"status": 404}]},
+    {"id": "answered", "kind": "either"},
     {"id": "respond", "kind": "transform",
      "expr": "nodes.user.status = 404 ? { 'status': 404, 'body': { 'error': 'no such user' } } : { 'status': 200, 'body': nodes.user.body }"}
   ],
-  "edges": [{"from": "user", "to": "respond"}, {"from": "user", "to": "respond", "on": 404}],
+  "edges": [{"from": "user", "to": "answered"}, {"from": "user", "to": "answered", "on": 404}, {"from": "answered", "to": "respond"}],
   "response": {"answers": [{"status": 200, "from": "respond"}, {"status": 404, "from": "respond"}]}
 }`
 
@@ -170,6 +172,27 @@ func TestRuns_ACaughtFailure(t *testing.T) {
 	got := strict[gen.Run](t, call(t, http.MethodGet, "/v1/runs/"+run.ID, "").body)
 	if user := got.Nodes[0]; user.Status != gen.NodeRunStatusFailed || !user.Error.Caught || got.Error.Code != "" {
 		t.Errorf("run %s, error %+v; user %s, error %+v", got.Status, got.Error, user.Status, user.Error)
+	}
+}
+
+// An either says which way it ran with, live and on the run's record.
+func TestRuns_AnEithersWay(t *testing.T) {
+	t.Parallel()
+	wr := create(t, strings.ReplaceAll(`{"nodes": [
+	    {"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}, "outputs": [{"status": 404}]},
+	    {"id": "found", "kind": "either"}],
+	  "edges": [{"from": "user", "to": "found"}, {"from": "user", "to": "found", "on": 404, "body": "null"}]}`, "BASE", usersUpstream(t).URL))
+	run := startRun(t, wr.Workflow.ID, `{"input": {"user_id": "7"}}`)
+	events := readEvents(t, bytes.NewReader(call(t, http.MethodGet, "/v1/runs/"+run.ID+"/events", "").body))
+	if got, want := eventList(t, events), "1 user started, 2 user succeeded, 3 found started, 4 found succeeded, end run succeeded"; got != want {
+		t.Fatalf("events: %s\nwant:   %s", got, want)
+	}
+	if n := strict[gen.NodeEvent](t, []byte(events[3].data)); n.Way != (gen.Way{From: "user"}) {
+		t.Errorf("found's end = %s", events[3].data)
+	}
+	got := strict[gen.Run](t, call(t, http.MethodGet, "/v1/runs/"+run.ID, "").body)
+	if user, found := got.Nodes[0], got.Nodes[1]; user.Way != (gen.Way{}) || found.Way != (gen.Way{From: "user"}) {
+		t.Errorf("user's way %+v, found's %+v", user.Way, found.Way)
 	}
 }
 

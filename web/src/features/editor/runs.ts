@@ -6,11 +6,12 @@ type NodeRun = components["schemas"]["NodeRun"];
 type RunError = components["schemas"]["RunError"];
 type RunSummary = components["schemas"]["RunSummary"];
 type RunStatus = RunSummary["status"];
+type Way = components["schemas"]["Way"];
 
 // StepRun is how one step went in the run shown: its state, the status it
-// got back, if it's an HTTP step that got one, its attempts and time, and
-// why it failed. A step is waiting while the run hasn't reached it, and
-// "not run" when the run ended without it.
+// got back, if it's an HTTP step that got one, its attempts and time, why
+// it failed, and the way an Either step came by. A step is waiting while the
+// run hasn't reached it, and "not run" when the run ended without it.
 export interface StepRun {
   state:
     | "waiting"
@@ -25,6 +26,7 @@ export interface StepRun {
   attempts?: number;
   ms?: number;
   error?: RunError;
+  came?: Way;
 }
 
 // stepRunOf is how a step went: as the server recorded it, once it has,
@@ -44,6 +46,7 @@ export function stepRunOf(
       attempts: recorded.attempts,
       ...(from === undefined ? {} : { ms: Date.parse(to) - Date.parse(from) }),
       ...(recorded.error ? { error: recorded.error } : {}),
+      ...(recorded.way ? { came: recorded.way } : {}),
     };
   }
   if (last)
@@ -52,6 +55,7 @@ export function stepRunOf(
       ...(last.http_status === undefined ? {} : { status: last.http_status }),
       attempts: last.attempt,
       ...(last.error ? { error: last.error } : {}),
+      ...(last.way ? { came: last.way } : {}),
     };
   return { state: run === "running" ? "waiting" : "not run" };
 }

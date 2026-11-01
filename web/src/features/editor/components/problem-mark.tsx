@@ -1,5 +1,8 @@
 import { CircleAlertIcon } from "lucide-react";
 
+import { useProblemCount } from "@/features/editor/hooks/use-problems";
+import type { Place } from "@/features/editor/problems";
+
 // ProblemMark marks something with problems: an icon, and words for screen
 // readers, since colour alone isn't a signal. The space before them is its
 // own text, so the name reads "Request (1 problem)"; a flex row, where the
@@ -14,4 +17,10 @@ export function ProblemMark({ count }: { count: number }) {
       </span>
     </>
   );
+}
+
+// Marked marks a tab whose part of the step has problems.
+export function Marked({ where }: { where: (p: Place) => boolean }) {
+  const count = useProblemCount(where);
+  return count > 0 ? <ProblemMark count={count} /> : null;
 }

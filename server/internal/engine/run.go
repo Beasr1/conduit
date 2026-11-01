@@ -47,7 +47,7 @@ type Status string
 const (
 	StatusSucceeded Status = "succeeded"
 	StatusFailed    Status = "failed"
-	StatusSkipped   Status = "skipped"   // nodes only: no edge into it was taken
+	StatusSkipped   Status = "skipped"   // nodes only: an edge into it went untaken, or, into an either, every one did
 	StatusCancelled Status = "cancelled" // stopped by a failure elsewhere, or by the caller
 )
 
@@ -82,6 +82,16 @@ type NodeResult struct {
 	// Request is what an http node sent, as built, once its URL, headers and
 	// body rendered. Nothing is redacted here; whoever stores it does that.
 	Request *SentRequest
+	// Way is the edge an either node ran with, the one into it that was taken.
+	Way *Way
+}
+
+// Way is an edge into an either: the node it comes from, and the output of
+// that node it leaves, a status, 0 for 2xx and the one output of a
+// transform or an either, or workflow.OnUnhandled.
+type Way struct {
+	From string
+	On   int
 }
 
 // SentRequest is a request as an http node built it.
@@ -189,7 +199,8 @@ type run struct {
 type nodeState struct {
 	ready, started bool
 	ended          bool
-	parentsDone    int // edges in whose source has ended
+	parentsDone    int       // edges in whose source has ended
+	reads          []docPart // what its expressions read, once it started
 	entry          json.RawMessage
 	result         NodeResult
 }
@@ -229,8 +240,8 @@ func (r *run) schedule() *Result {
 	}
 
 	// Whatever never started was stopped by a failure, the deadline or the
-	// caller: a node is skipped only when its parents all ended without
-	// taking an edge to it, and then it has already ended.
+	// caller: a node is skipped only once its parents have all ended, and
+	// then it has already ended.
 	for i := range r.nodes {
 		if !r.nodes[i].ended {
 			r.end(i, StatusCancelled, nil)
@@ -271,11 +282,40 @@ func (r *run) startReady() {
 		n.started = true
 		r.inFlight++
 		r.emit(i, EventStarted, 1, nil)
-		go r.exec(i, r.parts(i))
+		came := r.came(i)
+		n.reads = r.reads(i, came)
+		go r.exec(i, n.reads, came)
 	}
 }
 
-// parts is what node i's expressions may see: the finished ancestors.
+// came is the edges taken into node i, an either, in the definition's
+// order; nil for any other node.
+func (r *run) came(i int) []int {
+	if r.p.nodes[i].kind != workflow.NodeKindEither {
+		return nil
+	}
+	var out []int
+	for _, k := range r.p.nodes[i].in {
+		if r.taken[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// reads is what node i's expressions see: its finished ancestors, or, for
+// an either one way came into, what that edge's condition read, what the
+// node it came from read and that node.
+func (r *run) reads(i int, came []int) []docPart {
+	if len(came) != 1 {
+		return r.parts(i)
+	}
+	from := r.p.edges[came[0]].from
+	s := &r.nodes[from]
+	return append(s.reads[:len(s.reads):len(s.reads)], docPart{id: r.p.nodes[from].id, entry: s.entry})
+}
+
+// parts is node i's finished ancestors.
 func (r *run) parts(i int) []docPart {
 	var out []docPart
 	for _, a := range r.p.nodes[i].ancestors {
@@ -314,9 +354,9 @@ func (r *run) finish(i int, o outcome) {
 }
 
 // lineEnded counts edge k, now that its source has ended, taking it or not.
-// Once every edge into its node has, the node is ready if each node with an
-// edge into it took one of them, and skipped if any took none; a skip ends
-// the node's own edges untaken, so skips cascade.
+// Once every edge into its node has, the node is ready if it joined, and
+// skipped if not; a skip ends the node's own edges untaken, so skips
+// cascade.
 func (r *run) lineEnded(k int, taken bool) {
 	r.taken[k] = taken
 	i := r.p.edges[k].to
@@ -335,18 +375,15 @@ func (r *run) lineEnded(k int, taken bool) {
 	}
 }
 
-// joined says whether each node with an edge into node i took one of them:
-// a node's edges into one other are alternatives, and each node's is
-// needed (plan 04, strict joins).
+// joined says whether node i runs, now that every edge into it has ended:
+// an either when one was taken, any other node when every one was (plan 04,
+// strict joins).
 func (r *run) joined(i int) bool {
 	in := r.p.nodes[i].in
-	for _, k := range in {
-		from := r.p.edges[k].from
-		if !slices.ContainsFunc(in, func(j int) bool { return r.p.edges[j].from == from && r.taken[j] }) {
-			return false
-		}
+	if r.p.nodes[i].kind == workflow.NodeKindEither {
+		return slices.ContainsFunc(in, func(k int) bool { return r.taken[k] })
 	}
-	return true
+	return !slices.ContainsFunc(in, func(k int) bool { return !r.taken[k] })
 }
 
 func (r *run) end(i int, s Status, o *outcome) {

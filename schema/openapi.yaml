@@ -651,13 +651,13 @@ components:
         sends:
           $ref: "#/components/schemas/RenderedRequest"
         gives:
-          description: A transform step's value, or the workflow's output. Absent when it gave none.
+          description: A transform or either step's value, or the workflow's output; for a connection into an either, what the either gives when it's the one taken. Absent when it gave none.
           x-go-type: json.RawMessage
         unhandled:
           $ref: "#/components/schemas/UnhandledPreview"
         skipped:
           type: boolean
-          description: A run would skip the step, or a connection's source, with these samples, as no connection into it is taken.
+          description: A run would skip the step, or a connection's source, with these samples, as a step joined to it takes no connection into it, or none into an either is taken.
         problems:
           type: array
           description: What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
@@ -888,6 +888,8 @@ components:
           $ref: "#/components/schemas/NodeResponse"
         error:
           $ref: "#/components/schemas/RunError"
+        way:
+          $ref: "#/components/schemas/Way"
         started_at:
           type: string
           format: date-time
@@ -918,7 +920,7 @@ components:
 
     NodeResponse:
       type: object
-      description: What an http node got back, or a transform node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
+      description: What an http node got back, or a transform or either node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest.
       required: [body]
       properties:
         status:
@@ -960,3 +962,19 @@ components:
           description: On the event that ends an http node that got an answer.
         error:
           $ref: "#/components/schemas/RunError"
+        way:
+          $ref: "#/components/schemas/Way"
+
+    Way:
+      type: object
+      description: The edge an either node ran with, the one into it that was taken, as the definition writes it.
+      required: [from]
+      properties:
+        from:
+          type: string
+        on:
+          type: integer
+          description: The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform or an either.
+        unhandled:
+          type: boolean
+          description: It left from's Unhandled block, and on is absent.

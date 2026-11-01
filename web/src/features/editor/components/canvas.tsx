@@ -33,6 +33,7 @@ import {
   RESPONSE,
   responseCard,
   toFlow,
+  wayHandle,
 } from "@/features/editor/flow";
 import {
   useProblemCount,
@@ -81,7 +82,10 @@ export function Canvas() {
   // dashed, and its name says whether the run took it. A line into an
   // answer is taken once the run answered with it: gave is that status, or
   // -1 while the run goes on. A run that failed took none, even one the
-  // response's Unhandled answered.
+  // response's Unhandled answered. A line into an Either is taken when
+  // it's the way the Either says it came by. Until a run says, a way into an
+  // Either is dashed too, as it may not be taken; so is one the run is still
+  // to decide.
   const troubled = useProblems((p) => p.on === "connection");
   const steps = useRunSteps();
   const gave = useRun(
@@ -126,10 +130,20 @@ export function Canvas() {
                     : "not run",
             }
           : (steps?.(line?.to ?? "") ?? { state: "waiting" });
+      const to = line && !answer ? steps?.(line.to) : undefined;
       const taken =
-        steps && line ? takenOf(line.on, steps(line.from), into()) : undefined;
-      if (!on && !bad && taken === undefined) return e;
-      const classes = [bad && "problem", taken === false && "untaken"]
+        line && to?.came
+          ? wayHandle(to.came) === wayHandle(line)
+          : steps && line
+            ? takenOf(line.on, steps(line.from), into())
+            : undefined;
+      const may = e.data?.way === true && taken === undefined;
+      if (!on && !bad && !may && taken === undefined) return e;
+      const classes = [
+        bad && "problem",
+        taken === false && "untaken",
+        may && "way",
+      ]
         .filter(Boolean)
         .join(" ");
       return {
@@ -143,7 +157,11 @@ export function Canvas() {
           ? {
               ariaLabel: `Connection from ${line.from} to ${line.to}, ${taken ? "taken" : "not taken"} in this run`,
             }
-          : {}),
+          : line && may
+            ? {
+                ariaLabel: `Connection from ${line.from} to ${line.to}, one of its ways`,
+              }
+            : {}),
       };
     });
   }, [flow, selected.edges, troubled, steps, draft, gave]);
@@ -248,6 +266,7 @@ export function Canvas() {
       <Panel position="top-left" className="nokey flex gap-2">
         <AddNodeDialog kind="http" />
         <AddNodeDialog kind="transform" />
+        <AddNodeDialog kind="either" />
         <Button
           variant="outline"
           size="sm"

@@ -388,10 +388,10 @@ export interface components {
             /** @description A connection's preview only, whether a run would take it with these samples. */
             taken?: boolean;
             sends?: components["schemas"]["RenderedRequest"];
-            /** @description A transform step's value, or the workflow's output. Absent when it gave none. */
+            /** @description A transform or either step's value, or the workflow's output; for a connection into an either, what the either gives when it's the one taken. Absent when it gave none. */
             gives?: unknown;
             unhandled?: components["schemas"]["UnhandledPreview"];
-            /** @description A run would skip the step, or a connection's source, with these samples, as no connection into it is taken. */
+            /** @description A run would skip the step, or a connection's source, with these samples, as a step joined to it takes no connection into it, or none into an either is taken. */
             skipped: boolean;
             /** @description What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there. */
             problems: components["schemas"]["ProblemError"][];
@@ -519,6 +519,7 @@ export interface components {
             request?: components["schemas"]["NodeRequest"];
             response?: components["schemas"]["NodeResponse"];
             error?: components["schemas"]["RunError"];
+            way?: components["schemas"]["Way"];
             /**
              * Format: date-time
              * @description Absent if the node never started.
@@ -539,7 +540,7 @@ export interface components {
             body?: unknown;
             truncated?: boolean;
         };
-        /** @description What an http node got back, or a transform node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest. */
+        /** @description What an http node got back, or a transform or either node's value. It's the node's part of the data document, nodes.<id>, redacted and capped like NodeRequest. */
         NodeResponse: {
             /** @description http nodes only. */
             status?: number;
@@ -566,9 +567,21 @@ export interface components {
             /** @description On the event that ends an http node that got an answer. */
             http_status?: number;
             error?: components["schemas"]["RunError"];
+            way?: components["schemas"]["Way"];
         };
-        /** @enum {string} */
-        NodeKind: "http" | "transform";
+        /** @description The edge an either node ran with, the one into it that was taken, as the definition writes it. */
+        Way: {
+            from: string;
+            /** @description The output of from it left, as an edge's. Absent means 2xx, and the only output of a transform or an either. */
+            on?: number;
+            /** @description It left from's Unhandled block, and on is absent. */
+            unhandled?: boolean;
+        };
+        /**
+         * @description An http node calls an upstream, a transform node gives what its JSONata does, and an either node gives what the one edge into it that was taken gives; two taken fail it.
+         * @enum {string}
+         */
+        NodeKind: "http" | "transform" | "either";
         /** @description Retries transport errors, timeouts, 429 and 5xx responses, with backoff and Retry-After honoured. */
         Retry: {
             /** @description Total attempts, the first included. */
@@ -653,19 +666,21 @@ export interface components {
         Edge: {
             from: string;
             to: string;
-            /** @description The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and a transform's only output, or the Unhandled block when unhandled is set. */
+            /** @description The output of its source the edge leaves from, by status, one of the source's outputs. Absent means 2xx, and the only output of a transform or an either, or the Unhandled block when unhandled is set. */
             on?: number;
             /** @description The edge leaves from its source's Unhandled block, and on is absent. Every node has one. It takes what the node's other outputs don't, a failure of its own, a status it doesn't list among them, so a run goes on down the edges from it, its node failed; with no line from it, the failure fails the run. Steps after it read the failure as nodes.<id>.error, {code, detail}, beside an http node's status, headers and body when it got an answer. */
             unhandled?: boolean;
             /** @description A JSONata condition, cast to a boolean the way $boolean() does. The edge is taken when its source answered through the edge's output, or failed into its Unhandled block, and this is true. Absent means true. */
             when?: string;
+            /** @description Only on an edge into an either node. JSONata whose value the either gives when this edge is the one taken; it reads what the condition does, the nodes before the source and the source. Absent, the either gives the source's body as it is. */
+            body?: string;
         };
         Answer: {
             /** @description The HTTP status the answer has. Listed once in a response. */
             status: number;
             /** @description The node joined to the answer by its one line. A node joined to one answer, from one of its outputs, gives its result as the body; a node joined to several from one output is a transform, whose result is {status, body}, the status one of theirs. */
             from?: string;
-            /** @description The output of from that the line leaves from, as an edge's. Absent means 2xx, and a transform's only output, or the Unhandled block when unhandled is set. */
+            /** @description The output of from that the line leaves from, as an edge's. Absent means 2xx, and the only output of a transform or an either, or the Unhandled block when unhandled is set. */
             on?: number;
             /** @description The line leaves from from's Unhandled block, as an edge can, and on is absent. The answer's body is then from's body, what an http node got back with a status it doesn't list, else none. A node's Unhandled block is joined to one answer at most. */
             unhandled?: boolean;
@@ -698,7 +713,7 @@ export interface components {
                 [key: string]: components["schemas"]["Position"];
             };
         };
-        /** @description A workflow. A node runs once its parents have finished, if each of them took an edge into it; one parent's edges into it are alternatives. Otherwise it's skipped. */
+        /** @description A workflow. A node runs once its parents have finished, if every edge into it was taken; an either node runs if one was, and two fail it. Otherwise it's skipped. */
         Definition: {
             nodes: components["schemas"]["Node"][];
             edges?: components["schemas"]["Edge"][];

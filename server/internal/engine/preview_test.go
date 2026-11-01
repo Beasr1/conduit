@@ -272,13 +272,13 @@ const branched = `{
      "body": "{ 'id': input.user_id, 'why': nodes.user.body.error }"}},
     {"id": "crm", "kind": "http", "request": {"method": "POST", "url": "https://crm.example.com/v1/contacts",
      "body": "{ 'email': nodes.user.body.email }"}, "sample": {"body": {"id": "c-1"}}},
-    {"id": "log", "kind": "transform", "expr": "nodes.user.status"}
+    {"id": "log", "kind": "either"}
   ],
   "edges": [
     {"from": "user", "to": "create", "on": 404},
     {"from": "user", "to": "crm"},
-    {"from": "user", "to": "log", "on": 404},
-    {"from": "user", "to": "log"}
+    {"from": "user", "to": "log", "on": 404, "body": "nodes.user.status"},
+    {"from": "user", "to": "log", "body": "nodes.user.status"}
   ],
   "output": "{ 'crm': nodes.crm.body.id, 'created': $exists(nodes.create) }",
   "sample_input": {"user_id": "7"}

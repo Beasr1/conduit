@@ -222,6 +222,7 @@ func nodeRunOut(n store.NodeRun) (gen.NodeRun, error) {
 		decodeDoc(n.Request, &out.Request, what+"'s request"),
 		decodeDoc(n.Response, &out.Response, what+"'s response"),
 		decodeDoc(n.Error, &out.Error, what+"'s error"),
+		decodeDoc(n.Way, &out.Way, what+"'s way"),
 	)
 }
 

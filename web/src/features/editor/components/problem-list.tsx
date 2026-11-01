@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { removeEdges } from "@/features/editor/edits";
-import { handlesOf, RESPONSE, toFlow } from "@/features/editor/flow";
+import { handlesOf, RESPONSE, toFlow, wayHandle } from "@/features/editor/flow";
 import { useProblems } from "@/features/editor/hooks/use-problems";
 import {
   type Found,
@@ -81,7 +81,9 @@ function fieldOf(
       return fieldIds[field ?? "id"] ?? "step-id";
     }
     case "connection":
-      return "connection-when";
+      return place.field === "body"
+        ? `way-${place.index}-value`
+        : "connection-when";
     case "response":
       switch (place.field) {
         case "from":
@@ -181,8 +183,15 @@ function Entry({ found: { place, code, message } }: { found: Found }) {
       const key = flow.nodes[place.index]?.id;
       if (key) show("nodes", key, stepPartOf(place, draft));
     } else if (place.on === "connection") {
+      // A way's value is the Either's, in its panel, on the way's tab.
+      const e = draft.edges?.[place.index];
+      const either = flow.nodes.find(
+        (n) => n.type === "either" && draft.nodes[n.data.index]?.id === e?.to,
+      )?.id;
       const key = flow.edges.find((e) => e.data?.index === place.index)?.id;
-      if (key) show("edges", key);
+      if (place.field === "body" && either && e)
+        show("nodes", either, wayHandle(e));
+      else if (key) show("edges", key);
     }
   }
 
@@ -284,6 +293,7 @@ export function Where({ place, draft }: { place: Place; draft: Definition }) {
           )}{" "}
           → <span className="font-mono">{e?.to}</span>
           {place.field === "when" && " · Condition"}
+          {place.field === "body" && " · Value"}
         </>
       );
     }

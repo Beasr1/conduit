@@ -13,6 +13,7 @@ import {
   leaveAnswer,
   mentions,
   move,
+  newWays,
   moveCase,
   NODE_ID,
   outputToStep,
@@ -28,6 +29,7 @@ import {
   setField,
   setStepUnhandled,
   setUnhandled,
+  setWayBody,
   toSwitch,
   updateCase,
   updateEdge,
@@ -320,11 +322,9 @@ test("an output moves into a step, respond, joined to the response's one answer,
     kind: "transform",
     expr: draft.output,
   });
-  // It runs after the steps the output reads, whichever way each answered.
+  // It runs after the 2xx of each step the output reads.
   expect(moved.edges?.slice(draft.edges?.length)).toEqual([
     { from: "user", to: "respond" },
-    { from: "user", to: "respond", on: 404 },
-    { from: "user", to: "respond", on: 409 },
     { from: "crm", to: "respond" },
   ]);
   expect(moved.response).toEqual({
@@ -483,8 +483,12 @@ test("mentions finds every place that still reads a node by its id", () => {
         },
       },
       { id: "merge", kind: "transform", expr: "nodes.user.body" },
+      { id: "either", kind: "either" },
     ],
-    edges: [{ from: "crm", to: "merge", when: "nodes.user.status = 200" }],
+    edges: [
+      { from: "crm", to: "merge", when: "nodes.user.status = 200" },
+      { from: "crm", to: "either", body: "nodes.user.body.prefs" },
+    ],
     output: "nodes.merge.body",
   };
   expect(mentions(draft, "user")).toEqual([
@@ -492,9 +496,63 @@ test("mentions finds every place that still reads a node by its id", () => {
     "crm's headers",
     "merge's expression",
     "the condition on the edge from crm to merge",
+    "the body on the edge from crm to either",
   ]);
   expect(mentions(draft, "merge")).toEqual(["the workflow's output"]);
   expect(mentions(draft, "a(b")).toEqual([]);
+});
+
+// prefs answers 2xx or 400, and fallback follows its 400; prefs_ok, an
+// Either, takes prefs' 2xx, and greet follows it.
+const either: Definition = {
+  nodes: [
+    {
+      id: "prefs",
+      kind: "http",
+      request: { method: "GET", url: "https://prefs.example.com/v1" },
+      outputs: [{ status: 400 }],
+    },
+    { id: "fallback", kind: "transform", expr: "1" },
+    { id: "prefs_ok", kind: "either" },
+    { id: "greet", kind: "transform", expr: "2" },
+  ],
+  edges: [
+    { from: "prefs", to: "prefs_ok" },
+    { from: "prefs", to: "fallback", on: 400 },
+    { from: "prefs_ok", to: "greet" },
+  ],
+};
+
+test("an Either step is offered each output that could join it as a way", () => {
+  // Not prefs' 2xx, joined already, nor greet's, which would close a
+  // loop, nor its own.
+  expect(newWays(either, "prefs_ok")).toEqual([
+    { from: "prefs", on: 400 },
+    { from: "prefs", on: UNHANDLED },
+    { from: "fallback", on: undefined },
+    { from: "fallback", on: UNHANDLED },
+  ]);
+  const joined = connect(either, "fallback", "prefs_ok");
+  expect(newWays(joined, "prefs_ok")).toEqual([
+    { from: "prefs", on: 400 },
+    { from: "prefs", on: UNHANDLED },
+    { from: "fallback", on: UNHANDLED },
+  ]);
+});
+
+test("a way's body is set, changed and taken away", () => {
+  const set = setWayBody(either, 0, "nodes.prefs.body.data");
+  expect(set.edges?.[0]).toEqual({
+    from: "prefs",
+    to: "prefs_ok",
+    body: "nodes.prefs.body.data",
+  });
+  expect(setWayBody(set, 0, "nodes.prefs.body.data")).toBe(set);
+  expect(setWayBody(set, 0, undefined).edges?.[0]).toStrictEqual({
+    from: "prefs",
+    to: "prefs_ok",
+  });
+  expect(setWayBody(either, 9, "1")).toBe(either);
 });
 
 test.each([

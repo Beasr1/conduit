@@ -68,6 +68,7 @@ test.each<[string, Place]>([
   ["/edges/2/to", { on: "connection", index: 2 }],
   ["/edges/0/when", { on: "connection", index: 0, field: "when" }],
   ["/edges/1/unhandled", { on: "connection", index: 1, field: "on" }],
+  ["/edges/1/body", { on: "connection", index: 1, field: "body" }],
   ["/output", { on: "response", field: "output" }],
   ["/output_schema", { on: "response", field: "output_schema" }],
   ["/response/answers", { on: "response", field: "answers" }],
@@ -559,7 +560,115 @@ test("the server's detail stands where it says what went wrong", () => {
       broken,
     ),
   ).toBe(
-    "a can never run: it needs b to answer 2xx and 404. A step runs only when each step with a line into it answers through one of them.",
+    "a can never run: it needs b to answer 2xx and 404. A step runs only when every line into it is taken; to run it after whichever comes, join them to an Either step first.",
+  );
+});
+
+// prefs answers 2xx or 400, and fallback follows its 400. prefs_ok, an
+// Either, takes both, and gives on to greet from a response it doesn't have,
+// as it does to two answers; a body sits on a line into greet.
+const eithered: Definition = {
+  nodes: [
+    {
+      id: "prefs",
+      kind: "http",
+      request: { method: "GET", url: "https://prefs.example.com" },
+      outputs: [{ status: 400 }],
+    },
+    { id: "fallback", kind: "transform", expr: "1" },
+    { id: "prefs_ok", kind: "either" },
+    { id: "greet", kind: "transform", expr: "2" },
+  ],
+  edges: [
+    { from: "prefs", to: "prefs_ok" },
+    { from: "prefs", to: "fallback", on: 400 },
+    { from: "fallback", to: "prefs_ok", body: "1" },
+    { from: "prefs_ok", to: "greet", on: 404 },
+    { from: "fallback", to: "greet", body: "2" },
+  ],
+  response: {
+    answers: [
+      { status: 200, from: "prefs_ok", on: 404 },
+      { status: 201, from: "prefs_ok" },
+    ],
+  },
+};
+
+test.each([
+  [
+    "/nodes/2",
+    "required",
+    "Draw a line into it from each step it follows: an Either step runs after whichever comes.",
+  ],
+  [
+    "/nodes/2/kind",
+    "required",
+    "Give the step a kind: HTTP, transform or Either.",
+  ],
+  [
+    "/nodes/2/request",
+    "not_allowed",
+    "An Either step gives what the way that came gives, so it sends no request.",
+  ],
+  [
+    "/nodes/2/expr",
+    "not_allowed",
+    "An Either step gives what the way that came gives, so it has no expression.",
+  ],
+  [
+    "/nodes/2/switch",
+    "not_allowed",
+    "An Either step gives what the way that came gives, so it has no cases.",
+  ],
+  [
+    "/nodes/2/sample",
+    "not_allowed",
+    "An Either step gives what the way that came gives, so it has no sample.",
+  ],
+  [
+    "/nodes/2/outputs",
+    "not_allowed",
+    "An Either step gives one value, so it has no other responses.",
+  ],
+  [
+    "/edges/4/body",
+    "not_allowed",
+    "Only a connection into an Either step gives a body.",
+  ],
+  [
+    "/edges/3/on",
+    "not_allowed",
+    "An Either step has no responses for a connection to leave from.",
+  ],
+  [
+    "/response/answers/0/on",
+    "not_allowed",
+    "An Either step has one point, so its line into an answer names no response.",
+  ],
+  [
+    "/response/answers/1/from",
+    "not_allowed",
+    "An Either step gives what the way that came gives, so it gives one answer. To pick among several, join a transform step that does.",
+  ],
+])("an Either's %s, %s: says %j", (pointer, code, said) => {
+  expect(say({ pointer, code, detail: "the server's words" }, eithered)).toBe(
+    said,
+  );
+});
+
+test("two ways into an Either say so in the screen's words", () => {
+  expect(
+    say(
+      {
+        pointer: "/edges/2",
+        code: "overlap",
+        detail:
+          "two ways can come into prefs_ok in one run, from prefs (2xx) and fallback (2xx), and an either takes one",
+      },
+      eithered,
+    ),
+  ).toBe(
+    "Two ways can come into prefs_ok in one run, from prefs (2xx) and fallback (2xx), and an Either step takes one.",
   );
 });
 
