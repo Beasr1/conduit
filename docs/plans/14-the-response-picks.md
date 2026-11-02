@@ -133,3 +133,35 @@ to. The browser test is unchanged and passes.
 **Mutation checks**: 14 on the server and 14 on the web, every one
 caught. Chromium through nginx, light and dark: revision 46 draws as
 planned, and logged nothing.
+
+## After it was built
+
+Asked on 2026-11-02, once revision 46 drew every step's failures across
+the canvas into the 500, with four gaps named alongside:
+
+- **A step's failures into an answer are a link, not a wire.** Its
+  Unhandled names the answer, "Unhandled → 500", and the line is drawn,
+  dashed, only while the step, the line or the response is picked, or the
+  run shown took it, solid then, as Node-RED draws its link nodes
+  (sources.md). Lines from responses and cases are drawn as before, and
+  only the canvas changed. Picking an answer picks the card, so it shows
+  every link into the card: with every failure in one answer, the same
+  lines.
+- **Publish finds a line that never answers** (`never_answers`): its step
+  runs only after a block joined to an answer above it, which always
+  wins. It's said of the line, as `dead_line` is of one block in two
+  answers, rather than of the answer, which other lines may still give.
+  It reads what a step runs only after, as Publish's other checks do, so
+  what it says always holds, but it misses a line beaten by a step that
+  always runs after its own.
+- **The tour** opens from the toolbar only (plan 13), and its last stop
+  says a run gives the first answer reached, top to bottom.
+- **The browser test** adds a 500 above the 200 and joins prefs' and crm's
+  failures to it, so several lines into one answer, the order, the
+  Unhandled's words and a link drawn only while picked run in Chromium;
+  Publish and serve as before.
+
+**Mutation checks**: 11 on the server, 10 caught. The one left counts an
+HTTP step's 2xx lines with a transform's value, which differs only when
+one 2xx block is joined to two answers, Validate's `dead_line`. On the web,
+13, all caught.

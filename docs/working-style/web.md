@@ -269,9 +269,6 @@ the API is `/api` on the page's own origin.
   by its tab, so to reach a field on a hidden tab by label alone, as a
   test of what's kept across tabs does, it takes `selector: "input,
   textarea"`.
-- The tour opens on a first visit, over whatever a test does, so tests
-  start with it seen (`src/test/tour.ts`, a setup file); its own tests
-  forget it.
 - A test fails on any console warning or error it logs
   (`src/test/console.ts`). That's how React, React Router and Base UI
   report misuse. Vitest would only print it, and hides passing tests'

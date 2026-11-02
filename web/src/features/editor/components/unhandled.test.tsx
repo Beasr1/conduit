@@ -233,6 +233,7 @@ test("Unhandled joined straight to an answer is saved so", async () => {
   await screen.findByRole("complementary", { name: "HTTP step" });
   await choose("Connect Unhandled to", "Response 502");
   expect(await screen.findByTestId("rf__edge-user->#response:1")).toBeTruthy();
+  expect(strip("user")?.textContent).toBe("Unhandled → 502");
   // 502 offers itself no more, as this block's line is in it.
   expect(await options("Connect Unhandled to")).toEqual([
     "fallback",
@@ -246,6 +247,46 @@ test("Unhandled joined straight to an answer is saved so", async () => {
     { status: 200, lines: [{ from: "user" }] },
     { status: 502, lines: [{ from: "user", unhandled: true }] },
   ]);
+});
+
+// Every step's failures may join one answer, so such a line is a link: the
+// step's Unhandled names the answer, and the line is drawn, dashed, only
+// while the step, the line or the response is picked.
+test("a line from an Unhandled into an answer is drawn only while picked", async () => {
+  renderEditor({
+    ...steps,
+    response: {
+      answers: [
+        { status: 502, lines: [{ from: "user", unhandled: true }] },
+        { status: 200, lines: [{ from: "user" }] },
+      ],
+    },
+  });
+  expect(await screen.findByTestId("rf__edge-user->#response:1")).toBeTruthy();
+  expect(strip("user")?.textContent).toBe("Unhandled → 502");
+  const link = () => screen.queryByTestId("rf__edge-user->#response:0");
+  expect(link()).toBeNull();
+
+  fireEvent.click(
+    within(screen.getByTestId("rf__node-user")).getByText("Unhandled"),
+  );
+  await waitFor(() => expect(link()?.classList.contains("link")).toBe(true));
+  // Picked itself, it stays while its step isn't.
+  fireEvent.click(link() ?? document.body);
+  await waitFor(() =>
+    expect(link()?.classList.contains("selected")).toBe(true),
+  );
+  const pane = document.querySelector(".react-flow__pane");
+  if (!pane) throw new Error("no pane");
+  fireEvent.click(pane);
+  await waitFor(() => expect(link()).toBeNull());
+
+  fireEvent.click(
+    within(screen.getByTestId("rf__node-#response")).getByText("502"),
+  );
+  await waitFor(() => expect(link()).toBeTruthy());
+  fireEvent.click(pane);
+  await waitFor(() => expect(link()).toBeNull());
 });
 
 test("a transform's panel has its Unhandled, and joining it to an answer adds no case", async () => {
@@ -266,7 +307,9 @@ test("a transform's panel has its Unhandled, and joining it to an answer adds no
     within(panel).getByRole("heading", { name: "When it fails" }),
   ).toBeTruthy();
   await choose("Connect Unhandled to", "Response 500");
-  await waitFor(() => expect(strip("fallback")?.textContent).toBe("Unhandled"));
+  await waitFor(() =>
+    expect(strip("fallback")?.textContent).toBe("Unhandled → 500"),
+  );
   // A failure picks no answer, so it's still an expression.
   expect(
     within(panel).getByRole("textbox", { name: "Expression" }),

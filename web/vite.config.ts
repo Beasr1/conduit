@@ -35,7 +35,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    setupFiles: ["src/test/console.ts", "src/test/tour.ts"],
+    setupFiles: ["src/test/console.ts"],
     // Playwright runs those, in a browser.
     exclude: [...configDefaults.exclude, "e2e/**"],
   },

@@ -666,6 +666,21 @@ test("the server's detail stands where it says what went wrong", () => {
   ).toBe(
     "a's line to Bad can never be taken when Bad runs: it needs a to answer 2xx and 409. To run Bad after whichever line comes, mark none of its lines required; or remove this one.",
   );
+  // A line that comes only after a line into an answer above says what to
+  // change.
+  expect(
+    say(
+      {
+        pointer: "/response/answers/1/lines/0/from",
+        code: "never_answers",
+        detail:
+          "a runs only after b's Unhandled, which gives the 500 answer, above, so its 2xx never gives 200",
+      },
+      broken,
+    ),
+  ).toBe(
+    "a runs only after b's Unhandled, which gives the 500 answer, above, so its 2xx never gives 200. Remove one of the two lines, or move this answer above that one.",
+  );
   // A transform never runs only as its required lines can't all come.
   expect(
     say(

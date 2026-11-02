@@ -83,20 +83,29 @@ function Card({
 // it takes what the step's other blocks don't, its failures, once a line
 // leaves its handle, and the run goes on down those lines. Until one does,
 // it's dimmed, and says what's chosen: the failure fails the run, or that
-// nothing is yet (plan 12). While a run is shown, it's marked when the
-// step's failure went to it.
+// nothing is yet (plan 12). It names the answers its failures join, as the
+// canvas draws those lines only while they're picked. While a run is shown,
+// it's marked when the step's failure went to it.
 function UnhandledStrip({ step }: { step: string }) {
   const fails = useEditor(
     (s) => s.draft.nodes.find((n) => n.id === step)?.unhandled?.fail === true,
   );
-  const joined = useEditor(
+  const answers = useEditor((s) =>
+    step === ""
+      ? ""
+      : (s.draft.response?.answers ?? [])
+          .filter((a) =>
+            (a.lines ?? []).some((l) => l.from === step && l.unhandled),
+          )
+          .map((a) => a.status)
+          .join(", "),
+  );
+  const lined = useEditor(
     (s) =>
       step !== "" &&
-      ((s.draft.edges ?? []).some((e) => e.from === step && e.unhandled) ||
-        (s.draft.response?.answers ?? []).some((a) =>
-          (a.lines ?? []).some((l) => l.from === step && l.unhandled),
-        )),
+      (s.draft.edges ?? []).some((e) => e.from === step && e.unhandled),
   );
+  const joined = lined || answers !== "";
   const run = useStepRun(step);
   const took = run !== undefined && wayOf(run) === UNHANDLED;
   return (
@@ -106,6 +115,12 @@ function UnhandledStrip({ step }: { step: string }) {
       className="relative flex h-6 shrink-0 items-center gap-1 border-t px-3 text-xs data-unjoined:text-muted-foreground [&_svg]:size-3"
     >
       <span className="font-mono">Unhandled</span>
+      {answers !== "" && (
+        <>
+          {" "}
+          <span>→ {answers}</span>
+        </>
+      )}
       {!joined && (
         <>
           {" "}

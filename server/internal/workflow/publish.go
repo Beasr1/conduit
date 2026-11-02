@@ -34,6 +34,7 @@ func ReadyToPublish(d *Definition) Problems {
 	v.checkFailures(d, need, outs)
 	if d.Response != nil {
 		v.checkLooseEnds(d, edges, index, need, outs)
+		v.checkAnswered(d, index, need)
 	}
 	return v.problems
 }
@@ -98,12 +99,56 @@ func (v *validator) checkLooseEnds(d *Definition, edges []edgeRef, index map[str
 	}
 }
 
+// checkAnswered reports each line into an answer that never answers: its
+// node runs only after a block with a line into an answer above it, and a
+// run gives the first answer, top to bottom, that a line reached (plan 14).
+// A transform joined to several answers by its value reaches only the one
+// it picks, so those lines rule out nothing below them. A node's route is
+// what it runs only after, never itself, so a block joined to two answers,
+// Validate's dead_line, isn't said again here; nor is a node that never
+// runs, whose route is nil.
+func (v *validator) checkAnswered(d *Definition, index map[string]int, need []route) {
+	type line struct{ from, on, answer, line int }
+	var lines []line
+	values := map[int]int{} // the lines from each transform's value
+	for k, a := range d.Response.Answers {
+		for j, l := range a.Lines {
+			from, ok := index[l.From]
+			if !ok {
+				continue // Validate's unknown_node
+			}
+			lines = append(lines, line{from, l.Output(), k, j})
+			if d.Nodes[from].Kind == NodeKindTransform && l.Output() == 0 {
+				values[from]++
+			}
+		}
+	}
+	sure := func(m line) bool { return m.on != 0 || values[m.from] < 2 }
+	answers := d.Response.Answers
+	for _, l := range lines {
+		i := slices.IndexFunc(lines, func(m line) bool {
+			return m.answer < l.answer && sure(m) && slices.Equal(need[l.from][m.from], []int{m.on})
+		})
+		if i < 0 {
+			continue
+		}
+		m := lines[i]
+		_, after := blockOf(m.from, d.Nodes[m.from], m.on)
+		_, what := blockOf(l.from, d.Nodes[l.from], l.on)
+		v.add(fmt.Sprintf("/response/answers/%d/lines/%d/from", l.answer, l.line), "never_answers",
+			"%s runs only after %s's %s, which gives the %d answer, above, so its %s never gives %d",
+			d.Nodes[l.from].ID, d.Nodes[m.from].ID, after, answers[m.answer].Status, what, answers[l.answer].Status)
+	}
+}
+
 // blockOf is where node n's output on is in the definition, and its name:
-// a status it lists, a case, a transform's one value, or an http node's
-// 2xx, which has no place of its own but the node.
+// its Unhandled, a status it lists, a case, a transform's one value, or an
+// http node's 2xx, which has no place of its own but the node.
 func blockOf(i int, n Node, on int) (pointer, what string) {
 	p := fmt.Sprintf("/nodes/%d", i)
 	switch {
+	case on == OnUnhandled:
+		return p + "/unhandled", "Unhandled"
 	case n.Kind == NodeKindTransform && n.Switch != nil:
 		k := slices.IndexFunc(n.Switch.Cases, func(c Case) bool { return c.Status == on })
 		return fmt.Sprintf("%s/switch/cases/%d", p, k), fmt.Sprintf("case giving %d", on)

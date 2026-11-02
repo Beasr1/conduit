@@ -142,9 +142,11 @@
   /* A connection the run shown didn't take is dashed, and so is a way into
      a transform with several until a run says whether it came: dashed
      means it may not be taken, or wasn't. Its name says so in words too,
-     for a screen reader. */
+     for a screen reader. So is a step's failures into an answer, drawn
+     only while picked. */
   .react-flow__edge.untaken .react-flow__edge-path,
-  .react-flow__edge.way .react-flow__edge-path {
+  .react-flow__edge.way .react-flow__edge-path,
+  .react-flow__edge.link .react-flow__edge-path {
     stroke-dasharray: 4 4;
   }
   /* An answer's point on the response card takes a line let go anywhere

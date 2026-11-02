@@ -544,6 +544,37 @@ test("a step whose Unhandled took its failure is marked so, and the run goes on 
   expect(kind("user->fallback")).not.toContain("untaken");
 });
 
+// A line from a step's Unhandled into an answer is drawn only while picked,
+// or while a run shown answered through it, as a line it took: solid.
+test("a run that answered with a step's failure draws that line", async () => {
+  renderEditor({
+    ...branched,
+    response: {
+      answers: [
+        { status: 502, lines: [{ from: "user", unhandled: true }] },
+        { status: 200, lines: [{ from: "orders" }] },
+      ],
+    },
+  });
+  const link = () => screen.queryByTestId("rf__edge-user->#response:0");
+  await screen.findByTestId("rf__edge-orders->#response:1");
+  expect(link()).toBeNull();
+  serveRun({ ...caught, answered: 502, nodes: caught.nodes?.slice(0, 3) }, [
+    { node: "user", kind: "started", attempt: 1, at: at(0) },
+    {
+      node: "user",
+      kind: "failed",
+      attempt: 1,
+      at: at(82),
+      http_status: 500,
+      error: userFailed,
+    },
+  ]);
+  await run();
+  await waitFor(() => expect(link()).toBeTruthy());
+  expect(link()?.getAttribute("class")).not.toContain("link");
+});
+
 test("a run that failed, answered by the response's Unhandled, marks that and no answer", async () => {
   renderEditor({
     ...branched,

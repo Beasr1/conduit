@@ -217,6 +217,131 @@ func TestReadyToPublish_Failures(t *testing.T) {
 	}
 }
 
+// A run gives the first answer, top to bottom, that a line reached (plan
+// 14), so a line whose node runs only after a block joined to an answer
+// above it never answers.
+func TestReadyToPublish_NeverAnswers(t *testing.T) {
+	t.Parallel()
+	crm := `{"id": "crm", "kind": "http", "request": {"method": "GET", "url": "https://crm.example.com/v1"}}`
+	fallback := `"nodes": [` + crm + `, ` + get("fallback", "https://crm.example.com/v1/cached") + `],
+	  "edges": [{"from": "crm", "to": "fallback", "unhandled": true}]`
+	// pick's failures join the 502, below the rest, unless they fail the run.
+	pick := `{"id": "pick", "kind": "transform", "expr": "{'status': 200, 'body': 1}"}`
+	picks := `"nodes": [` + pick + `, ` + get("after", "https://after.example.com/v1") + `, ` + value("sorry", "'down'") + `],
+	  "edges": [{"from": "pick", "to": "after"}, {"from": "pick", "to": "sorry", "unhandled": true}]`
+	failed := `{"status": 502, "lines": [{"from": "pick", "unhandled": true}, {"from": "sorry"}]}`
+	tests := []struct {
+		name, def, want string
+	}{
+		{
+			// fallback runs on crm's failure, which the 500 answers first.
+			"a fallback after a failure joined above",
+			`{` + fallback + `, "response": {"answers": [{"status": 500, "lines": [{"from": "crm", "unhandled": true}]},
+			    {"status": 200, "lines": [{"from": "crm"}, {"from": "fallback"}]}]}}`,
+			"/response/answers/1/lines/1/from never_answers",
+		},
+		{
+			"an answer only such a line gives",
+			`{` + fallback + `, "response": {"answers": [{"status": 500, "lines": [{"from": "crm", "unhandled": true}]},
+			    {"status": 200, "lines": [{"from": "crm"}]}, {"status": 203, "lines": [{"from": "fallback"}]}]}}`,
+			"/response/answers/2/lines/0/from never_answers",
+		},
+		{
+			"its answer above",
+			`{` + fallback + `, "response": {"answers": [{"status": 203, "lines": [{"from": "fallback"}]},
+			    {"status": 500, "lines": [{"from": "crm", "unhandled": true}]}, {"status": 200, "lines": [{"from": "crm"}]}]}}`,
+			"",
+		},
+		{
+			// The first line reached in an answer gives its body, but the
+			// answer is given all the same.
+			"in the same answer",
+			`{` + fallback + `, "response": {"answers": [{"status": 500, "lines": [{"from": "crm", "unhandled": true}, {"from": "fallback"}]},
+			    {"status": 200, "lines": [{"from": "crm"}]}]}}`,
+			"",
+		},
+		{
+			// shape runs on whichever of crm's blocks came, so on its 2xx too.
+			"after a merge a failure may come by",
+			`{"nodes": [` + crm + `, ` + value("shape", "1") + `],
+			  "edges": [{"from": "crm", "to": "shape"}, {"from": "crm", "to": "shape", "unhandled": true}],
+			  "response": {"answers": [{"status": 500, "lines": [{"from": "crm", "unhandled": true}]}, {"status": 200, "lines": [{"from": "shape"}]}]}}`,
+			"",
+		},
+		{
+			// pick reaches the 500 only when it picks it, so after's 201
+			// answers when pick picks 200.
+			"after a transform that picks",
+			`{` + picks + `, "response": {"answers": [{"status": 500, "lines": [{"from": "pick"}]},
+			    {"status": 201, "lines": [{"from": "after"}]}, {"status": 200, "lines": [{"from": "pick"}]}, ` + failed + `]}}`,
+			"",
+		},
+		{
+			// Joined to one answer, pick's value gives it whenever pick runs;
+			// its failures, joined too, pick nothing.
+			"after a transform joined to one answer",
+			`{` + picks + `, "response": {"answers": [{"status": 500, "lines": [{"from": "pick"}]},
+			    {"status": 201, "lines": [{"from": "after"}]}, ` + failed + `]}}`,
+			"/response/answers/1/lines/0/from never_answers",
+		},
+		{
+			// A failure reaches its answer whatever the value would have
+			// picked.
+			"after a failure of a transform that picks",
+			`{` + picks + `, "response": {"answers": [{"status": 502, "lines": [{"from": "pick", "unhandled": true}]},
+			    {"status": 500, "lines": [{"from": "pick"}]}, {"status": 200, "lines": [{"from": "pick"}, {"from": "after"}]},
+			    {"status": 203, "lines": [{"from": "sorry"}]}]}}`,
+			"/response/answers/3/lines/0/from never_answers",
+		},
+		{
+			// Validate says so: dead_line.
+			"a block joined to two answers",
+			`{"nodes": [` + crm + `], "response": {"answers": [{"status": 500, "lines": [{"from": "crm", "unhandled": true}]},
+			    {"status": 200, "lines": [{"from": "crm"}]}, {"status": 502, "lines": [{"from": "crm", "unhandled": true}]}]}}`,
+			"",
+		},
+		{
+			// stuck needs prefs to answer 404 and 2xx, so it never runs, and
+			// Validate says so.
+			"a step that never runs",
+			`{"nodes": [` + get("prefs", "https://prefs.example.com/v1", `"outputs": [{"status": 404}]`) + `, ` +
+				get("stuck", "https://stuck.example.com/v1") + `],
+			  "edges": [{"from": "prefs", "to": "stuck"}, {"from": "prefs", "to": "stuck", "on": 404}],
+			  "response": {"answers": [{"status": 200, "lines": [{"from": "prefs"}]}, {"status": 404, "lines": [{"from": "prefs", "on": 404}]},
+			    {"status": 201, "lines": [{"from": "stuck"}]}]}}`,
+			"",
+		},
+		{
+			// Validate says no node is ghost; its line is no node's.
+			"a line from no step",
+			`{` + fallback + `, "response": {"answers": [{"status": 500, "lines": [{"from": "ghost", "unhandled": true}]},
+			    {"status": 200, "lines": [{"from": "crm"}]}, {"status": 203, "lines": [{"from": "fallback"}]}]}}`,
+			"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := found(ReadyToPublish(decode(t, tt.def))); got != tt.want {
+				t.Errorf("ReadyToPublish() =\n%s\nwant\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
+// The words name both blocks and both answers, as the screen shows them.
+func TestReadyToPublish_NeverAnswersSays(t *testing.T) {
+	t.Parallel()
+	d := decode(t, `{"nodes": [{"id": "crm", "kind": "http", "request": {"method": "GET", "url": "https://crm.example.com/v1"}}, `+
+		value("note", "'cached'")+`],
+	  "edges": [{"from": "crm", "to": "note", "unhandled": true}],
+	  "response": {"answers": [{"status": 500, "lines": [{"from": "crm", "unhandled": true}]}, {"status": 200, "lines": [{"from": "crm"}, {"from": "note"}]}]}}`)
+	want := "note runs only after crm's Unhandled, which gives the 500 answer, above, so its value never gives 200"
+	if ps := ReadyToPublish(d); len(ps) != 1 || ps[0].Detail != want {
+		t.Errorf("ReadyToPublish() = %+v, want one saying %q", []Problem(ps), want)
+	}
+}
+
 // A cycle is Validate's problem; there's nothing to route.
 func TestReadyToPublish_Cycle(t *testing.T) {
 	t.Parallel()

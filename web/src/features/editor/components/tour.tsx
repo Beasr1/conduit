@@ -51,33 +51,9 @@ const STOPS: Stop[] = [
     at: "[data-testid='rf__node-#response']",
     side: "left",
     title: "The response",
-    text: "What your API answers. Join the step that gives each answer to it.",
+    text: "What your API answers. Join each answer to the steps that give it; a run gives the first one reached, top to bottom.",
   },
 ];
-
-// Where a browser remembers it was offered the tour. Conduit has no
-// accounts, so it's this browser's.
-const SEEN = "conduit.tour";
-
-// tourSeen says whether this browser has been offered the tour. Storage
-// that's missing or refuses, as in a private window, means it's offered
-// again.
-export function tourSeen(): boolean {
-  try {
-    return localStorage.getItem(SEEN) !== null;
-  } catch {
-    return false;
-  }
-}
-
-// markTourSeen remembers this browser has been offered the tour.
-export function markTourSeen() {
-  try {
-    localStorage.setItem(SEEN, "seen");
-  } catch {
-    // It's offered again next time.
-  }
-}
 
 // A stop on screen, with the element it points at.
 interface Shown extends Stop {
@@ -85,8 +61,7 @@ interface Shown extends Stop {
 }
 
 // Tour shows the stops whose parts are on screen, one at a time from the
-// first, while it's open. Skip, Done or Escape closes it, and this browser
-// remembers it has seen it.
+// first, while it's open. Skip, Done or Escape closes it.
 export function Tour({
   open,
   onClose,
@@ -117,7 +92,6 @@ export function Tour({
   if (!open || stop === undefined) return null;
   // Opened again, it finds its stops afresh, as the canvas may have changed.
   const close = () => {
-    markTourSeen();
     setStops([]);
     onClose();
   };

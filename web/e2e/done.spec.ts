@@ -52,11 +52,25 @@ async function open(page: Page, id: string) {
   return panel;
 }
 
-// failsTheRun has a step's failures fail the run, as each step here does:
-// Publish waits until every step's are decided (plan 12).
+// Publish waits until every step's failures are decided (plan 12):
+// failsTheRun has them fail the run, and failsInto joins them to an answer,
+// which the step's Unhandled then names, as the line is drawn only while
+// it's picked.
 async function failsTheRun(panel: Locator) {
   await panel.getByRole("tab", { name: "Unhandled" }).click();
   await panel.getByRole("checkbox", { name: "Fail the run" }).check();
+}
+
+async function failsInto(page: Page, id: string, status: number) {
+  const panel = await open(page, id);
+  await panel.getByRole("tab", { name: "Unhandled" }).click();
+  await panel.getByRole("combobox", { name: "Connect Unhandled to" }).click();
+  await page
+    .getByRole("option", { name: `Response ${status}`, exact: true })
+    .click();
+  await expect(step(page, id).locator("[data-part='unhandled']")).toHaveText(
+    `Unhandled → ${status}`,
+  );
 }
 
 // connect joins a step's 2xx to another step, or to an answer, with
@@ -81,8 +95,9 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
   await created.getByRole("button", { name: "Create" }).click();
   await expect(page).toHaveURL(/\/workflows\/[0-9a-f-]+$/);
 
-  // The tour offers itself on a first visit: on an empty canvas, two stops,
-  // each beside the part it's about: the response's, left of its card.
+  // Tour in the toolbar: on an empty canvas, two stops, each beside the
+  // part it's about: the response's, left of its card.
+  await page.getByRole("button", { name: "Tour" }).click();
   const tour = page.getByRole("dialog");
   await expect(tour.getByText("1 of 2")).toBeVisible();
   await tour.getByRole("button", { name: "Next" }).click();
@@ -100,8 +115,8 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
   await tour.getByRole("button", { name: "Done" }).click();
   await expect(tour).toBeHidden();
 
-  // Four HTTP steps, each calling the test upstream and failing the run
-  // with its failures; crm's URL waits.
+  // Four HTTP steps, each calling the test upstream, user's and orders'
+  // failures failing the run; crm's URL waits.
   for (const id of ["user", "orders", "prefs", "crm"] as const) {
     await page.getByRole("button", { name: "Add HTTP step" }).click();
     const add = page.getByRole("dialog");
@@ -113,14 +128,13 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
     await panel
       .getByRole("textbox", { name: "URL", exact: true })
       .fill(urls[id]);
-    await failsTheRun(panel);
+    if (id !== "prefs") await failsTheRun(panel);
   }
   let panel = await open(page, "crm");
   await panel.getByRole("combobox", { name: "Method" }).click();
   await page.getByRole("option", { name: "POST", exact: true }).click();
   await panel.getByRole("tab", { name: "Body" }).click();
   await panel.getByRole("textbox", { name: "Request body" }).fill(crmBody);
-  await failsTheRun(panel);
 
   // Four connections, and crm joined to the 200 answer.
   await connect(page, "user", "orders");
@@ -134,6 +148,24 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
   await answer.press("Enter");
   await connect(page, "crm", "Response 200");
   await expect(page.locator(".react-flow__edge")).toHaveCount(5);
+
+  // prefs' and crm's failures go into one answer, 500, moved above the 200,
+  // as a run gives the first answer reached (plan 14). Picked, crm's line
+  // into it is drawn, and no other.
+  await page.getByRole("button", { name: "Fit View" }).click();
+  await page.getByTestId("rf__node-#response").getByText("+ Add").click();
+  await answer.fill("500");
+  await answer.press("Enter");
+  await response.getByRole("button", { name: "Move 500 up" }).click();
+  await expect(response.getByRole("heading", { level: 4 })).toHaveText([
+    /^1\.\s*500/,
+    /^2\.\s*200/,
+  ]);
+  await failsInto(page, "prefs", 500);
+  await failsInto(page, "crm", 500);
+  await expect(page.locator(".react-flow__edge.link")).toHaveCount(1);
+  await open(page, "user");
+  await expect(page.locator(".react-flow__edge.link")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Workflow settings" }).click();
   await page.getByRole("textbox", { name: "Input schema" }).fill(inputSchema);
@@ -233,8 +265,6 @@ test("a definition made through the API, with no layout, opens laid out", async 
   expect(made.status()).toBe(201);
   const { workflow } = (await made.json()) as { workflow: { id: string } };
 
-  // The tour stays put away: this is about where the steps are drawn.
-  await page.addInitScript(() => localStorage.setItem("conduit.tour", "seen"));
   await signIn(page);
   await page.goto(`/workflows/${workflow.id}`);
   await expect(page.locator(".react-flow__edge")).toHaveCount(4);

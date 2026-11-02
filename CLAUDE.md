@@ -17,8 +17,10 @@ over sample data, branching on the status a step gets back, and running it
 with an input, followed live on the canvas. A step is drawn as its request
 and a block per response, and a click opens that part, under two rows of
 tabs. Each answer on the response card takes lines from any number of
-steps, and a run gives the first answer, top to bottom, that one reached. A
-transform's cases are its exits, a tab each with its
+steps, and a run gives the first answer, top to bottom, that one reached;
+Publish finds a line an answer above always beats. A line from a step's
+Unhandled into an answer is drawn only while picked, and the Unhandled
+names the answer. A transform's cases are its exits, a tab each with its
 condition, JSONata and status: the first that holds answers as an HTTP
 step does, down its own lines, and none holding fails the step into its
 Unhandled. A step's Unhandled block takes its failures, giving a body you

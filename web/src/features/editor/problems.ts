@@ -459,6 +459,9 @@ export function say(problem: ProblemError, of: Definition): string {
     }
     case "duplicate_line":
       return "Joined to this answer twice: remove one.";
+    case "never_answers":
+      // It starts with the step's id, which stays as it's written.
+      return `${problem.detail}. Remove one of the two lines, or move this answer above that one.`;
     case "never_runs":
       // It starts with the step's id, which stays as it's written.
       return place.on === "step" && of.nodes[place.index]?.kind === "transform"

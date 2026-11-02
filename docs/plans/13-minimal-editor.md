@@ -170,5 +170,8 @@ The third was the wait above, which went.
 
 **Since found**: NN/g's study of tutorials finds they "interrupt users,
 don't necessarily improve task performance, and are quickly forgotten"
-(sources.md, contested). The tour stays as decided, offered once; offering
-it only from the toolbar is a one-line change, yours to make.
+(sources.md). The tour stayed as decided, offered once, until you chose
+the toolbar only on 2026-11-02: it no longer opens on its own, so nothing
+is kept in local storage, and tests no longer start with it seen. Its
+last stop now says a run gives the first answer reached, top to bottom
+(plan 14).

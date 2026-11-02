@@ -50,6 +50,7 @@ resolve, but their claims weren't re-read.
 | openapi-typescript on TS 6 | (its peer range is `typescript: ^5.x`) | used with TypeScript 6.0.3 | generated `src/gen/schema.d.ts` correctly; pnpm reports the unmet peer (checked 2026-10-25) |
 | Vulnerable tool dependencies | (none raised before) | raise the requirement directly | kin-openapi v0.142.0 had nine advisories, fixed in v0.143.0–v0.149.0. oapi-codegen v2.8.1 still requires v0.142.0, so we raised it to v0.152.0 ourselves, and `x/mod`/`x/text` to their fixed releases. Generated output is identical; OSV finds 0 vulnerabilities in compiled modules, and the server binary has no third-party modules at all (checked 2026-10-25) |
 | New releases | install whatever is latest | nothing younger than about a day | pnpm 12 refused `@tanstack/react-query` 5.104.5, published the day before, with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` (checked 2026-10-20) |
+| The tour (plan 13) | offered on a first visit, and from the toolbar | from the toolbar only (your call, 2026-11-02) | NN/g: "Tutorials interrupt users, don't necessarily improve task performance, and are quickly forgotten", and "users frequently skip them"; contextual help, pulled when wanted, "can avoid these pitfalls" ✓ [91] |
 
 ## Kept, and backed
 
@@ -83,6 +84,7 @@ resolve, but their claims weren't re-read.
 | A transform's cases are its exits: a tab each, named, with a condition, its JSONata and its own status; the first that holds gives its status and body as an http node's answer would, and the run goes down the lines from its exit; with none holding, the step fails into its Unhandled (plan 04, 2026-11-01) | n8n's Switch routes by rules, each to an output it can name: "Turn this control on to rename the output field to put matching data into"; its Fallback Output says "how to route the workflow when an item doesn't match any of the rules or conditions"; and it can "send the data to the first output matching the conditions" ✓ [81] |
 | A tab opens as an arrow key reaches it, and the open panel takes focus (web.md) | The WAI-ARIA tabs pattern recommends tabs "activate automatically when they receive focus" when panels show "without noticeable latency", and a panel whose first content isn't focusable gets `tabindex="0"` ✓ [44] |
 | One exit, the response: an answer takes lines from any number of steps, and a run gives the first answer, top to bottom, that one reached, so no step is needed to pick (plan 14, 2026-11-02; a picking step before the card was the same day's first answer) | A Step Functions `Choice` state "examines each of the Choice Rules in the order listed" and goes to "the first Choice Rule in which the variable matches" ✓ [92]: the card's answers are read the same way. Step Functions keeps that choice apart from ending, as "`Choice` states do not support the `End` field" ✓ [92]; you chose one place for both. Its single error handler, a `Parallel` state's `Catch`, stops the rest: "If any branch fails, because of an unhandled error or by transitioning to a `Fail` state, the entire `Parallel` state is considered to have failed and all its branches are stopped" ✓ [93]. Failures joined to an answer don't stop the other branches; "Fail the run" does |
+| A line from a step's Unhandled into an answer is a link: the Unhandled names the answer, and the line is drawn, dashed, only while the step, the line or the response is picked, or a run shown took it (plan 14, 2026-11-02) | Node-RED's link nodes "Create virtual wires between flows", and "The virtual connections between Link nodes only become visible in the editor when you select" one of them, drawn dashed ✓ [94] |
 | Each row of a step's tabs is named for a screen reader, Blocks and Request (plan 13, 2026-11-02) | The WAI-ARIA tabs pattern: with no visible label, "the `tablist` element has a label provided by aria-label" ✓ [44] |
 | What a field is for is a hint behind ⓘ beside its label, a line or two, rather than a sentence under it; a hint is a popover that opens on hover or a press (plan 13, 2026-11-02) | Base UI: "Popups that open when hovering an info icon should use Popover with the openOnHover prop on the trigger instead of a tooltip", as "Tooltips don't work well with touch input" and "are disabled on touch devices"; and "If the description is important to understanding the element, don't hide it behind a tooltip" ✓ [89], so a problem stays under its field |
 
@@ -97,7 +99,6 @@ resolve, but their claims weren't re-read.
 | gnata | created 2026-03-10 ✓, ported with AI, pre-1.0, breaking changes in 0.6.0 ✓ | the alternatives are stale (blues/jsonata-go targets JSONata 1.5.4). Pin it exact, wrap it, golden-test it |
 | No Redis in v1 | the spec lists it | nothing in v1 needs it; agreed as D7 |
 | nginx's stable branch | nginx recommends mainline: "This version is recommended for production unless your organization has strict requirements for stability" ✓ [86] | fewer changes. CI builds the images and tests nginx's config (`just images`, 2026-11-01), so following mainline is dropping one ignore rule in `dependabot.yml` |
-| A short tour, offered on a first visit and replayable from the toolbar (plan 13) | NN/g: "Tutorials interrupt users, don't necessarily improve task performance, and are quickly forgotten", and "users frequently skip them"; contextual help, pulled when wanted, "can avoid these pitfalls" ✓ [91] | your call from wireframes (2026-11-01), before this was found: five sentences, each beside the part it names, skipped with one click; the hints are the pulled help. Flagged to you 2026-11-02: offering it only from the toolbar is a one-line change |
 | Lists of looks to avoid are review questions, not rules (design.md) | the design skill design.md started from [37] treats its list as rules | a list everyone follows becomes a template of its own (decided 2026-10-28) |
 
 ## gnata facts (checked ✓)
@@ -253,6 +254,7 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 91. https://www.nngroup.com/articles/onboarding-tutorials/
 92. https://docs.aws.amazon.com/step-functions/latest/dg/state-choice.html
 93. https://docs.aws.amazon.com/step-functions/latest/dg/state-parallel.html
+94. https://flowfuse.com/node-red/core-nodes/link/
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

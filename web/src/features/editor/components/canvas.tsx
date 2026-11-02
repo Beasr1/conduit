@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { AddNodeDialog } from "@/features/editor/components/add-node-dialog";
 import { nodeTypes } from "@/features/editor/components/nodes";
 import { ProblemMark } from "@/features/editor/components/problem-mark";
-import { Tour, tourSeen } from "@/features/editor/components/tour";
+import { Tour } from "@/features/editor/components/tour";
 import {
   canConnect,
   canJoin,
@@ -58,9 +58,9 @@ export function Canvas() {
   const setPart = useEditor((s) => s.setPart);
   const openPanel = useEditor((s) => s.openPanel);
   const refuse = useEditor((s) => s.refuse);
-  // The tour opens on its own the first time this browser opens a workflow
-  // (plan 13), and Tour in the toolbar opens it again.
-  const [touring, setTouring] = useState(() => !tourSeen());
+  // Tour in the toolbar opens the tour (plan 13). It never opens on its
+  // own: one nobody asked for gets in the way of what they came to do.
+  const [touring, setTouring] = useState(false);
 
   const flow = useMemo(() => toFlow(draft), [draft]);
   // Only a node that's moving or selected gets a new object, so the rest
@@ -84,7 +84,10 @@ export function Canvas() {
   // response's Unhandled answered. A line into a step is taken when the step
   // it leaves says its answer took it. Until a run says, a way into a
   // transform with several is dashed too, as it may not be taken; so is one
-  // the run is still to decide.
+  // the run is still to decide. A line from a step's Unhandled into an answer
+  // is a link, as every step's failures may join one answer: drawn, dashed,
+  // only while it, its step or the response is picked, or the run shown took
+  // it, and the step's Unhandled names the answer.
   const troubled = useProblems((p) => p.on === "connection");
   const steps = useRunSteps();
   const gave = useRun(
@@ -100,6 +103,7 @@ export function Canvas() {
     const wrong = new Set(
       troubled.map((f) => (f.place.on === "connection" ? f.place.index : -1)),
     );
+    const card = selected.nodes.includes(RESPONSE);
     return flow.edges.map((e): FlowEdge => {
       const on = selected.edges.includes(e.id);
       const answer =
@@ -137,17 +141,26 @@ export function Canvas() {
               )
             : tookLine(line.on, steps(line.from), line.to);
       const may = e.data?.way === true && taken === undefined;
-      if (!on && !bad && !may && taken === undefined) return e;
+      const link = into?.unhandled === true;
+      if (!on && !bad && !may && !link && taken === undefined) return e;
+      const hidden =
+        link &&
+        !on &&
+        taken !== true &&
+        !card &&
+        !selected.nodes.includes(into.from);
       const classes = [
         bad && "problem",
         taken === false && "untaken",
         may && "way",
+        link && taken !== true && "link",
       ]
         .filter(Boolean)
         .join(" ");
       return {
         ...e,
         selected: on,
+        ...(hidden ? { hidden } : {}),
         ...(classes ? { className: classes } : {}),
         ...(bad
           ? { label: e.label ? `${String(e.label)} · problem` : "problem" }
@@ -163,7 +176,7 @@ export function Canvas() {
             : {}),
       };
     });
-  }, [flow, selected.edges, troubled, steps, draft, gave]);
+  }, [flow, selected, troubled, steps, draft, gave]);
   const settingsProblems = useProblemCount((p) => p.on === "settings");
 
   return (
