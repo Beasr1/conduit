@@ -61,6 +61,8 @@ func TestRetryable(t *testing.T) {
 		{&Error{Kind: KindStatus, Status: 429}, true},
 		{&Error{Kind: KindStatus, Status: 503}, true},
 		{&Error{Kind: KindStatus, Status: 500}, true},
+		// A loop refused: sending it again meets the same refusal (plan 06).
+		{&Error{Kind: KindStatus, Status: 508}, false},
 		{&Error{Kind: KindStatus, Status: 404}, false},
 		{&Error{Kind: KindStatus, Status: 302}, false},
 		{&Error{Kind: KindBlocked}, false},

@@ -21,6 +21,9 @@ var (
 	// ErrRevisionMismatch means a save named a revision that's no longer
 	// the latest: someone else saved first.
 	ErrRevisionMismatch = errors.New("the workflow has a newer revision")
+	// ErrVersionMismatch is ErrRevisionMismatch for an upstream: a save named
+	// a version that's no longer its latest (plan 07).
+	ErrVersionMismatch = errors.New("the upstream has a newer version")
 )
 
 // Store is the database. It's safe for concurrent use.

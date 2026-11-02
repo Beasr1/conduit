@@ -190,6 +190,13 @@ type partError struct {
 // preview's program can hold, is left out: its problem says why.
 func (n *node) request(ctx context.Context, doc []byte, key string) (*SentRequest, []partError) {
 	req := &SentRequest{Method: n.method, Header: make(http.Header, len(n.headers)+1)}
+	if n.bound {
+		params, errs := n.params(ctx, doc)
+		if len(errs) > 0 {
+			return req, errs
+		}
+		doc = params
+	}
 	var errs []partError
 	fail := func(part, pointer string, err error) {
 		errs = append(errs, partError{part: part, pointer: pointer, err: err})
@@ -250,6 +257,30 @@ func (n *node) request(ctx context.Context, doc []byte, key string) (*SentReques
 		req.Header.Set("Idempotency-Key", key)
 	}
 	return req, errs
+}
+
+// params is the values a node that uses an upstream gives its parameters,
+// each its expression's over doc, as one object its request reads instead
+// of the run (plan 07). One that fails is left out, and reported.
+func (n *node) params(ctx context.Context, doc []byte) ([]byte, []partError) {
+	values := make(map[string]json.RawMessage, len(n.with))
+	var errs []partError
+	for _, b := range n.with {
+		if b.value == nil {
+			continue // it doesn't compile, a problem of its own, which a preview lists
+		}
+		v, err := b.value.Eval(ctx, doc)
+		if err != nil {
+			errs = append(errs, partError{part: "with " + b.name, pointer: "/with/" + workflow.PointerToken(b.name), err: err})
+			continue
+		}
+		values[b.name] = v
+	}
+	out, err := json.Marshal(values)
+	if err != nil {
+		return nil, append(errs, partError{part: "with", pointer: "/with", err: err})
+	}
+	return out, errs
 }
 
 // escapeURLValue escapes a placeholder's value for where it lands in a URL,

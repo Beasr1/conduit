@@ -21,6 +21,13 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  type Choice,
+  NO_CHOICE,
+  type Said,
+  UpstreamChoice,
+  useMakeStep,
+} from "@/features/editor/components/upstream-choice";
 import { addNode, ID_RULE, ID_TAKEN, NODE_ID } from "@/features/editor/edits";
 import {
   freeSpot,
@@ -33,29 +40,21 @@ import type { components } from "@/gen/schema";
 
 type Node = components["schemas"]["Node"];
 
-const kinds = {
-  http: {
-    label: "HTTP step",
-    fresh: (id: string): Node => ({
-      id,
-      kind: "http",
-      request: { method: "GET", url: "" },
-    }),
-  },
-  transform: {
-    label: "transform step",
-    fresh: (id: string): Node => ({ id, kind: "transform", expr: "" }),
-  },
-};
+const labels = { http: "HTTP step", transform: "transform step" };
 
 // AddNodeDialog asks for the new node's id, which expressions use to read
 // its result, and puts the node in the middle of what the canvas shows, or
-// below that, clear of the nodes already there.
-export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
+// below that, clear of the nodes already there. An HTTP step uses an
+// upstream (plan 07): one from the library, at its latest version, or one
+// made here from a call.
+export function AddNodeDialog({ kind }: { kind: keyof typeof labels }) {
   const [open, setOpen] = useState(false);
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
   const canvas = useStoreApi();
+  const makeStep = useMakeStep();
+  const [choice, setChoice] = useState<Choice>(NO_CHOICE);
+  const [said, setSaid] = useState<Said>({});
   // Checked as it's typed. Uniqueness reads the draft at the moment of
   // checking, so it's never against an old copy.
   const [schema] = useState(() =>
@@ -74,10 +73,25 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
     defaultValues: { id: "" },
     mode: "onChange",
   });
-  const { errors } = form.formState;
-  const label = kinds[kind].label;
+  const { errors, isSubmitting } = form.formState;
+  const label = labels[kind];
 
-  function onSubmit({ id }: { id: string }) {
+  function reset() {
+    form.reset();
+    setChoice(NO_CHOICE);
+    setSaid({});
+  }
+
+  async function onSubmit({ id }: { id: string }) {
+    let node: Node = { id, kind: "transform", expr: "" };
+    if (kind === "http") {
+      const made = await makeStep(id, choice);
+      if ("said" in made) {
+        setSaid(made.said);
+        return;
+      }
+      node = made.node;
+    }
     const { width, height, transform } = canvas.getState();
     const [x, y, zoom] = transform;
     const middle = {
@@ -85,9 +99,9 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
       y: (height / 2 - y) / zoom - NODE_HEIGHT / 2,
     };
     const placed = toFlow(editor.getState().draft).nodes.map((n) => n.position);
-    edit((d) => addNode(d, kinds[kind].fresh(id), freeSpot(middle, placed)));
+    edit((d) => addNode(d, node, freeSpot(middle, placed)));
     setOpen(false);
-    form.reset();
+    reset();
   }
 
   return (
@@ -95,7 +109,7 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) form.reset();
+        if (!next) reset();
       }}
     >
       <DialogTrigger render={<Button variant="outline" size="sm" />}>
@@ -125,9 +139,21 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof kinds }) {
               />
               <FieldError errors={[errors.id]} />
             </Field>
+            {kind === "http" && (
+              <UpstreamChoice
+                choice={choice}
+                onChange={(next) => {
+                  setChoice(next);
+                  setSaid({});
+                }}
+                said={said}
+              />
+            )}
           </FieldGroup>
           <DialogFooter className="mt-4">
-            <Button type="submit">Add</Button>
+            <Button type="submit" disabled={isSubmitting}>
+              Add
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

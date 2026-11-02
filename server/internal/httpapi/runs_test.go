@@ -77,11 +77,11 @@ func usersUpstream(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// published creates a workflow from def, with BASE standing for base, and
-// publishes revision 1.
+// published creates a workflow from def, with BASE standing for base, each
+// step's own request saved as an upstream it uses, and publishes revision 1.
 func published(t *testing.T, base, def string) gen.WorkflowRevision {
 	t.Helper()
-	wr := create(t, strings.ReplaceAll(def, "BASE", base))
+	wr := create(t, withUpstreams(t, strings.ReplaceAll(def, "BASE", base)))
 	if r := call(t, http.MethodPost, "/v1/workflows/"+wr.Workflow.ID+"/publish", `{"revision": 1}`); r.status != http.StatusOK {
 		t.Fatalf("publish = %d %s", r.status, r.body)
 	}

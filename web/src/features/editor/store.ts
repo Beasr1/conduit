@@ -18,6 +18,16 @@ import {
 import type { components } from "@/gen/schema";
 
 type Definition = components["schemas"]["Definition"];
+type Upstream = components["schemas"]["Upstream"];
+type Parameter = components["schemas"]["Parameter"];
+
+// An upstream being edited in place, from a step that uses it (plan 07): its
+// request, responses and samples are the step's in the draft, and its
+// parameters these.
+export interface UpstreamEdit {
+  node: string;
+  parameters: Parameter[];
+}
 
 interface Selection {
   nodes: string[];
@@ -32,6 +42,13 @@ export interface Refused {
 // which for a valid draft are the node ids themselves.
 export interface EditorState {
   draft: Definition;
+  // The versions of upstreams the draft's steps use, by versionKey, which
+  // fill those steps (plan 07). A version never changes, so one fetched is
+  // kept.
+  versions: Record<string, Upstream>;
+  addVersion: (key: string, version: Upstream) => void;
+  upstreamEdit: UpstreamEdit | undefined;
+  editUpstream: (edit: UpstreamEdit | undefined) => void;
   // The step that a revision's output, kept from before the response, moved
   // into when it opened, so the editor can say why there are changes to
   // save. Undefined when there was nothing to move.
@@ -88,10 +105,25 @@ export type EditorStore = StoreApi<EditorState>;
 // definition it opened, its output moved into a step if it has one. The
 // saved revision stays in the query cache, so a refetch of it never reaches
 // the draft.
-export function createEditorStore(opened: Definition): EditorStore {
+export function createEditorStore(
+  opened: Definition,
+  versions: Record<string, Upstream> = {},
+  upstreamEdit?: UpstreamEdit,
+): EditorStore {
   const { draft, step } = outputToStep(opened);
   return createStore<EditorState>()((set) => ({
     draft,
+    versions,
+    addVersion: (key, version) =>
+      set((s) => ({ versions: { ...s.versions, [key]: version } })),
+    upstreamEdit,
+    // + Response goes when the edit does: a step's responses are then its
+    // upstream's again.
+    editUpstream: (upstreamEdit) =>
+      set((s) => ({
+        upstreamEdit,
+        part: !upstreamEdit && s.part === "add" ? "request" : s.part,
+      })),
     moved: step,
     moving: {},
     selected: { nodes: [], edges: [] },
@@ -175,7 +207,8 @@ export function createEditorStore(opened: Definition): EditorStore {
 // kept is the part of a selection the draft still has: a deleted node drops
 // out of it, and so does an edge whose end was renamed. The response card is
 // always there. A step whose open response, or case, was removed opens on
-// its first part; its Unhandled is always there too.
+// its first part; its Unhandled is always there too, and so are the
+// Parameters of one that uses an upstream.
 function kept(
   { selected, part }: Pick<EditorState, "selected" | "part">,
   draft: Definition,
@@ -194,6 +227,7 @@ function kept(
     part === "request" ||
     part === "add" ||
     part === UNHANDLED_HANDLE ||
+    (part === "with" && node.uses !== undefined) ||
     handlesOf(node).includes(part) ||
     exitsOf(node).some((e) => e.part === part)
       ? part
@@ -220,4 +254,12 @@ export function useEditorStore(): EditorStore {
 // re-renders only when that slice changes.
 export function useEditor<T>(selector: (state: EditorState) => T): T {
   return useStore(useEditorStore(), selector);
+}
+
+// isLocked says whether step i's request and responses are its upstream's,
+// shown but not edited: it uses one, which isn't being edited in place
+// (plan 07).
+export function isLocked(s: EditorState, i: number): boolean {
+  const n = s.draft.nodes[i];
+  return n?.uses !== undefined && s.upstreamEdit?.node !== n.id;
 }

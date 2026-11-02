@@ -11,6 +11,7 @@ import (
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
 	"github.com/Beasr1/conduit/server/internal/runner"
 	"github.com/Beasr1/conduit/server/internal/store"
+	"github.com/Beasr1/conduit/server/internal/trace"
 )
 
 func (a *api) StartRun(ctx context.Context, req gen.StartRunRequestObject) (gen.StartRunResponseObject, error) {
@@ -20,7 +21,7 @@ func (a *api) StartRun(ctx context.Context, req gen.StartRunRequestObject) (gen.
 		return nil, invalidDefinition(problemErrors(invalid.Problems), "Revision %d has problems, so it can't run.", invalid.Revision)
 	}
 	if err != nil {
-		return nil, refusal(err)
+		return nil, refusal(ctx, err)
 	}
 	out, err := runOut(run)
 	if err != nil {
@@ -135,7 +136,7 @@ func (a *api) ServeWorkflow(ctx context.Context, req gen.ServeWorkflowRequestObj
 			detail: fmt.Sprintf("The published revision, %d, has problems. Fix them and publish again.", invalid.Revision),
 		}
 	case err != nil:
-		return nil, refusal(err)
+		return nil, refusal(ctx, err)
 	}
 	// An answer goes out as it is, a failed run's unhandled one too; one
 	// passing an error on with no error body to say it, as problem details
@@ -161,15 +162,26 @@ func (a *api) ServeWorkflow(ctx context.Context, req gen.ServeWorkflowRequestObj
 	}
 }
 
-// refusal answers the runner refusing to start a run: the input, or the
-// cap. Anything else goes on to answerError.
-func refusal(err error) error {
+// refusal answers the runner refusing to start a run: the input, a loop,
+// or a cap. Anything else goes on to answerError.
+func refusal(ctx context.Context, err error) error {
 	var input *runner.InputError
 	switch {
 	case errors.As(err, &input):
 		return &problem{
 			status: http.StatusBadRequest, code: "invalid_input", errors: problemErrors(input.Problems),
 			detail: "The input doesn't match the workflow's input_schema.",
+		}
+	case errors.Is(err, runner.ErrLoop):
+		t, _ := trace.From(ctx)
+		return &problem{
+			status: http.StatusLoopDetected, code: "loop",
+			detail: fmt.Sprintf("This call has passed through Conduit %d times already, in trace %s: a workflow calling itself, or workflows calling each other, round and round. It wasn't run.", trace.MaxHops, t.ID),
+		}
+	case errors.Is(err, runner.ErrWorkflowBusy):
+		return &problem{
+			status: http.StatusServiceUnavailable, code: "busy", retryAfter: 5,
+			detail: "This workflow has a quarter of the server's runs in progress, the most one workflow may have. Try again shortly.",
 		}
 	case errors.Is(err, runner.ErrBusy):
 		return &problem{
@@ -201,7 +213,7 @@ func (a servedAnswer) VisitServeWorkflowResponse(w http.ResponseWriter) error {
 func runSummaryOut(r store.Run) (gen.RunSummary, error) {
 	out := gen.RunSummary{
 		ID: r.ID, WorkflowID: r.WorkflowID, Revision: r.Revision,
-		Trigger: gen.RunSummaryTrigger(r.Trigger), Status: gen.RunSummaryStatus(r.Status),
+		Trigger: gen.RunSummaryTrigger(r.Trigger), TraceID: r.TraceID, Status: gen.RunSummaryStatus(r.Status),
 		Answered: r.Answered, StartedAt: r.StartedAt.UTC(),
 	}
 	if r.EndedAt != nil {
@@ -214,7 +226,7 @@ func runOut(r store.Run) (gen.Run, error) {
 	s, err := runSummaryOut(r)
 	return gen.Run{
 		ID: s.ID, WorkflowID: s.WorkflowID, Revision: s.Revision,
-		Trigger: gen.RunTrigger(s.Trigger), Status: gen.RunStatus(s.Status),
+		Trigger: gen.RunTrigger(s.Trigger), TraceID: s.TraceID, Status: gen.RunStatus(s.Status),
 		Answered: s.Answered, Error: s.Error, StartedAt: s.StartedAt, EndedAt: s.EndedAt,
 		Input: r.Input, Output: r.Output, OutputTruncated: r.OutputTruncated,
 	}, err

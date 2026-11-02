@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"code.dny.dev/ssrf"
+
+	"github.com/Beasr1/conduit/server/internal/trace"
 )
 
 const (
@@ -169,6 +171,10 @@ func (c *Client) attempt(ctx context.Context, r *Request) (*Response, *Error) {
 	for k, v := range r.Header {
 		req.Header[k] = v
 	}
+	// After the step's own headers, so a step can't set the hop count that
+	// stops a loop (plan 06).
+	t, _ := trace.From(ctx)
+	t.Pass(req.Header)
 	if r.Body != nil && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}

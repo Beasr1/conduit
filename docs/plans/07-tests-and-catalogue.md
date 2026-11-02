@@ -2,9 +2,9 @@
 
 Status: the test suite is a direction, not scheduled: it comes after plan
 04's runs (phase C), and it's written now because it shapes v1, as 08 is.
-The rest of 07, the upstream catalogue, OpenAPI import and caller keys, is
-planned when 07 starts. Talked through with you on 2026-10-30. ✓ means
-checked first-hand on the source.
+Upstreams, the catalogue, are accepted below (2026-11-02) and being built;
+OpenAPI import and caller keys are planned when they start. Talked through
+with you on 2026-10-30. ✓ means checked first-hand on the source.
 
 ## Goal
 
@@ -120,6 +120,224 @@ with schemas and samples than to the editor:
 - **Fetching a sample from a GET**: one call to the step's URL, through
   the SSRF guard, kept as its sample, as a run's response can be.
 
+## Upstreams (accepted 2026-11-02)
+
+Your call on 2026-11-02, asked what "move api to upstream/atomic" meant:
+"both steps use saved upstreams making our workflow even cleaner. we
+define the handling of that api in there only. but we can add our workflow
+created published api to workflow as upstream/step". The roadmap already
+calls an upstream "a single API endpoint". Accepted the same day as
+drafted, each choice below as recommended: pinned versions with newer ones
+offered, steps with their own request kept, a workflow used as a step run
+inside the server. On 2026-11-03 you dropped steps with a request of their
+own for new work (4 below). Being built, in the phases under Steps.
+
+### How it would work
+
+1. **An upstream is one API endpoint, saved once with how it's handled**:
+   its method and URL, headers, query and body, each of which can name the
+   upstream's own parameters, `{{ user_id }}`; its timeout and retries; the
+   responses it handles, by status; and its samples. That's what an HTTP
+   step holds today, lifted out, plus a list of parameters.
+2. **A step uses an upstream, and keeps only what's the workflow's**: which
+   upstream, at which version; an expression for each parameter,
+   `user_id: input.user_id`; a line from each response; and what its
+   failures do, its Unhandled. The step's blocks are the upstream's
+   responses.
+3. **Every save of an upstream is a version of its own, never edited**, as a
+   workflow's revisions are. A step names the version it uses. When a newer
+   one exists, the step offers it, "v3, v4 is out", and taking it is an
+   edit like any other: a new revision of the workflow, checked, and
+   published when you publish. So a published workflow never changes under
+   its callers, and an upstream fixed for one workflow doesn't break
+   another.
+4. **A published workflow is an upstream too.** Its parameters are its
+   input schema's, its responses its answers, and a step pins one of its
+   published revisions. It runs inside the server, as a run of its own,
+   recorded, in its caller's trace one hop further (plan 06), rather than
+   through its `/serve` address, so a definition holds no token to call it.
+5. **Workflows using workflows can't form a cycle.** A step can only pin a
+   revision that's already published, and revisions never change, so every
+   one a step reaches is older than the step's own: a chain of them ends.
+   Kestra refuses the same thing outright: "A flow cannot call itself
+   directly or indirectly; any cycle makes the flow invalid" ✓. Here it
+   can't be built. A loop through an HTTP step or another API is still
+   plan 06's to stop.
+6. **The library**: a page that lists upstreams, makes one, saves a version,
+   and shows which workflows use which version. A step's "Save as
+   upstream" moves its request and handling into a new upstream and makes
+   the step use it. OpenAPI import fills the library later, as 07 always
+   meant.
+
+### What others do
+
+| Tool | A step points at | Which version runs | An edit to the shared thing |
+|---|---|---|---|
+| Step Functions, a state machine calling another | its ARN | a version (pinned), an alias (movable), or the latest | follows what's named, fixed when the run starts ✓ |
+| Zapier, an app's versions | a version | the one the Zap uses; a new one is promoted for new Zaps | nothing, until the Zap is migrated, within one major version ✓ |
+| Terraform modules | a source and a version constraint | the newest the constraint allows, kept in a lock file | nothing, until `terraform init -upgrade` ✓ |
+| Windmill, a flow step calling a script | a path, and maybe a hash | the hash, if given | the hash: nothing ✓ |
+| Kestra subflows | a flow, and maybe a `revision` | "By default, the last" revision ✓ | the next call runs it |
+| Power Automate custom connectors | an operation | the one there is | reaches every flow, so a breaking change must be a new operation ✓ |
+
+Terraform's reason, the same as ours: "explicitly constraining the
+acceptable version numbers to avoid unexpected or unwanted changes" ✓.
+Semantic Versioning's rule for what's released: "the contents of that
+version MUST NOT be modified" ✓.
+
+### Decided while drafting, accepted
+
+1. **Pinned, with newer versions offered**, as Step Functions' versions,
+   Zapier and Terraform do. Following the latest would let an upstream's
+   edit reach every published workflow with no Publish in between, past
+   plan 12's checks. A copy in each step, D14 as proposed, is what you
+   ruled out: the handling lives in one place.
+2. **The handling is the upstream's alone**, as you said: a step can't
+   override its timeout, retries or responses. Its Unhandled stays the
+   step's, as where failures go is the workflow's choice.
+3. **A workflow used as a step runs in the server**, not through `/serve`:
+   no token in a definition, and the caps and hop count of plan 06 apply as
+   they do to any run.
+4. **Upstreams only, from 2026-11-03**, your call, asking whether the
+   whole step could move to the upstream, as every status, 2xx too, is the
+   upstream's: drafted as keeping both. Publish refuses an HTTP step with a
+   request of its own (`own_request`), and Add HTTP step makes an upstream
+   from a call in its own dialog. A revision saved or published before
+   still runs, never rewritten, and Save as upstream moves its steps into
+   the library. What can't move is what each workflow decides: a step's
+   id, the values it gives the parameters, where each response and its
+   failures lead, and its Unhandled's body, which reads the run. Every tool
+   checked keeps a generic HTTP step beside its catalog (sources.md,
+   contested).
+5. **Secrets in an upstream's headers stay as values**, as in steps today,
+   until 06's credentials hold them by reference.
+
+### Steps
+
+Each phase ends with `just check` green, staged for you to commit.
+
+**A. The library.**
+- [x] D14 settled in the roadmap.
+- [x] Schema: an upstream's version, in `workflow.yaml`: its parameters,
+      by name, and a request, responses and samples as an HTTP step has,
+      the templates reading the parameters; `just gen`.
+- [x] Its checks, tests first: names, and what an HTTP step's own get;
+      and that every expression in its request reads only its
+      parameters (`unknown_parameter`), as gnata's `ReferencedPaths` says.
+- [x] Store: upstreams and their versions, every save a version; the
+      migration.
+- [x] API: list, make, read, save a version, read a version. A version
+      with problems isn't saved (422, `invalid_upstream`), as steps pin it.
+
+**B. Steps that use upstreams.**
+- [x] A node `uses` an upstream at a version, `with` a JSONata expression
+      for each parameter.
+- [x] Before a definition is checked, previewed or run, each such node is
+      filled from its version (`workflow.Resolve`, the versions from the
+      store in one query), so every check a step gets applies; a version
+      that isn't there (`unknown_upstream`), or a parameter unbound
+      (`required`) or unknown (`unknown_parameter`), is a problem on the
+      node, and so is a request, responses or samples of its own.
+- [x] The engine evaluates the bindings over the run, then renders the
+      version's request over them, never over the run; previews the same.
+
+Mutation checks for A and B: 40 on the server, 37 caught at first. The
+empty-path guard was dead, as gnata reports a read of the whole input as
+incomplete, so it went; a malformed If-Match got a test of its words. Left:
+skipping the query when no node uses an upstream, which saves a round trip
+and changes nothing else.
+
+**C. The editor.** Asked on 2026-11-02, your answers: an upstream is
+edited both in place, from a step that uses it, and on its library page;
+the library is a page beside Workflows, listing each upstream's versions
+and which workflows use which; and Add HTTP step offers the library, a
+step without one having its own request, as now.
+- [x] The library page: list, make, edit (a new version).
+- [x] A step from an upstream; its parameters' expressions; a newer
+      version offered on it.
+- [x] "Save as upstream": each placeholder of a step's own request becomes
+      a parameter bound to what it read.
+- [x] The browser test.
+
+As built: the editor fills a step that uses an upstream from its version
+as the page opens, and strips it again before the check, a save or a
+preview, so it's drawn, previewed and run as any HTTP step while the
+server is sent only `uses` and `with`. Its request and responses are
+locked, and Edit upstream opens them: the preview takes the upstream as
+it stands, keyed by the step's id (`upstreams`), Save upstream makes the
+next version, which the step then pins, and the workflow's header waits
+until the upstream is saved or discarded. A preview says the values the
+parameters take (`parameters`), which the step's body reads, under that
+name. Add HTTP step offers the library, and Save as upstream makes each
+placeholder a parameter named for the last field it reads. The library
+page lists upstreams, makes one from a name and a call, each `{{ name }}`
+in its URL a parameter, and edits one in a step's tabs, each parameter
+with a sample the preview gives it; Used by says which workflows' latest
+revisions use which version, and whether that revision is served.
+
+Walked through in Chromium through nginx, light and dark, with no console
+errors, it showed four faults the jsdom tests had passed, each now with a
+test: the disabled fieldset disabled the Request row's tabs too, as HTML
+disables every control in one ✓; typing a parameter's value closed its
+tab, as the store didn't know the part; a locked step's card offered
++ Add; and its body showed the run's input rather than the parameters its
+request reads. Reading the code after found a fifth: Keep as the sample,
+on a run's answer, wrote a locked step's sample, which saving dropped; it
+now says to edit the upstream. The browser test
+(`web/e2e/upstreams.spec.ts`) makes an upstream, adds a 404 on its page,
+uses it from a step, runs it to 200 and 404, publishes and calls it, edits
+it in place, saves another step's request as one, and reads Used by. It
+found the Done flow's Save also matching Save as upstream, as Playwright
+matches a name as a substring unless told exact ✓.
+
+Mutation checks for C: 37 in the web code, 32 caught at first, and 13 on
+the server, 9 caught. Each survivor got a test, and all are caught now:
+no Save as upstream on a step that uses one; its 2xx sample locked; the
+check sent the draft stripped; a 412 on Save upstream, and an empty name
+in Save as upstream, each said; the library's served flag over the API; a
+published workflow whose latest revision isn't the one served; an edit
+previewed for its own step only; and one sent for a step with a request
+of its own ignored.
+
+**C2. Upstreams only** (your call, 2026-11-03).
+- [x] Publish refuses an HTTP step with a request of its own
+      (`own_request`, at its request); a save, a preview and a run don't,
+      so a revision saved or published before still runs.
+- [x] Add HTTP step makes a step that uses an upstream: one from the
+      library, or New upstream, made from a name and a call whose URL reads
+      the run, each placeholder a parameter the step gives what it read.
+- [x] The problem shows by Save as upstream, its fix, and the problem list
+      takes the cursor there.
+
+As built: the server's tests make upstreams from their fixtures' own
+requests, through the API, before they publish, so every serve test runs
+the new path; the loop tests publish through the store, as a revision
+published before was. A bare `{{ user_id }}` reads nothing of the run, so
+New upstream and Save as upstream make it a parameter still to be given a
+value. The tour's second stop is a step's call now, and the problem list
+names a parameter's problem as one, where it said "Query parameter".
+Checked in Chromium through nginx, light and dark, with no console errors,
+and in the browser tests: the Done flow builds its four steps with New
+upstream, crm's body a parameter added by editing its upstream in place,
+and a workflow made through the API with a request of its own is moved to
+the library from its problem and published. Mutation checks: 3 on the
+server and 17 in the web code, all caught, with tests written first for
+the gaps expected (a step with neither a request nor an upstream, the
+method kept, what's missing, a 409 and a 422 under their fields).
+
+**D. Workflows as steps.**
+- [ ] A node uses a published revision of another workflow, its input
+      bound; it runs as a run of its own, in the caller's trace, and its
+      answer is the step's response.
+- [ ] Tests, mutation checks and docs at the end of each phase.
+
+### Open questions
+
+- Taking a newer version in every workflow at once, as Zapier migrates:
+  each would become a new revision, published or not?
+- Whether an upstream can be deleted while a revision, published or not,
+  uses one of its versions.
+
 ## Open questions (decide when 07 starts)
 
 - At Publish, live tests: run again, require the revision's last live
@@ -144,3 +362,19 @@ with schemas and samples than to the editor:
 - Postman test examples ✓:
   https://learning.postman.com/docs/tests-and-scripts/write-scripts/test-examples/
 - REST Assured usage ✓: https://github.com/rest-assured/rest-assured/wiki/Usage
+- Upstreams (2026-11-02):
+  - Step Functions, starting a version or alias ✓:
+    https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html
+  - Zapier, versions and migrating ✓:
+    https://docs.zapier.com/platform/manage/versions,
+    https://docs.zapier.com/platform/manage/migrate
+  - Terraform, module versions ✓:
+    https://developer.hashicorp.com/terraform/language/modules/syntax
+  - Windmill, a step's script hash ✓:
+    https://jsr.io/@windmill/windmill@1.776.0/doc/~/PathScript
+  - Kestra, subflows, their revision and cycles ✓:
+    https://kestra.io/docs/workflow-components/subflows,
+    https://kestra.io/plugins/core/flow/io.kestra.plugin.core.flow.subflow
+  - Power Automate, custom connectors' versions ✓:
+    https://learn.microsoft.com/en-us/connectors/custom-connectors/operational-versioning
+  - Semantic Versioning ✓: https://semver.org/

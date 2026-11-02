@@ -14,6 +14,7 @@ import (
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
 	"github.com/Beasr1/conduit/server/internal/runner"
 	"github.com/Beasr1/conduit/server/internal/store"
+	"github.com/Beasr1/conduit/server/internal/trace"
 )
 
 // maxBody is nginx's client_max_body_size too.
@@ -46,7 +47,8 @@ func NewRouter(d Deps) http.Handler {
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
-		h.ServeHTTP(w, r)
+		// The trace a call carries, which a run it starts continues (plan 06).
+		h.ServeHTTP(w, r.WithContext(trace.With(r.Context(), trace.Read(r.Header))))
 	})
 }
 

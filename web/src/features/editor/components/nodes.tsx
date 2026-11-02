@@ -20,7 +20,7 @@ import {
 import { atStep, useProblemCount } from "@/features/editor/hooks/use-problems";
 import { useRun, useStepRun } from "@/features/editor/hooks/use-runs";
 import { runSaid, wayOf } from "@/features/editor/runs";
-import { type Refused, useEditor } from "@/features/editor/store";
+import { isLocked, type Refused, useEditor } from "@/features/editor/store";
 
 // Frame is a step's request block, and the inside of a step that has no
 // others: its id, a line saying what it does, and the handle connections
@@ -143,9 +143,11 @@ function UnhandledStrip({ step }: { step: string }) {
 // and on the right a block per response, with the handle its connections
 // leave from, then + Add, and its Unhandled strip along the bottom. Each
 // block says which part of the step it is, and the canvas opens that part
-// when it's clicked.
+// when it's clicked. A step that uses an upstream has its responses from it,
+// so no + Add, unless the upstream is being edited in place.
 const HttpNode = memo(function HttpNode({ id, data }: NodeProps<FlowNode>) {
   const node = useEditor((s) => s.draft.nodes[data.index]);
+  const locked = useEditor((s) => isLocked(s, data.index));
   const problems = useProblemCount(atStep(data.index));
   const outputs = node ? handlesOf(node) : [];
   // React Flow finds a node's handles when it mounts; one added or taken
@@ -191,12 +193,14 @@ const HttpNode = memo(function HttpNode({ id, data }: NodeProps<FlowNode>) {
             <Handle type="source" position={Position.Right} id={o} />
           </div>
         ))}
-        <div
-          data-part="add"
-          className="flex flex-1 items-center px-2.5 text-muted-foreground"
-        >
-          + Add
-        </div>
+        {!locked && (
+          <div
+            data-part="add"
+            className="flex flex-1 items-center px-2.5 text-muted-foreground"
+          >
+            + Add
+          </div>
+        )}
       </div>
     </Card>
   );

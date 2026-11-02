@@ -238,9 +238,112 @@ export interface paths {
         put?: never;
         /**
          * Run a revision in the background
-         * @description The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it.
+         * @description The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and one that has already passed through Conduit 8 times is refused with 508 (plan 06).
          */
         post: operations["startRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/upstreams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the upstream library, newest first */
+        get: operations["listUpstreams"];
+        put?: never;
+        /**
+         * Make an upstream; its definition becomes version 1
+         * @description A saved API endpoint and how it's handled (plan 07). A step that uses it pins a version, so a definition with problems isn't saved; they're listed in the 422.
+         */
+        post: operations["createUpstream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/upstreams/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check an upstream's definition without saving it
+         * @description What a save would refuse it for, as the library's page checks while it's edited.
+         */
+        post: operations["validateUpstream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/upstreams/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        /** Get an upstream at its latest version */
+        get: operations["getUpstream"];
+        /**
+         * Save the next version
+         * @description If-Match must name the latest version, so a save can't silently undo someone else's. Versions never change, so a definition with problems isn't saved; they're listed in the 422.
+         */
+        put: operations["saveUpstream"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/upstreams/{id}/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        /** List the workflows whose latest revision uses an upstream, and the versions each pins */
+        get: operations["listUpstreamUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/upstreams/{id}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+                version: number;
+            };
+            cookie?: never;
+        };
+        /** Get one version of an upstream */
+        get: operations["getUpstreamVersion"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -318,7 +421,7 @@ export interface paths {
         put?: never;
         /**
          * Run a workflow's published revision and answer with the answer it gives
-         * @description The body is the run's input. A run answers with the answer it gave, its status and its body. A run that gives none, as a node failed, or it took no line into the response, or lines from two nodes, answers with its response's default, if it has one, at the status of the cause, 502 an upstream failed, 504 a timeout, 500 otherwise. Without one, or with no response, it answers that status with problem details naming what failed; `instance` is the run, at /v1/runs/{id}. A revision saved with an output answers 200 with it. Served runs time out after 30 s.
+         * @description The body is the run's input. A run answers with the answer it gave, its status and its body. A run that gives none, as a node failed, or it took no line into the response, or lines from two nodes, answers with its response's default, if it has one, at the status of the cause, 502 an upstream failed, 504 a timeout, 500 otherwise. Without one, or with no response, it answers that status with problem details naming what failed; `instance` is the run, at /v1/runs/{id}. A revision saved with an output answers 200 with it. Served runs time out after 30 s. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and the run's own calls pass it on, one hop further; a call that has already passed through Conduit 8 times, a workflow calling itself, is refused with 508 before a run starts (plan 06).
          */
         post: operations["serveWorkflow"];
         delete?: never;
@@ -384,6 +487,10 @@ export interface components {
             node?: string;
             /** @description The connection to preview, by its place in the definition's edges. Not with node. */
             edge?: number;
+            /** @description Unsaved versions of the upstreams steps use, by the step's id, which the preview uses in place of the version each pins, to show what an upstream being edited would do (plan 07). */
+            upstreams?: {
+                [key: string]: components["schemas"]["Upstream"];
+            };
         };
         Preview: {
             /** @description The data document the step, or a connection's condition, reads, {"input", "nodes"}, as a run would build it from the samples. For a transform with ways, what the run by each reads, merged, a node read differently by two as the first read it. */
@@ -397,6 +504,8 @@ export interface components {
             /** @description A connection's preview only, whether a run would take it with these samples. */
             taken?: boolean;
             sends?: components["schemas"]["RenderedRequest"];
+            /** @description An http step that uses an upstream, the values its parameters take, by name, which its request reads. One whose value fails is left out, as the problems say. */
+            parameters?: unknown;
             /** @description A transform step's value, or the workflow's output. Absent when it gave none, and for a transform with ways, as each way gives its own. */
             gives?: unknown;
             unhandled?: components["schemas"]["UnhandledPreview"];
@@ -451,6 +560,44 @@ export interface components {
         RevisionList: {
             revisions: components["schemas"]["RevisionSummary"][];
         };
+        UpstreamSummary: {
+            id: string;
+            /** @description Unique in the library. */
+            name: string;
+            latest_version: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        UpstreamList: {
+            upstreams: components["schemas"]["UpstreamSummary"][];
+            /** @description Pass as `before` for the next page. Absent on the last page. */
+            next?: string;
+        };
+        CreateUpstream: {
+            name: string;
+            definition: components["schemas"]["Upstream"];
+        };
+        UpstreamUsers: {
+            workflows: components["schemas"]["UpstreamUse"][];
+        };
+        UpstreamUse: {
+            workflow_id: string;
+            name: string;
+            /** @description The workflow's latest revision, which uses the upstream. */
+            revision: number;
+            /** @description The versions its steps pin, oldest first. */
+            versions: number[];
+            /** @description Whether that revision is the one the workflow serves. */
+            published: boolean;
+        };
+        UpstreamVersion: {
+            upstream: components["schemas"]["UpstreamSummary"];
+            version: number;
+            definition: components["schemas"]["Upstream"];
+            provenance: components["schemas"]["Provenance"];
+            /** Format: date-time */
+            created_at: string;
+        };
         WorkflowRevision: {
             workflow: components["schemas"]["Workflow"];
             revision: components["schemas"]["Revision"];
@@ -490,6 +637,8 @@ export interface components {
              * @enum {string}
              */
             trigger: "editor" | "served";
+            /** @description The W3C trace the run belongs to, 32 lowercase hex digits; the caller's, when the call that started it carried one. Runs that call each other through /serve share it. Absent for runs from before traces were kept. */
+            trace_id?: string;
             /** @enum {string} */
             status: "running" | "succeeded" | "failed" | "cancelled";
             error?: components["schemas"]["RunError"];
@@ -635,6 +784,12 @@ export interface components {
             timeout_ms?: number;
             retry?: components["schemas"]["Retry"];
         };
+        /** @description An upstream, pinned to a version, which never changes (plan 07). */
+        Uses: {
+            /** @description The upstream's id. */
+            upstream: string;
+            version: number;
+        };
         Case: {
             /** @description What the editor calls the case, on its exit and its tab. Absent, it's Case and its place. */
             name?: string;
@@ -675,8 +830,14 @@ export interface components {
             /** @description Unique in the workflow. Expressions read the node's result as nodes.<id>. */
             id: string;
             kind: components["schemas"]["NodeKind"];
-            /** @description The call an http node makes. */
+            /** @description The call an http node makes, unless it uses an upstream. */
             request?: components["schemas"]["HTTPRequest"];
+            /** @description The upstream an http node calls, at a version, in place of a request of its own (plan 07). Its request, responses and samples are the version's, and the node has none of its own. */
+            uses?: components["schemas"]["Uses"];
+            /** @description For a node that uses an upstream, a JSONata expression over the run for each of the upstream's parameters, which its request reads. */
+            with?: {
+                [key: string]: string;
+            };
             /** @description A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch. */
             expr?: string;
             /** @description A transform node's cases, in place of an expr. */
@@ -763,6 +924,23 @@ export interface components {
             /** @description How the editor draws the workflow. The engine ignores it. */
             ui?: components["schemas"]["UI"];
         };
+        Parameter: {
+            /** @description Unique in its upstream. Its templates read it as {{ name }}, and its body as name. */
+            name: string;
+            /** @description A made-up value, any JSON, which the library's preview of the upstream gives the parameter; a step gives it its own. At most 64 KiB. */
+            sample?: unknown;
+        };
+        /** @description A saved API endpoint and how it's handled, one version of it (plan 07). Every save makes a new version, which never changes, and a step that uses the upstream pins one. Its templates and body read its parameters by name, {{ user_id }}, and each step that uses it gives them values. */
+        Upstream: {
+            /** @description What a step that uses it gives it, each a JSONata expression over the step's run. Its templates and body read them by name, and nothing else. */
+            parameters?: components["schemas"]["Parameter"][];
+            /** @description The call, as an http node's, its templates and body reading the parameters. */
+            request: components["schemas"]["HTTPRequest"];
+            /** @description Its made-up or redacted 2xx response, which previews of a step that uses it read. */
+            sample?: components["schemas"]["Sample"];
+            /** @description Its answers besides 2xx, as an http node's. A step that uses it has a block for each, and lines from them. */
+            outputs?: components["schemas"]["Output"][];
+        };
     };
     responses: {
         /** @description RFC 9457 problem details. `code` says what went wrong; `errors` lists every problem with a JSON Pointer. */
@@ -774,7 +952,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
-        /** @description Too many runs are in progress, or the server is shutting down. Try again after Retry-After seconds. */
+        /** @description Too many runs are in progress, on the server or of the one workflow, which may have a quarter of the server's at once, or the server is shutting down. Try again after Retry-After seconds. */
         Busy: {
             headers: {
                 "Retry-After"?: number;
@@ -787,6 +965,7 @@ export interface components {
     };
     parameters: {
         WorkflowID: string;
+        UpstreamID: string;
         RunID: string;
     };
     requestBodies: never;
@@ -1160,6 +1339,195 @@ export interface operations {
             404: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             503: components["responses"]["Busy"];
+            508: components["responses"]["Problem"];
+        };
+    };
+    listUpstreams: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description Return upstreams older than this id, for the next page. */
+                before?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of upstreams. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpstreamList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+        };
+    };
+    createUpstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateUpstream"];
+            };
+        };
+        responses: {
+            /** @description Made. */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpstreamVersion"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    validateUpstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Upstream"];
+            };
+        };
+        responses: {
+            /** @description Its problems, none when it can be saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Validation"];
+                };
+            };
+            401: components["responses"]["Problem"];
+        };
+    };
+    getUpstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The upstream. Send its ETag as If-Match when saving the next version. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpstreamVersion"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    saveUpstream: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The latest version's ETag, such as "3". Without it the save is refused with 428. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Upstream"];
+            };
+        };
+        responses: {
+            /** @description Saved. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpstreamVersion"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+        };
+    };
+    listUpstreamUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workflows, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpstreamUsers"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    getUpstreamVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version, which never changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpstreamVersion"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     listRuns: {
@@ -1280,6 +1648,7 @@ export interface operations {
             502: components["responses"]["Problem"];
             503: components["responses"]["Busy"];
             504: components["responses"]["Problem"];
+            508: components["responses"]["Problem"];
         };
     };
 }

@@ -4,7 +4,8 @@ import { runSaid } from "@/features/editor/runs";
 import { useEditor } from "@/features/editor/store";
 
 // RunList lists a workflow's latest runs, newest first: those started here,
-// and those its callers made through its URL. Picking one shows it on the
+// and those its callers made through its URL, each with its trace, which
+// runs calling each other share (plan 06). Picking one shows it on the
 // canvas.
 export function RunList({ workflow }: { workflow: string }) {
   const runs = useRuns(workflow);
@@ -38,6 +39,11 @@ export function RunList({ workflow }: { workflow: string }) {
               {runSaid(r)} ·{" "}
               {r.trigger === "served" ? "called at its URL" : "run here"}
             </span>
+            {r.trace_id && (
+              <span className="font-mono text-xs text-muted-foreground">
+                trace {r.trace_id}
+              </span>
+            )}
           </Button>
         </li>
       ))}

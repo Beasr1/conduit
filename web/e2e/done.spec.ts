@@ -1,5 +1,15 @@
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
+import {
+  connect,
+  failsInto,
+  failsTheRun,
+  inRun,
+  open,
+  said,
+  signIn,
+  step,
+} from "./editor";
 import { stack } from "./stack";
 
 // The spec example, as plan 04's Done builds it: user, then orders and prefs
@@ -18,69 +28,6 @@ const inputSchema = JSON.stringify({
   required: ["user_id"],
   properties: { user_id: { type: "string" } },
 });
-
-async function signIn(page: Page) {
-  await page.goto("/sign-in");
-  await page.getByLabel("API token").fill(stack.token);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/workflows$/);
-}
-
-// step is a step's card on the canvas.
-const step = (page: Page, id: string) => page.getByTestId(`rf__node-${id}`);
-
-// said is a card's second line: what the step calls, or, while a run is
-// shown, how it went: "running", "200" as it streams, "200, 12 ms" once
-// recorded.
-const said = (page: Page, id: string) =>
-  step(page, id).locator("span.text-xs").first();
-
-// inRun is the part of a step's panel that says how it went in the run
-// shown, beside what the preview says it would do.
-const inRun = (panel: Locator) =>
-  panel.locator("section").filter({
-    has: panel.page().getByRole("heading", { name: /^In this run/ }),
-  });
-
-// open opens a step's panel by its card, once Fit View has every card in
-// sight: an open panel narrows the canvas, so one may be out of it.
-async function open(page: Page, id: string) {
-  await page.getByRole("button", { name: "Fit View" }).click();
-  await step(page, id).getByText(id, { exact: true }).click();
-  const panel = page.getByRole("complementary", { name: "HTTP step" });
-  await expect(panel.getByLabel("Id", { exact: true })).toHaveValue(id);
-  return panel;
-}
-
-// Publish waits until every step's failures are decided (plan 12):
-// failsTheRun has them fail the run, and failsInto joins them to an answer,
-// which the step's Unhandled then names, as the line is drawn only while
-// it's picked.
-async function failsTheRun(panel: Locator) {
-  await panel.getByRole("tab", { name: "Unhandled" }).click();
-  await panel.getByRole("checkbox", { name: "Fail the run" }).check();
-}
-
-async function failsInto(page: Page, id: string, status: number) {
-  const panel = await open(page, id);
-  await panel.getByRole("tab", { name: "Unhandled" }).click();
-  await panel.getByRole("combobox", { name: "Connect Unhandled to" }).click();
-  await page
-    .getByRole("option", { name: `Response ${status}`, exact: true })
-    .click();
-  await expect(step(page, id).locator("[data-part='unhandled']")).toHaveText(
-    `Unhandled → ${status}`,
-  );
-}
-
-// connect joins a step's 2xx to another step, or to an answer, with
-// Connect to in its 2xx tab.
-async function connect(page: Page, from: string, to: string) {
-  const panel = await open(page, from);
-  await panel.getByRole("tab", { name: "2xx" }).click();
-  await panel.getByRole("combobox", { name: "Connect to" }).click();
-  await page.getByRole("option", { name: to, exact: true }).click();
-}
 
 test("the Done flow: build the spec example, save it, run it, see what crm did, publish it", async ({
   page,
@@ -115,26 +62,41 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
   await tour.getByRole("button", { name: "Done" }).click();
   await expect(tour).toBeHidden();
 
-  // Four HTTP steps, each calling the test upstream, user's and orders'
-  // failures failing the run; crm's URL waits.
+  // Four HTTP steps, each a new upstream calling the test upstream, made in
+  // Add HTTP step (plan 07): its URL reads the run, and each placeholder
+  // becomes a parameter the step gives what it read. user's and orders'
+  // failures fail the run.
   for (const id of ["user", "orders", "prefs", "crm"] as const) {
     await page.getByRole("button", { name: "Add HTTP step" }).click();
     const add = page.getByRole("dialog");
     await add.getByLabel("Id").fill(id);
+    await add.getByRole("combobox", { name: "Upstream" }).click();
+    await page.getByRole("option", { name: "New upstream" }).click();
+    await add.getByLabel("Name", { exact: true }).fill(`${id} ${slug}`);
+    if (id === "crm") {
+      await add.getByRole("combobox", { name: "Method" }).click();
+      await page.getByRole("option", { name: "POST", exact: true }).click();
+    }
+    await add.getByRole("textbox", { name: "URL", exact: true }).fill(urls[id]);
     await add.getByRole("button", { name: "Add", exact: true }).click();
     await expect(step(page, id)).toBeVisible();
-    if (id === "crm") continue;
-    const panel = await open(page, id);
-    await panel
-      .getByRole("textbox", { name: "URL", exact: true })
-      .fill(urls[id]);
-    if (id !== "prefs") await failsTheRun(panel);
+    if (id === "user" || id === "orders")
+      await failsTheRun(await open(page, id));
   }
+
+  // crm sends a body. Edited in place, its upstream takes a parameter, body,
+  // sent as its JSON body, and saves that as its version 2; the value the
+  // step gives body waits.
   let panel = await open(page, "crm");
-  await panel.getByRole("combobox", { name: "Method" }).click();
-  await page.getByRole("option", { name: "POST", exact: true }).click();
+  await panel.getByRole("button", { name: "Edit upstream" }).click();
+  await panel.getByRole("tab", { name: "Parameters" }).click();
+  await panel.getByRole("textbox", { name: "Add a parameter" }).fill("body");
+  await panel.getByRole("button", { name: "Add", exact: true }).click();
+  await panel.getByRole("tab", { name: "Request" }).click();
   await panel.getByRole("tab", { name: "Body" }).click();
-  await panel.getByRole("textbox", { name: "Request body" }).fill(crmBody);
+  await panel.getByRole("textbox", { name: "Request body" }).fill("body");
+  await panel.getByRole("button", { name: "Save upstream" }).click();
+  await expect(panel.getByText("· v2")).toBeVisible();
 
   // Four connections, and crm joined to the 200 answer.
   await connect(page, "user", "orders");
@@ -170,21 +132,23 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
   await page.getByRole("button", { name: "Workflow settings" }).click();
   await page.getByRole("textbox", { name: "Input schema" }).fill(inputSchema);
 
-  // Saved, crm's missing URL is a problem, which the list takes the cursor
-  // to; a URL fixes it.
-  await page.getByRole("button", { name: "Save" }).click();
+  // Saved, crm's body has no value yet, a problem, which the list takes the
+  // cursor to; its value fixes it.
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByRole("button", { name: "1 problem" }).click();
   const problems = page.getByRole("complementary", { name: "Problems" });
-  await problems.getByRole("button", { name: /^crm · URL/ }).click();
+  await problems
+    .getByRole("button", { name: /^crm · Parameter “body”/ })
+    .click();
   panel = page.getByRole("complementary", { name: "HTTP step" });
-  const url = panel.getByRole("textbox", { name: "URL", exact: true });
-  await expect(url).toBeFocused();
-  await expect(url).toHaveAttribute("aria-invalid", "true");
-  await expect(panel.getByRole("alert")).toHaveText("Add a URL.");
-  await url.fill(urls.crm);
+  const body = panel.getByRole("textbox", { name: "body", exact: true });
+  await expect(body).toBeFocused();
+  await expect(body).toHaveAttribute("aria-invalid", "true");
+  await expect(panel.getByText("Give the parameter a value.")).toBeVisible();
+  await body.fill(crmBody);
   await expect(page.getByRole("button", { name: /problems?$/ })).toHaveCount(0);
   // Saved again: revision 3, after the one with the problem.
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/^Revision \d/)).toHaveText(/^Revision 3\b/);
 
   // A run, followed on the canvas as it goes: prefs is still running once

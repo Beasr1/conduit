@@ -12,7 +12,7 @@ shimReactFlow();
 // The stops of the tour over the Spec example, in order.
 const stops = [
   "The canvas",
-  "A step's request",
+  "A step's call",
   "Its responses",
   "Connecting",
   "The response",

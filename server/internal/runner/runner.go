@@ -18,10 +18,12 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/Beasr1/conduit/server/internal/engine"
 	"github.com/Beasr1/conduit/server/internal/store"
+	"github.com/Beasr1/conduit/server/internal/trace"
 	"github.com/Beasr1/conduit/server/internal/upstream"
 	"github.com/Beasr1/conduit/server/internal/workflow"
 )
@@ -42,6 +44,12 @@ type Runner struct {
 	events *hub
 	// slots holds a token for each run in progress: the cap.
 	slots chan struct{}
+	// running counts each workflow's runs in progress, which may be share at
+	// most, a quarter of the slots, so one workflow's loop leaves the rest
+	// to the others (plan 06).
+	mu      sync.Mutex
+	running map[string]int
+	share   int
 	// stopping is done once Stop is called: editor runs are cancelled, and
 	// no run starts.
 	stopping context.Context
@@ -51,13 +59,16 @@ type Runner struct {
 // New returns a Runner whose runs call upstreams through client.
 func New(s *store.Store, client *upstream.Client, log *slog.Logger, o Options) *Runner {
 	stopping, stop := context.WithCancel(context.Background())
+	slots := cmp.Or(o.MaxRuns, 32)
 	return &Runner{
 		store:    s,
 		editor:   engine.New(client, engine.Options{RunTimeout: cmp.Or(o.EditorTimeout, 5*time.Minute)}),
 		served:   engine.New(client, engine.Options{RunTimeout: cmp.Or(o.ServedTimeout, 30*time.Second)}),
 		log:      log,
 		events:   newHub(),
-		slots:    make(chan struct{}, cmp.Or(o.MaxRuns, 32)),
+		slots:    make(chan struct{}, slots),
+		running:  map[string]int{},
+		share:    max(1, slots/4),
 		stopping: stopping,
 		stop:     stop,
 	}
@@ -67,6 +78,13 @@ var (
 	// ErrBusy is the cap on runs in progress reached, or the server shutting
 	// down. Try again shortly.
 	ErrBusy = errors.New("too many runs in progress")
+	// ErrWorkflowBusy is a workflow with a quarter of the slots, its share,
+	// in progress: busy, for that workflow (plan 06).
+	ErrWorkflowBusy = fmt.Errorf("the workflow has its share of the runs in progress: %w", ErrBusy)
+	// ErrLoop is a call that has passed through Conduit trace.MaxHops times
+	// already: a workflow calling itself, or workflows calling each other,
+	// round and round (plan 06).
+	ErrLoop = errors.New("the call has passed through Conduit too many times")
 	// ErrNotPublished is a served workflow with no published revision.
 	ErrNotPublished = errors.New("the workflow has no published revision")
 	// ErrNotHere is a run in progress whose events this process doesn't
@@ -111,6 +129,7 @@ type Outcome struct {
 // as recorded: still running. Revision 0 means the latest. The run outlives
 // the request that started it; Stop cancels it.
 func (r *Runner) Start(ctx context.Context, workflowID string, revision int, input json.RawMessage) (store.Run, error) {
+	ctx = traced(ctx)
 	w, err := r.store.Workflow(ctx, workflowID)
 	if err != nil {
 		return store.Run{}, err
@@ -142,6 +161,7 @@ func (r *Runner) Start(ctx context.Context, workflowID string, revision int, inp
 // once the run has ended and been recorded. A caller who hangs up cancels
 // the run.
 func (r *Runner) Serve(ctx context.Context, slug string, input json.RawMessage) (Outcome, error) {
+	ctx = traced(ctx)
 	w, err := r.store.WorkflowBySlug(ctx, slug)
 	if err != nil {
 		return Outcome{}, err
@@ -272,10 +292,17 @@ func (r *Runner) prepare(ctx context.Context, workflowID string, revision int, i
 	if err := json.Unmarshal(rev.Definition, &d); err != nil {
 		return nil, fmt.Errorf("decode revision %d of %s: %w", revision, workflowID, err)
 	}
-	p, err := engine.Compile(&d)
-	var ps workflow.Problems
-	if errors.As(err, &ps) {
-		return nil, &InvalidError{Revision: revision, Problems: ps}
+	// Filled from the upstreams its nodes use, pinned, so as they were when
+	// it was saved (plan 07).
+	vs, err := r.store.Versions(ctx, &d)
+	if err != nil {
+		return nil, err
+	}
+	rd, ps := workflow.Resolve(&d, vs)
+	p, err := engine.Compile(rd)
+	var compiled workflow.Problems
+	if errors.As(err, &compiled) || len(ps) > 0 {
+		return nil, &InvalidError{Revision: revision, Problems: append(ps, compiled...)}
 	}
 	if err != nil {
 		return nil, err
@@ -289,23 +316,59 @@ func (r *Runner) prepare(ctx context.Context, workflowID string, revision int, i
 	return p, nil
 }
 
-// begin takes a slot and records the run as running.
+// traced is ctx with a trace: the caller's, or one the run starts.
+func traced(ctx context.Context) context.Context {
+	if _, ok := trace.From(ctx); ok {
+		return ctx
+	}
+	return trace.With(ctx, trace.New())
+}
+
+// begin takes a slot, one of the workflow's share, and records the run as
+// running, in its trace; unless the trace has gone round too often.
 func (r *Runner) begin(ctx context.Context, workflowID string, revision int, trigger string, input json.RawMessage) (store.Run, error) {
+	t, _ := trace.From(ctx)
+	if t.Hops >= trace.MaxHops {
+		return store.Run{}, ErrLoop
+	}
 	if r.stopping.Err() != nil {
 		return store.Run{}, ErrBusy
+	}
+	if !r.take(workflowID) {
+		return store.Run{}, ErrWorkflowBusy
 	}
 	select {
 	case r.slots <- struct{}{}:
 	default:
+		r.leave(workflowID)
 		return store.Run{}, ErrBusy
 	}
-	run, err := r.store.StartRun(ctx, workflowID, revision, trigger, input)
+	run, err := r.store.StartRun(ctx, workflowID, revision, trigger, t.ID, input)
 	if err != nil {
 		<-r.slots
+		r.leave(workflowID)
 		return store.Run{}, err
 	}
 	r.events.open(run.ID)
 	return run, nil
+}
+
+// take counts a run of the workflow in, unless it has its share already.
+func (r *Runner) take(workflowID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.running[workflowID] >= r.share {
+		return false
+	}
+	r.running[workflowID]++
+	return true
+}
+
+// leave counts a run of the workflow out.
+func (r *Runner) leave(workflowID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.running[workflowID]--
 }
 
 // writeTimeout bounds each write that records a run, including the wait
@@ -319,7 +382,10 @@ const unhandledTimeout = 5 * time.Second
 // execute runs p and records it: each node as it ends, through the writer,
 // then the run. It frees the run's slot once the run is recorded.
 func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Program, run store.Run) Outcome {
-	defer func() { <-r.slots }()
+	defer func() {
+		<-r.slots
+		r.leave(run.WorkflowID)
+	}()
 	// What a cancelled run did is still recorded.
 	rec := context.WithoutCancel(ctx)
 

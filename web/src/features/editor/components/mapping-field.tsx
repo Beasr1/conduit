@@ -22,8 +22,9 @@ type Preview = components["schemas"]["Preview"];
 // as it's typed; then the result. A step's request body, a transform's
 // value, a connection's condition and the workflow's output are each
 // written in one. reads picks what of the preview it reads, its reads but
-// for a step's Unhandled body. What the expression is for is a hint beside
-// its label (plan 13); a connection's input starts folded.
+// for a step's Unhandled body, and source names it and says what it is when
+// it isn't the run's input. What the expression is for is a hint beside its
+// label (plan 13); a connection's input starts folded.
 export function MappingField({
   id,
   label,
@@ -36,6 +37,7 @@ export function MappingField({
   open,
   result,
   reads = (p) => p.reads,
+  source,
   folded = false,
 }: {
   id: string;
@@ -53,6 +55,7 @@ export function MappingField({
   // What it makes of that, given the preview and the draft previewed.
   result: (preview: Preview, of: Definition) => ReactNode;
   reads?: (preview: Preview) => unknown;
+  source?: Source;
   folded?: boolean;
 }) {
   const [text, setText] = useState(initial);
@@ -89,6 +92,7 @@ export function MappingField({
         open={open}
         onPick={insert}
         reads={reads}
+        source={source}
         folded={folded}
       />
       <Field data-invalid={problems.length > 0}>
@@ -121,18 +125,26 @@ export function MappingField({
   );
 }
 
+// Source is what an expression reads when it isn't the run's input: its
+// name, and what it is.
+export interface Source {
+  title: string;
+  about: ReactNode;
+}
+
 // Reads is what an expression reads, simulated over the samples: the run's
 // input, and what the steps before it got back, as a tree whose fields
 // give their path, which goes into what into names. The steps open names
 // start unfolded. A step a run may come without, or that may answer more
 // than one way, is tagged so, and the hint says what to check. Folded, it
-// waits to be opened.
+// waits to be opened. Reading something else, source names it.
 export function Reads({
   into,
   preview,
   open,
   onPick,
   reads = (p) => p.reads,
+  source,
   folded = false,
 }: {
   into: string;
@@ -140,8 +152,10 @@ export function Reads({
   open: (of: Definition) => string[];
   onPick: (path: string) => void;
   reads?: (preview: Preview) => unknown;
+  source?: Source;
   folded?: boolean;
 }) {
+  const title = source?.title ?? "Input";
   const body = (
     <>
       {preview.isPending ? (
@@ -173,19 +187,24 @@ export function Reads({
   if (folded)
     return (
       <details className="flex flex-col gap-1.5 text-sm">
-        <summary className="cursor-pointer font-medium">Input</summary>
+        <summary className="cursor-pointer font-medium">{title}</summary>
         <div className="mt-1.5 flex flex-col gap-1.5">{body}</div>
       </details>
     );
   return (
     <section className="flex flex-col gap-1.5 text-sm">
       <div className="flex items-center gap-1">
-        <h3 className="font-medium">Input</h3>
-        <Hint about="Input">
-          The run&apos;s input, and what the steps before got back. Pick a field
-          to put its path in {into}. A step tagged conditional may not be there,
-          so check it with <span className="font-mono">$exists</span>; one
-          tagged with its responses may have answered any of them.
+        <h3 className="font-medium">{title}</h3>
+        <Hint about={title}>
+          {source?.about ?? (
+            <>
+              The run&apos;s input, and what the steps before got back. Pick a
+              field to put its path in {into}. A step tagged conditional may not
+              be there, so check it with{" "}
+              <span className="font-mono">$exists</span>; one tagged with its
+              responses may have answered any of them.
+            </>
+          )}
         </Hint>
       </div>
       {body}

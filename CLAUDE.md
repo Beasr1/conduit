@@ -8,8 +8,12 @@ with JSONata. A Go engine runs it, fanning out in parallel.
 editor: Publish waits until every way a run can go reaches an answer and
 every step's failures are decided, every error is answered in one shape,
 the response picks its answer top to bottom, and the editor says only what
-a field is, with a short tour and one-line hints. Next: your call between
-plan 11, the visual design, and plan 07.**
+a field is, with a short tour and one-line hints. Plan 06's loop guard is
+built too: a workflow calling itself is refused after 8 hops. Plan 07's
+upstreams are being built: a library of them, each save a version that
+never changes, which a step uses at a pinned version, edited in place
+from the step or on the upstream's own page, and Publish takes only steps
+that use one; workflows as steps come next.**
 The web app signs in with a session cookie, which sign-out or 30 minutes
 unused ends, lists workflows and creates them, and edits, checks, saves
 and publishes one in graph mode, previewing what each step reads and sends
@@ -18,7 +22,10 @@ with an input, followed live on the canvas. A step is drawn as its request
 and a block per response, and a click opens that part, under two rows of
 tabs. Each answer on the response card takes lines from any number of
 steps, and a run gives the first answer, top to bottom, that one reached;
-Publish finds a line an answer above always beats. A line from a step's
+Publish finds a line an answer above always beats. Every run is in a W3C
+trace, its caller's or its own, and its calls carry it on; a call 8 hops
+in, a workflow calling itself, is refused, and one workflow may have a
+quarter of the server's runs at once (plan 06). A line from a step's
 Unhandled into an answer is drawn only while picked, and the Unhandled
 names the answer. A transform's cases are its exits, a tab each with its
 condition, JSONata and status: the first that holds answers as an HTTP
@@ -32,10 +39,17 @@ for them all too, and runs if every line marked required came and, with
 none marked, any did, its expression making its value from what did. Its
 preview is a run by each line into it, over what those runs read, merged,
 and every Input tags a step a run may come without, or that may answer
-more than one way. A run records the lines each step's answer took. What
-was built, and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
-13-minimal-editor.md and 14-the-response-picks.md; the bigger picture is
-docs/plans/README.md.
+more than one way. A run records the lines each step's answer took. An
+Upstreams page beside Workflows is the library: an upstream is one API
+call and how it's handled, with parameters its request reads. A step that
+uses one gives the parameters values, its request and responses the
+upstream's version's, is offered a newer version, and can edit the
+upstream in place, saving its next version. Add HTTP step makes a new
+upstream from a call; a step with a request of its own, from before,
+still runs, Publish refuses it, and Save as upstream moves it to the
+library. What was built, and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
+13-minimal-editor.md, 14-the-response-picks.md, 06-hardening.md and
+07-tests-and-catalogue.md; the bigger picture is docs/plans/README.md.
 
 ## Read before working
 
@@ -67,8 +81,8 @@ docs/plans/README.md.
 ## Layout
 
 - `server/`: Go module. `cmd/conduit`, plus `internal/` packages `config`,
-  `workflow`, `engine`, `transform`, `upstream`, `store`, `runner` and
-  `httpapi`; `migrations/` holds the goose SQL.
+  `workflow`, `engine`, `transform`, `upstream`, `trace`, `store`, `runner`
+  and `httpapi`; `migrations/` holds the goose SQL.
 - `web/`: React app.
 - `schema/openapi.yaml`: source of truth for API types on both sides.
 - `schema/workflow.yaml`: the workflow definition; the Go types in
@@ -90,7 +104,7 @@ just dev-server     API server on http://127.0.0.1:8080, after db-up and migrate
 just dev-web        web app on http://127.0.0.1:5173; /api is proxied to the server
 just upstream       the test upstream on http://127.0.0.1:8090, to try runs against
 just check          the gate: format, lint, race tests, coverage floors, typecheck, the browser test on a build, stale generated code
-just e2e            the browser test: plan 04's Done flow in Chromium, against its own database, server and test upstream
+just e2e            the browser tests: plan 04's Done flow and plan 07's library, in Chromium, against their own database, server and test upstream
 just fmt            apply formatting: gofumpt + goimports, Prettier
 just test           Go and web tests
 just gen            regenerate the HTTP layer, the workflow types and web/src/gen from schema/
@@ -126,7 +140,11 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`, and
   it runs beside `just dev`; Playwright starts and stops the pieces. A
   `.spec.ts` in `web/e2e` is Playwright's, and Vitest skips it.
 - All outbound HTTP goes through `internal/upstream`, which applies the
-  SSRF guard, timeouts and size caps. Never use `http.DefaultClient`.
+  SSRF guard, timeouts and size caps, and passes the run's W3C trace on,
+  one hop further. Never use `http.DefaultClient`.
+- A call 8 hops into a trace is refused with 508, and a workflow may have
+  a quarter of `CONDUIT_MAX_RUNS` in progress (plan 06). A test that
+  starts many runs of one workflow needs a cap that allows them.
 - JSONata is untrusted user code. Evaluate it only through
   `internal/transform`, with guardrails on.
 - Everything the UI does goes through `schema/openapi.yaml`; no UI-only

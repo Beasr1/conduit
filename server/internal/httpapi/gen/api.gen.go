@@ -187,6 +187,13 @@ func (e RunSummaryTrigger) Valid() bool {
 	}
 }
 
+// CreateUpstream defines model for CreateUpstream.
+type CreateUpstream struct {
+	// Definition A saved API endpoint and how it's handled, one version of it (plan 07). Every save makes a new version, which never changes, and a step that uses the upstream pins one. Its templates and body read its parameters by name, {{ user_id }}, and each step that uses it gives them values.
+	Definition externalRef0.Upstream `json:"definition"`
+	Name       string                `json:"name"`
+}
+
 // CreateWorkflow defines model for CreateWorkflow.
 type CreateWorkflow struct {
 	// Definition A workflow. A node runs once its parents have finished, an http node if every edge into it was taken, and a transform node if every required one was and, with none required, any was. Otherwise it's skipped.
@@ -297,6 +304,9 @@ type Preview struct {
 	// Outcomes For a step, or a connection's source, what each step before it may have done in a run that reaches it, by id, worked out from the edges whatever the samples. Absent when it never runs, or the edges have a cycle.
 	Outcomes map[string]StepOutcome `json:"outcomes,omitempty,omitzero"`
 
+	// Parameters An http step that uses an upstream, the values its parameters take, by name, which its request reads. One whose value fails is left out, as the problems say.
+	Parameters json.RawMessage `json:"parameters,omitempty,omitzero"`
+
 	// Problems What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
 	Problems []ProblemError `json:"problems"`
 
@@ -329,6 +339,9 @@ type PreviewRequest struct {
 
 	// Node The step to preview, by id. Absent, with no edge, means the workflow's output.
 	Node string `json:"node,omitempty,omitzero"`
+
+	// Upstreams Unsaved versions of the upstreams steps use, by the step's id, which the preview uses in place of the version each pins, to show what an upstream being edited would do (plan 07).
+	Upstreams map[string]externalRef0.Upstream `json:"upstreams,omitempty,omitzero"`
 }
 
 // Problem defines model for Problem.
@@ -433,6 +446,9 @@ type Run struct {
 	StartedAt       time.Time       `json:"started_at"`
 	Status          RunStatus       `json:"status"`
 
+	// TraceID The W3C trace the run belongs to, 32 lowercase hex digits; the caller's, when the call that started it carried one. Runs that call each other through /serve share it. Absent for runs from before traces were kept.
+	TraceID string `json:"trace_id,omitempty,omitzero"`
+
 	// Trigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
 	Trigger    RunTrigger `json:"trigger"`
 	WorkflowID string     `json:"workflow_id"`
@@ -492,6 +508,9 @@ type RunSummary struct {
 	StartedAt time.Time        `json:"started_at"`
 	Status    RunSummaryStatus `json:"status"`
 
+	// TraceID The W3C trace the run belongs to, 32 lowercase hex digits; the caller's, when the call that started it carried one. Runs that call each other through /serve share it. Absent for runs from before traces were kept.
+	TraceID string `json:"trace_id,omitempty,omitzero"`
+
 	// Trigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
 	Trigger    RunSummaryTrigger `json:"trigger"`
 	WorkflowID string            `json:"workflow_id"`
@@ -534,6 +553,54 @@ type UnhandledPreview struct {
 
 	// Reads What the body reads, the step's own made-up failure among it.
 	Reads json.RawMessage `json:"reads"`
+}
+
+// UpstreamList defines model for UpstreamList.
+type UpstreamList struct {
+	// Next Pass as `before` for the next page. Absent on the last page.
+	Next      string            `json:"next,omitempty,omitzero"`
+	Upstreams []UpstreamSummary `json:"upstreams"`
+}
+
+// UpstreamSummary defines model for UpstreamSummary.
+type UpstreamSummary struct {
+	CreatedAt     time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	LatestVersion int       `json:"latest_version"`
+
+	// Name Unique in the library.
+	Name string `json:"name"`
+}
+
+// UpstreamUse defines model for UpstreamUse.
+type UpstreamUse struct {
+	Name string `json:"name"`
+
+	// Published Whether that revision is the one the workflow serves.
+	Published bool `json:"published"`
+
+	// Revision The workflow's latest revision, which uses the upstream.
+	Revision int `json:"revision"`
+
+	// Versions The versions its steps pin, oldest first.
+	Versions   []int  `json:"versions"`
+	WorkflowID string `json:"workflow_id"`
+}
+
+// UpstreamUsers defines model for UpstreamUsers.
+type UpstreamUsers struct {
+	Workflows []UpstreamUse `json:"workflows"`
+}
+
+// UpstreamVersion defines model for UpstreamVersion.
+type UpstreamVersion struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Definition A saved API endpoint and how it's handled, one version of it (plan 07). Every save makes a new version, which never changes, and a step that uses the upstream pins one. Its templates and body read its parameters by name, {{ user_id }}, and each step that uses it gives them values.
+	Definition externalRef0.Upstream `json:"definition"`
+	Provenance Provenance            `json:"provenance"`
+	Upstream   UpstreamSummary       `json:"upstream"`
+	Version    int                   `json:"version"`
 }
 
 // Validation defines model for Validation.
@@ -584,6 +651,9 @@ type WorkflowRevision struct {
 // RunID defines model for RunID.
 type RunID = string
 
+// UpstreamID defines model for UpstreamID.
+type UpstreamID = string
+
 // WorkflowID defines model for WorkflowID.
 type WorkflowID = string
 
@@ -615,6 +685,20 @@ type DeleteSessionParams struct {
 	Session string `form:"__Host-conduit_session,omitempty" json:"__Host-conduit_session,omitempty,omitzero"`
 }
 
+// ListUpstreamsParams defines parameters for ListUpstreams.
+type ListUpstreamsParams struct {
+	Limit int `form:"limit,omitempty" json:"limit,omitempty,omitzero"`
+
+	// Before Return upstreams older than this id, for the next page.
+	Before string `form:"before,omitempty" json:"before,omitempty,omitzero"`
+}
+
+// SaveUpstreamParams defines parameters for SaveUpstream.
+type SaveUpstreamParams struct {
+	// IfMatch The latest version's ETag, such as "3". Without it the save is refused with 428.
+	IfMatch string `json:"If-Match,omitempty,omitzero"`
+}
+
 // ListWorkflowsParams defines parameters for ListWorkflows.
 type ListWorkflowsParams struct {
 	Limit int `form:"limit,omitempty" json:"limit,omitempty,omitzero"`
@@ -637,6 +721,15 @@ type PreviewDefinitionJSONRequestBody = PreviewRequest
 
 // CreateSessionJSONRequestBody defines body for CreateSession for application/json ContentType.
 type CreateSessionJSONRequestBody = SignIn
+
+// CreateUpstreamJSONRequestBody defines body for CreateUpstream for application/json ContentType.
+type CreateUpstreamJSONRequestBody = CreateUpstream
+
+// ValidateUpstreamJSONRequestBody defines body for ValidateUpstream for application/json ContentType.
+type ValidateUpstreamJSONRequestBody = externalRef0.Upstream
+
+// SaveUpstreamJSONRequestBody defines body for SaveUpstream for application/json ContentType.
+type SaveUpstreamJSONRequestBody = externalRef0.Upstream
 
 // ValidateDefinitionJSONRequestBody defines body for ValidateDefinition for application/json ContentType.
 type ValidateDefinitionJSONRequestBody = externalRef0.Definition
@@ -682,6 +775,27 @@ type ServerInterface interface {
 	// CreateSession Sign a browser in
 	// (POST /v1/session)
 	CreateSession(w http.ResponseWriter, r *http.Request)
+	// ListUpstreams List the upstream library, newest first
+	// (GET /v1/upstreams)
+	ListUpstreams(w http.ResponseWriter, r *http.Request, params ListUpstreamsParams)
+	// CreateUpstream Make an upstream; its definition becomes version 1
+	// (POST /v1/upstreams)
+	CreateUpstream(w http.ResponseWriter, r *http.Request)
+	// ValidateUpstream Check an upstream's definition without saving it
+	// (POST /v1/upstreams/validate)
+	ValidateUpstream(w http.ResponseWriter, r *http.Request)
+	// GetUpstream Get an upstream at its latest version
+	// (GET /v1/upstreams/{id})
+	GetUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID)
+	// SaveUpstream Save the next version
+	// (PUT /v1/upstreams/{id})
+	SaveUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID, params SaveUpstreamParams)
+	// ListUpstreamUsers List the workflows whose latest revision uses an upstream, and the versions each pins
+	// (GET /v1/upstreams/{id}/users)
+	ListUpstreamUsers(w http.ResponseWriter, r *http.Request, id UpstreamID)
+	// GetUpstreamVersion Get one version of an upstream
+	// (GET /v1/upstreams/{id}/versions/{version})
+	GetUpstreamVersion(w http.ResponseWriter, r *http.Request, id UpstreamID, version int)
 	// ValidateDefinition Check a definition without saving it
 	// (POST /v1/validate)
 	ValidateDefinition(w http.ResponseWriter, r *http.Request)
@@ -963,6 +1077,217 @@ func (siw *ServerInterfaceWrapper) CreateSession(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateSession(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUpstreams operation middleware
+func (siw *ServerInterfaceWrapper) ListUpstreams(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListUpstreamsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUpstreams(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateUpstream operation middleware
+func (siw *ServerInterfaceWrapper) CreateUpstream(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateUpstream(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ValidateUpstream operation middleware
+func (siw *ServerInterfaceWrapper) ValidateUpstream(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ValidateUpstream(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetUpstream operation middleware
+func (siw *ServerInterfaceWrapper) GetUpstream(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UpstreamID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUpstream(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SaveUpstream operation middleware
+func (siw *ServerInterfaceWrapper) SaveUpstream(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UpstreamID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SaveUpstreamParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = IfMatch
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SaveUpstream(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUpstreamUsers operation middleware
+func (siw *ServerInterfaceWrapper) ListUpstreamUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UpstreamID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUpstreamUsers(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetUpstreamVersion operation middleware
+func (siw *ServerInterfaceWrapper) GetUpstreamVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UpstreamID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "version" -------------
+	var version int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version", r.PathValue("version"), &version, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUpstreamVersion(w, r, id, version)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1369,6 +1694,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/validate", wrapper.ValidateDefinition)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/preview", wrapper.PreviewDefinition)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/runs", wrapper.StartRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams", wrapper.ListUpstreams)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams", wrapper.CreateUpstream)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams/validate", wrapper.ValidateUpstream)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}", wrapper.GetUpstream)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/upstreams/{id}", wrapper.SaveUpstream)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}/users", wrapper.ListUpstreamUsers)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}/versions/{version}", wrapper.GetUpstreamVersion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs", wrapper.ListRuns)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}", wrapper.GetRun)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}/events", wrapper.StreamRunEvents)
@@ -1568,6 +1900,20 @@ func (response ServeWorkflow504ApplicationProblemPlusJSONResponse) VisitServeWor
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(504)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeWorkflow508ApplicationProblemPlusJSONResponse Problem
+
+func (response ServeWorkflow508ApplicationProblemPlusJSONResponse) VisitServeWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(508)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1905,6 +2251,427 @@ func (response CreateSession422ApplicationProblemPlusJSONResponse) VisitCreateSe
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUpstreamsRequestObject struct {
+	Params ListUpstreamsParams
+}
+
+type ListUpstreamsResponseObject interface {
+	VisitListUpstreamsResponse(w http.ResponseWriter) error
+}
+
+type ListUpstreams200JSONResponse UpstreamList
+
+func (response ListUpstreams200JSONResponse) VisitListUpstreamsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUpstreams401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListUpstreams401ApplicationProblemPlusJSONResponse) VisitListUpstreamsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUpstreamRequestObject struct {
+	Body *CreateUpstreamJSONRequestBody
+}
+
+type CreateUpstreamResponseObject interface {
+	VisitCreateUpstreamResponse(w http.ResponseWriter) error
+}
+
+type CreateUpstream201ResponseHeaders struct {
+	ETag     string
+	Location string
+}
+
+type CreateUpstream201JSONResponse struct {
+	Body    UpstreamVersion
+	Headers CreateUpstream201ResponseHeaders
+}
+
+func (response CreateUpstream201JSONResponse) VisitCreateUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.Header().Set("Location", fmt.Sprint(response.Headers.Location))
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUpstream401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CreateUpstream401ApplicationProblemPlusJSONResponse) VisitCreateUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUpstream409ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateUpstream409ApplicationProblemPlusJSONResponse) VisitCreateUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUpstream422ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateUpstream422ApplicationProblemPlusJSONResponse) VisitCreateUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateUpstreamRequestObject struct {
+	Body *ValidateUpstreamJSONRequestBody
+}
+
+type ValidateUpstreamResponseObject interface {
+	VisitValidateUpstreamResponse(w http.ResponseWriter) error
+}
+
+type ValidateUpstream200JSONResponse Validation
+
+func (response ValidateUpstream200JSONResponse) VisitValidateUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateUpstream401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ValidateUpstream401ApplicationProblemPlusJSONResponse) VisitValidateUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUpstreamRequestObject struct {
+	ID UpstreamID `json:"id"`
+}
+
+type GetUpstreamResponseObject interface {
+	VisitGetUpstreamResponse(w http.ResponseWriter) error
+}
+
+type GetUpstream200ResponseHeaders struct {
+	ETag string
+}
+
+type GetUpstream200JSONResponse struct {
+	Body    UpstreamVersion
+	Headers GetUpstream200ResponseHeaders
+}
+
+func (response GetUpstream200JSONResponse) VisitGetUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUpstream401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetUpstream401ApplicationProblemPlusJSONResponse) VisitGetUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUpstream404ApplicationProblemPlusJSONResponse Problem
+
+func (response GetUpstream404ApplicationProblemPlusJSONResponse) VisitGetUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveUpstreamRequestObject struct {
+	ID     UpstreamID `json:"id"`
+	Params SaveUpstreamParams
+	Body   *SaveUpstreamJSONRequestBody
+}
+
+type SaveUpstreamResponseObject interface {
+	VisitSaveUpstreamResponse(w http.ResponseWriter) error
+}
+
+type SaveUpstream200ResponseHeaders struct {
+	ETag string
+}
+
+type SaveUpstream200JSONResponse struct {
+	Body    UpstreamVersion
+	Headers SaveUpstream200ResponseHeaders
+}
+
+func (response SaveUpstream200JSONResponse) VisitSaveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", fmt.Sprint(response.Headers.ETag))
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveUpstream401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response SaveUpstream401ApplicationProblemPlusJSONResponse) VisitSaveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveUpstream404ApplicationProblemPlusJSONResponse Problem
+
+func (response SaveUpstream404ApplicationProblemPlusJSONResponse) VisitSaveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveUpstream412ApplicationProblemPlusJSONResponse Problem
+
+func (response SaveUpstream412ApplicationProblemPlusJSONResponse) VisitSaveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveUpstream422ApplicationProblemPlusJSONResponse Problem
+
+func (response SaveUpstream422ApplicationProblemPlusJSONResponse) VisitSaveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveUpstream428ApplicationProblemPlusJSONResponse Problem
+
+func (response SaveUpstream428ApplicationProblemPlusJSONResponse) VisitSaveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(428)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUpstreamUsersRequestObject struct {
+	ID UpstreamID `json:"id"`
+}
+
+type ListUpstreamUsersResponseObject interface {
+	VisitListUpstreamUsersResponse(w http.ResponseWriter) error
+}
+
+type ListUpstreamUsers200JSONResponse UpstreamUsers
+
+func (response ListUpstreamUsers200JSONResponse) VisitListUpstreamUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUpstreamUsers401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListUpstreamUsers401ApplicationProblemPlusJSONResponse) VisitListUpstreamUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUpstreamUsers404ApplicationProblemPlusJSONResponse Problem
+
+func (response ListUpstreamUsers404ApplicationProblemPlusJSONResponse) VisitListUpstreamUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUpstreamVersionRequestObject struct {
+	ID      UpstreamID `json:"id"`
+	Version int        `json:"version"`
+}
+
+type GetUpstreamVersionResponseObject interface {
+	VisitGetUpstreamVersionResponse(w http.ResponseWriter) error
+}
+
+type GetUpstreamVersion200JSONResponse UpstreamVersion
+
+func (response GetUpstreamVersion200JSONResponse) VisitGetUpstreamVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUpstreamVersion401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response GetUpstreamVersion401ApplicationProblemPlusJSONResponse) VisitGetUpstreamVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUpstreamVersion404ApplicationProblemPlusJSONResponse Problem
+
+func (response GetUpstreamVersion404ApplicationProblemPlusJSONResponse) VisitGetUpstreamVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2517,6 +3284,20 @@ func (response StartRun503ApplicationProblemPlusJSONResponse) VisitStartRunRespo
 	return err
 }
 
+type StartRun508ApplicationProblemPlusJSONResponse Problem
+
+func (response StartRun508ApplicationProblemPlusJSONResponse) VisitStartRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(508)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetHealthz Report that the process is up
@@ -2546,6 +3327,27 @@ type StrictServerInterface interface {
 	// CreateSession Sign a browser in
 	// (POST /v1/session)
 	CreateSession(ctx context.Context, request CreateSessionRequestObject) (CreateSessionResponseObject, error)
+	// ListUpstreams List the upstream library, newest first
+	// (GET /v1/upstreams)
+	ListUpstreams(ctx context.Context, request ListUpstreamsRequestObject) (ListUpstreamsResponseObject, error)
+	// CreateUpstream Make an upstream; its definition becomes version 1
+	// (POST /v1/upstreams)
+	CreateUpstream(ctx context.Context, request CreateUpstreamRequestObject) (CreateUpstreamResponseObject, error)
+	// ValidateUpstream Check an upstream's definition without saving it
+	// (POST /v1/upstreams/validate)
+	ValidateUpstream(ctx context.Context, request ValidateUpstreamRequestObject) (ValidateUpstreamResponseObject, error)
+	// GetUpstream Get an upstream at its latest version
+	// (GET /v1/upstreams/{id})
+	GetUpstream(ctx context.Context, request GetUpstreamRequestObject) (GetUpstreamResponseObject, error)
+	// SaveUpstream Save the next version
+	// (PUT /v1/upstreams/{id})
+	SaveUpstream(ctx context.Context, request SaveUpstreamRequestObject) (SaveUpstreamResponseObject, error)
+	// ListUpstreamUsers List the workflows whose latest revision uses an upstream, and the versions each pins
+	// (GET /v1/upstreams/{id}/users)
+	ListUpstreamUsers(ctx context.Context, request ListUpstreamUsersRequestObject) (ListUpstreamUsersResponseObject, error)
+	// GetUpstreamVersion Get one version of an upstream
+	// (GET /v1/upstreams/{id}/versions/{version})
+	GetUpstreamVersion(ctx context.Context, request GetUpstreamVersionRequestObject) (GetUpstreamVersionResponseObject, error)
 	// ValidateDefinition Check a definition without saving it
 	// (POST /v1/validate)
 	ValidateDefinition(ctx context.Context, request ValidateDefinitionRequestObject) (ValidateDefinitionResponseObject, error)
@@ -2858,6 +3660,207 @@ func (sh *strictHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateSessionResponseObject); ok {
 		if err := validResponse.VisitCreateSessionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUpstreams operation middleware
+func (sh *strictHandler) ListUpstreams(w http.ResponseWriter, r *http.Request, params ListUpstreamsParams) {
+	var request ListUpstreamsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUpstreams(ctx, request.(ListUpstreamsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUpstreams")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUpstreamsResponseObject); ok {
+		if err := validResponse.VisitListUpstreamsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateUpstream operation middleware
+func (sh *strictHandler) CreateUpstream(w http.ResponseWriter, r *http.Request) {
+	var request CreateUpstreamRequestObject
+
+	var body CreateUpstreamJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateUpstream(ctx, request.(CreateUpstreamRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateUpstream")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateUpstreamResponseObject); ok {
+		if err := validResponse.VisitCreateUpstreamResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ValidateUpstream operation middleware
+func (sh *strictHandler) ValidateUpstream(w http.ResponseWriter, r *http.Request) {
+	var request ValidateUpstreamRequestObject
+
+	var body ValidateUpstreamJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ValidateUpstream(ctx, request.(ValidateUpstreamRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ValidateUpstream")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ValidateUpstreamResponseObject); ok {
+		if err := validResponse.VisitValidateUpstreamResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetUpstream operation middleware
+func (sh *strictHandler) GetUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID) {
+	var request GetUpstreamRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUpstream(ctx, request.(GetUpstreamRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUpstream")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUpstreamResponseObject); ok {
+		if err := validResponse.VisitGetUpstreamResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SaveUpstream operation middleware
+func (sh *strictHandler) SaveUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID, params SaveUpstreamParams) {
+	var request SaveUpstreamRequestObject
+
+	request.ID = id
+	request.Params = params
+
+	var body SaveUpstreamJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SaveUpstream(ctx, request.(SaveUpstreamRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SaveUpstream")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SaveUpstreamResponseObject); ok {
+		if err := validResponse.VisitSaveUpstreamResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUpstreamUsers operation middleware
+func (sh *strictHandler) ListUpstreamUsers(w http.ResponseWriter, r *http.Request, id UpstreamID) {
+	var request ListUpstreamUsersRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUpstreamUsers(ctx, request.(ListUpstreamUsersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUpstreamUsers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUpstreamUsersResponseObject); ok {
+		if err := validResponse.VisitListUpstreamUsersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetUpstreamVersion operation middleware
+func (sh *strictHandler) GetUpstreamVersion(w http.ResponseWriter, r *http.Request, id UpstreamID, version int) {
+	var request GetUpstreamVersionRequestObject
+
+	request.ID = id
+	request.Version = version
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUpstreamVersion(ctx, request.(GetUpstreamVersionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUpstreamVersion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUpstreamVersionResponseObject); ok {
+		if err := validResponse.VisitGetUpstreamVersionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

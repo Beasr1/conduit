@@ -236,6 +236,20 @@ the API is `/api` on the page's own origin.
   Blocks and Request, so a screen reader tells them apart.
 - A step's Unhandled has two places for problems: `unhandled`, what's
   chosen for its failures (plan 12), and `unhandled_body`, its body.
+- A step that uses an upstream (plan 07) is filled from its version as the
+  editor opens (`fill`) and stripped before anything is sent (`strip`), so
+  it's drawn and edited as any HTTP step while the server gets only `uses`
+  and `with`. Its request and responses are locked (`isLocked`) unless the
+  upstream is being edited in place: a disabled `fieldset` round the tab
+  panels, never round a tab list, as HTML disables every button in one,
+  tabs too (sources.md). Its body reads its parameters, the preview's
+  `parameters`, not the run's input.
+- Add HTTP step always makes a step that uses an upstream
+  (`upstream-choice.tsx`): one from the library, or a new one made from a
+  call whose URL reads the run, each placeholder a parameter the step gives
+  what it read (`asUpstream`, as Save as upstream does). A step with a
+  request of its own, saved before, shows Publish's `own_request` by Save
+  as upstream.
 - A field is labelled, not explained. What it's for is a `Hint`
   (`components/hint.tsx`) beside its label: a Base UI Popover with
   `openOnHover`, which opens on hover or a press. Not a Tooltip, which
@@ -269,6 +283,13 @@ the API is `/api` on the page's own origin.
   by its tab, so to reach a field on a hidden tab by label alone, as a
   test of what's kept across tabs does, it takes `selector: "input,
   textarea"`.
+- jsdom let a test click a tab that a disabled `fieldset` disabled, which
+  Chromium refuses, so a test of something locked checks `:disabled`,
+  which jsdom works out from the fieldset, and Chromium sees the rest.
+- Base UI's select takes a click that no press came before only on the
+  option highlighted, so a test picking an option presses it
+  (`pointerDown`, then `click`), as a mouse does: options that arrive
+  after it opens move what's highlighted.
 - A test fails on any console warning or error it logs
   (`src/test/console.ts`). That's how React, React Router and Base UI
   report misuse. Vitest would only print it, and hides passing tests'
@@ -286,4 +307,11 @@ the API is `/api` on the page's own origin.
   narrows the canvas, and reads a card's run line as it streams ("200")
   and once recorded ("200, 12 ms"). On its first visit it goes through
   the tour, checking a stop sits beside its part, which jsdom can't show,
-  and it sets Fail the run on each step before it publishes (plan 12).
+  and it decides each step's failures before it publishes (plan 12). A
+  second test covers plan 07's library (`web/e2e/upstreams.spec.ts`): it
+  makes an upstream, uses it from a step, runs and publishes it, edits it
+  in place, and saves a step's request as one. Their steps, such as
+  opening a panel or joining a block, are in `web/e2e/editor.ts`. A
+  button is named exactly where another's name holds it, Save beside Save
+  as upstream, as Playwright otherwise matches a name as a substring
+  (sources.md).

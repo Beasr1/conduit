@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -47,7 +48,7 @@ func (a *api) CreateWorkflow(ctx context.Context, req gen.CreateWorkflowRequestO
 	if err != nil {
 		return nil, err
 	}
-	rev, err := revisionOut(r)
+	rev, err := a.revisionOut(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +86,7 @@ func (a *api) GetWorkflow(ctx context.Context, req gen.GetWorkflowRequestObject)
 	if err != nil {
 		return nil, err
 	}
-	rev, err := revisionOut(r)
+	rev, err := a.revisionOut(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +118,7 @@ func (a *api) SaveDraft(ctx context.Context, req gen.SaveDraftRequestObject) (ge
 	if err != nil {
 		return nil, err
 	}
-	rev, err := revisionOut(r)
+	rev, err := a.revisionOut(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +142,7 @@ func (a *api) GetRevision(ctx context.Context, req gen.GetRevisionRequestObject)
 	if err != nil {
 		return nil, err
 	}
-	rev, err := revisionOut(r)
+	rev, err := a.revisionOut(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +154,7 @@ func (a *api) PublishWorkflow(ctx context.Context, req gen.PublishWorkflowReques
 	if err != nil {
 		return nil, err
 	}
-	rev, err := revisionOut(r)
+	rev, err := a.revisionOut(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -167,20 +168,38 @@ func (a *api) PublishWorkflow(ctx context.Context, req gen.PublishWorkflowReques
 	return gen.PublishWorkflow200JSONResponse(workflowOut(w)), nil
 }
 
-func (*api) ValidateDefinition(_ context.Context, req gen.ValidateDefinitionRequestObject) (gen.ValidateDefinitionResponseObject, error) {
-	return gen.ValidateDefinition200JSONResponse{Problems: problemsOf(req.Body)}, nil
+func (a *api) ValidateDefinition(ctx context.Context, req gen.ValidateDefinitionRequestObject) (gen.ValidateDefinitionResponseObject, error) {
+	ps, err := a.problemsOf(ctx, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return gen.ValidateDefinition200JSONResponse{Problems: ps}, nil
 }
 
 // previewTimeout bounds a whole preview. Each expression on the way has
 // its own guardrails, and a definition can hold a lot of them.
 const previewTimeout = 3 * time.Second
 
-func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequestObject) (gen.PreviewDefinitionResponseObject, error) {
+func (a *api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequestObject) (gen.PreviewDefinitionResponseObject, error) {
 	ctx, cancel := context.WithTimeout(ctx, previewTimeout)
 	defer cancel()
 	b := req.Body
+	// Filled from the upstreams its nodes use, as a run would be (plan 07).
+	vs, err := a.store.Versions(ctx, &b.Definition)
+	if err != nil {
+		return nil, err
+	}
+	// An unsaved version stands in for the one a step pins, to show what an
+	// edit to its upstream would do. The step is pointed at it alone, so
+	// another step using the upstream keeps its own version.
+	for i, n := range b.Definition.Nodes {
+		if u, ok := b.Upstreams[n.ID]; ok && n.Uses != nil {
+			unsaved := workflow.Uses{Upstream: "unsaved " + n.ID, Version: n.Uses.Version}
+			b.Definition.Nodes[i].Uses, vs[unsaved] = &unsaved, &u
+		}
+	}
+	rd, _ := workflow.Resolve(&b.Definition, vs)
 	var pv *engine.Preview
-	var err error
 	switch {
 	case b.Edge != nil && b.Node != "":
 		return nil, &problem{
@@ -188,9 +207,9 @@ func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequ
 			errors: []gen.ProblemError{{Pointer: "/edge", Code: "not_allowed", Detail: "a preview is of a node or an edge, not both"}},
 		}
 	case b.Edge != nil:
-		pv, err = engine.SimulateEdge(ctx, &b.Definition, *b.Edge)
+		pv, err = engine.SimulateEdge(ctx, rd, *b.Edge)
 	default:
-		pv, err = engine.Simulate(ctx, &b.Definition, b.Node)
+		pv, err = engine.Simulate(ctx, rd, b.Node)
 	}
 	switch {
 	case errors.Is(err, engine.ErrNoSuchNode):
@@ -206,7 +225,10 @@ func (*api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRequ
 	case err != nil:
 		return nil, err
 	}
-	out := gen.PreviewDefinition200JSONResponse{Reads: pv.Reads, Gives: pv.Gives, Taken: pv.Taken, Skipped: pv.Skipped, Problems: problemErrors(pv.Problems)}
+	out := gen.PreviewDefinition200JSONResponse{
+		Reads: pv.Reads, Parameters: pv.Parameters, Gives: pv.Gives, Taken: pv.Taken, Skipped: pv.Skipped,
+		Problems: problemErrors(pv.Problems),
+	}
 	if u := pv.Unhandled; u != nil {
 		out.Unhandled = gen.UnhandledPreview{Reads: u.Reads, Gives: u.Gives}
 	}
@@ -244,15 +266,22 @@ func pageLimit(limit int) (int, error) {
 	return limit, nil
 }
 
-// problemsOf is everything engine.Compile finds wrong with d, and what
-// workflow.ReadyToPublish says Publish needs besides.
-func problemsOf(d *workflow.Definition) []gen.ProblemError {
-	_, err := engine.Compile(d)
-	var ps workflow.Problems
-	errors.As(err, &ps)
+// problemsOf is everything wrong with d: how its nodes use upstreams, as
+// workflow.Resolve says (plan 07), then what engine.Compile finds in it,
+// filled from those, and what workflow.ReadyToPublish says Publish needs
+// besides.
+func (a *api) problemsOf(ctx context.Context, d *workflow.Definition) ([]gen.ProblemError, error) {
+	vs, err := a.store.Versions(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	rd, ps := workflow.Resolve(d, vs)
+	_, err = engine.Compile(rd)
+	var compiled workflow.Problems
+	errors.As(err, &compiled)
 	// What Publish needs besides what a run does (plan 12): listed with the
 	// rest, so a save and a check say them, and Publish refuses them.
-	return problemErrors(append(ps, workflow.ReadyToPublish(d)...))
+	return problemErrors(slices.Concat(ps, compiled, workflow.ReadyToPublish(rd))), nil
 }
 
 // problemErrors is ps as the API sends them: [] rather than null when there
@@ -284,16 +313,20 @@ func workflowOut(w store.Workflow) gen.Workflow {
 	return out
 }
 
-func revisionOut(r store.Revision) (gen.Revision, error) {
+func (a *api) revisionOut(ctx context.Context, r store.Revision) (gen.Revision, error) {
 	var d workflow.Definition
 	if err := json.Unmarshal(r.Definition, &d); err != nil {
 		return gen.Revision{}, fmt.Errorf("decode revision %d of %s: %w", r.Revision, r.WorkflowID, err)
+	}
+	ps, err := a.problemsOf(ctx, &d)
+	if err != nil {
+		return gen.Revision{}, err
 	}
 	return gen.Revision{
 		WorkflowID: r.WorkflowID,
 		Revision:   r.Revision,
 		Definition: d,
-		Problems:   problemsOf(&d),
+		Problems:   ps,
 		Provenance: provenanceOut(r.Provenance),
 		CreatedAt:  r.CreatedAt.UTC(),
 	}, nil

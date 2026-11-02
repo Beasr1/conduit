@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { PAUSE_MS, useStill } from "@/features/editor/hooks/use-still";
 import { useEditor } from "@/features/editor/store";
+import { strip, upstreamOf } from "@/features/editor/upstreams";
 import type { components } from "@/gen/schema";
 import { api, call } from "@/lib/api";
 
@@ -22,7 +23,14 @@ export const previewKeys = {
 // preview stays while the next is on its way.
 export function usePreview(of?: { step: number } | { edge: number }) {
   const draft = useEditor((s) => s.draft);
+  const editing = useEditor((s) => s.upstreamEdit);
   const still = useStill(draft, PAUSE_MS);
+  // An upstream being edited in place goes with the draft, so the preview
+  // shows what the edit would do (plan 07).
+  const node = editing && still.nodes.find((n) => n.id === editing.node);
+  const upstreams = node
+    ? { [node.id]: upstreamOf(node, editing.parameters) }
+    : undefined;
   let target: Omit<PreviewRequest, "definition"> | undefined = {};
   if (of && "step" in of) {
     const node = still.nodes[of.step]?.id;
@@ -33,16 +41,19 @@ export function usePreview(of?: { step: number } | { edge: number }) {
       of.edge < (still.edges?.length ?? 0) ? { edge: of.edge } : undefined;
   }
   return useQuery({
-    queryKey: previewKeys.of(
-      still,
-      target?.node ?? (target?.edge === undefined ? "" : `#${target.edge}`),
-    ),
+    queryKey: [
+      ...previewKeys.of(
+        still,
+        target?.node ?? (target?.edge === undefined ? "" : `#${target.edge}`),
+      ),
+      editing?.parameters,
+    ],
     queryFn: async ({ signal }) => ({
       of: still,
       preview: await call(
         (signal) =>
           api.POST("/v1/preview", {
-            body: { definition: still, ...target },
+            body: { definition: strip(still), upstreams, ...target },
             signal,
           }),
         signal,

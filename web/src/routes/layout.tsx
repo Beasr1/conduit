@@ -1,4 +1,4 @@
-import { Link, Outlet } from "react-router";
+import { Link, NavLink, Outlet } from "react-router";
 
 import { HealthBadge } from "@/components/health-badge";
 import { Button } from "@/components/ui/button";
@@ -12,9 +12,26 @@ export function Component() {
     // can fill what's left, as the editor's canvas does.
     <div className="flex h-svh flex-col">
       <header className="flex items-center justify-between gap-4 border-b px-6 py-3">
-        <Link to={routes.workflows()} className="font-heading font-semibold">
-          Conduit
-        </Link>
+        <div className="flex items-center gap-6">
+          <Link to={routes.workflows()} className="font-heading font-semibold">
+            Conduit
+          </Link>
+          {/* The two lists: what's built, and the APIs it calls (plan 07). */}
+          <nav aria-label="Main" className="flex items-center gap-4 text-sm">
+            <NavLink
+              to={routes.workflows()}
+              className="text-muted-foreground underline-offset-4 hover:underline aria-[current=page]:text-foreground"
+            >
+              Workflows
+            </NavLink>
+            <NavLink
+              to={routes.upstreams()}
+              className="text-muted-foreground underline-offset-4 hover:underline aria-[current=page]:text-foreground"
+            >
+              Upstreams
+            </NavLink>
+          </nav>
+        </div>
         <div className="flex items-center gap-3">
           <HealthBadge />
           <Button

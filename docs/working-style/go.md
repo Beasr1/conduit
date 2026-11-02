@@ -24,6 +24,7 @@ server/
     engine/      runs a validated workflow: scheduler, node execution, events
     transform/   JSONata (gnata) behind a small interface, guardrails always on
     upstream/    the only outbound HTTP: SSRF-safe transport, retries, error kinds
+    trace/       W3C trace context: read from a request, passed on by each call, hops counted
     store/       Postgres via pgx; returns domain types, translates driver errors
     runner/      starts and records runs: input checks, the cap, the writer, the event log, shutdown
     httpapi/     handlers, middleware, error mapping, SSE; gen/ is generated

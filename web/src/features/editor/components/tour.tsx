@@ -32,8 +32,8 @@ const STOPS: Stop[] = [
     // Above it, as its responses are on its right.
     at: ".react-flow__node [data-part='request']",
     side: "top",
-    title: "A step's request",
-    text: "Click it to set where the step calls, with its headers, query and body.",
+    title: "A step's call",
+    text: "An HTTP step calls an upstream, an API saved in the library: click it to give the upstream's parameters values, or to edit the upstream.",
   },
   {
     at: ".react-flow__node [data-part='2xx']",

@@ -36,6 +36,10 @@ type Preview struct {
 	Reads json.RawMessage
 	// Sends is an http step's request: every part of it that rendered.
 	Sends *SentRequest
+	// Parameters is an http step that uses an upstream: the values its
+	// parameters take, by name, which its request reads. One whose value
+	// fails is left out, as Problems says.
+	Parameters json.RawMessage
 	// Gives is a transform step's value, or the workflow's output.
 	Gives json.RawMessage
 	// Ways is a transform step with two or more connections into it: what
@@ -666,6 +670,11 @@ func (s *sim) step(pv *Preview, t int) bool {
 	}
 	switch {
 	case n.kind == workflow.NodeKindHTTP && s.d.Nodes[t].Request != nil:
+		if n.bound {
+			// What the request reads; those that fail are its problems,
+			// which request says.
+			pv.Parameters, _ = n.params(s.ctx, doc)
+		}
 		req, errs := n.request(s.ctx, doc, "<run id>:"+n.id)
 		pv.Sends = req
 		for _, e := range errs {

@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HttpStepForm } from "@/features/editor/components/http-step-form";
 import { Marked } from "@/features/editor/components/problem-mark";
 import { StepIdField } from "@/features/editor/components/step-id-field";
+import { SaveAsUpstream } from "@/features/editor/components/save-as-upstream";
 import { RunSent } from "@/features/editor/components/step-run";
 import {
   AddResponse,
@@ -12,13 +13,17 @@ import {
 } from "@/features/editor/components/step-output";
 import { StepUnhandled } from "@/features/editor/components/step-unhandled";
 import { TransformStepForm } from "@/features/editor/components/transform-step-form";
+import {
+  StepParameters,
+  UpstreamLine,
+} from "@/features/editor/components/upstream-step";
 import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
 import {
   type Place,
   REQUEST_FIELDS,
   type StepField,
 } from "@/features/editor/problems";
-import { useEditor } from "@/features/editor/store";
+import { isLocked, useEditor } from "@/features/editor/store";
 
 // Where each kind of step shows its problems: under its fields, or, for a
 // kind the editor doesn't know, in the words that say so. A problem
@@ -26,11 +31,16 @@ import { useEditor } from "@/features/editor/store";
 const fieldsOf: Record<string, ReadonlySet<StepField | undefined>> = {
   http: new Set([
     "id",
+    // A request of its own, which Publish refuses, shows by Save as
+    // upstream.
+    "request",
     ...REQUEST_FIELDS,
     "sample",
     "outputs",
     "unhandled",
     "unhandled_body",
+    "uses",
+    "with",
   ]),
   transform: new Set(["id", "expr", "unhandled", "unhandled_body"]),
 };
@@ -52,6 +62,18 @@ export function StepSettings({ index }: { index: number }) {
       (s.draft.nodes[index]?.outputs ?? []).map((o) => o.status),
     ),
   );
+  // A step that uses an upstream (plan 07) has its request and responses
+  // from it: locked, unless the upstream is being edited in place.
+  const uses = useEditor((s) => s.draft.nodes[index]?.uses !== undefined);
+  const locked = useEditor((s) => isLocked(s, index));
+  // The forms keep what's typed, so a step moved to another version, or an
+  // upstream opened or put away, draws them afresh from the draft.
+  const formKey = useEditor((s) => {
+    const n = s.draft.nodes[index];
+    return n?.uses
+      ? `${n.uses.upstream}@${n.uses.version}:${s.upstreamEdit?.node === n.id}`
+      : "own";
+  });
   const shown = fieldsOf[kind] ?? unknownKind;
   const elsewhere = useProblems(
     (p) => p.on === "step" && p.index === index && !shown.has(p.field),
@@ -62,6 +84,7 @@ export function StepSettings({ index }: { index: number }) {
     <>
       <FieldError errors={asErrors(elsewhere)} />
       <StepIdField key={`id-${index}`} index={index} />
+      {kind === "http" && uses && <UpstreamLine index={index} />}
       {kind === "http" && (
         <Tabs
           key={`http-${index}`}
@@ -76,9 +99,24 @@ export function StepSettings({ index }: { index: number }) {
             activateOnFocus
             className="flex-wrap group-data-horizontal/tabs:h-auto [&>[data-slot=tabs-trigger]]:h-auto"
           >
+            {uses && (
+              <TabsTrigger value="with">
+                Parameters
+                <Marked
+                  where={(p) =>
+                    mine(p) && (p.field === "with" || p.field === "uses")
+                  }
+                />
+              </TabsTrigger>
+            )}
             <TabsTrigger value="request">
               Request
-              <Marked where={(p) => mine(p) && REQUEST_FIELDS.has(p.field)} />
+              <Marked
+                where={(p) =>
+                  mine(p) &&
+                  (REQUEST_FIELDS.has(p.field) || p.field === "request")
+                }
+              />
             </TabsTrigger>
             <TabsTrigger value="2xx">
               2xx
@@ -94,9 +132,11 @@ export function StepSettings({ index }: { index: number }) {
                 <Marked where={(p) => mine(p) && p.output === j} />
               </TabsTrigger>
             ))}
-            <TabsTrigger value="add" aria-label="Add a response">
-              + Response
-            </TabsTrigger>
+            {!locked && (
+              <TabsTrigger value="add" aria-label="Add a response">
+                + Response
+              </TabsTrigger>
+            )}
             <TabsTrigger value="unhandled">
               Unhandled
               <Marked
@@ -109,21 +149,34 @@ export function StepSettings({ index }: { index: number }) {
           </TabsList>
           {/* Each stays mounted while hidden, so what's typed survives a
               switch. */}
+          {uses && (
+            <TabsContent value="with" keepMounted>
+              <StepParameters key={formKey} index={index} />
+            </TabsContent>
+          )}
           <TabsContent value="request" keepMounted>
             <RunSent index={index} />
-            <HttpStepForm index={index} />
+            <HttpStepForm key={formKey} index={index} locked={locked} />
+            {!uses && <SaveAsUpstream index={index} />}
           </TabsContent>
           <TabsContent value="2xx" keepMounted>
-            <StepOutput index={index} />
+            <StepOutput key={formKey} index={index} locked={locked} />
           </TabsContent>
           {statuses.map((status) => (
             <TabsContent key={status} value={String(status)} keepMounted>
-              <StepOutput index={index} status={status} />
+              <StepOutput
+                key={formKey}
+                index={index}
+                status={status}
+                locked={locked}
+              />
             </TabsContent>
           ))}
-          <TabsContent value="add" keepMounted>
-            <AddResponse index={index} taken={statuses} />
-          </TabsContent>
+          {!locked && (
+            <TabsContent value="add" keepMounted>
+              <AddResponse index={index} taken={statuses} />
+            </TabsContent>
+          )}
           <TabsContent value="unhandled" keepMounted>
             <StepUnhandled index={index} />
           </TabsContent>

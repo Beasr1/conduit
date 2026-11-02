@@ -15,6 +15,7 @@ type Run struct {
 	WorkflowID      string          `db:"workflow_id"`
 	Revision        int             `db:"revision"`
 	Trigger         string          `db:"trigger"`  // editor or served
+	TraceID         string          `db:"trace_id"` // its W3C trace (plan 06); empty for runs from before
 	Status          string          `db:"status"`   // running, succeeded, failed or cancelled
 	Input           json.RawMessage `db:"input"`    // empty in lists
 	Answered        int             `db:"answered"` // the answer's status, once it succeeded with one; else 0
@@ -40,15 +41,15 @@ type NodeRun struct {
 }
 
 const (
-	runColumns = `id::text AS id, workflow_id::text AS workflow_id, revision, trigger, status,
+	runColumns = `id::text AS id, workflow_id::text AS workflow_id, revision, trigger, COALESCE(trace_id, '') AS trace_id, status,
 		input, COALESCE(answered, 0) AS answered, output, output_truncated, error, started_at, ended_at`
 	nodeRunColumns = `run_id::text AS run_id, node_id, status, attempts, request, response, error, took, started_at, ended_at`
 )
 
 // StartRun records a run of revision as running, and returns it with its id.
-func (s *Store) StartRun(ctx context.Context, workflowID string, revision int, trigger string, input json.RawMessage) (Run, error) {
-	r, err := one[Run](ctx, s.pool, `INSERT INTO runs (workflow_id, revision, trigger, status, input)
-		VALUES ($1::uuid, $2, $3, 'running', $4) RETURNING `+runColumns, workflowID, revision, trigger, input)
+func (s *Store) StartRun(ctx context.Context, workflowID string, revision int, trigger, traceID string, input json.RawMessage) (Run, error) {
+	r, err := one[Run](ctx, s.pool, `INSERT INTO runs (workflow_id, revision, trigger, trace_id, status, input)
+		VALUES ($1::uuid, $2, $3, $4, 'running', $5) RETURNING `+runColumns, workflowID, revision, trigger, traceID, input)
 	if err != nil {
 		return Run{}, fmt.Errorf("start a run of %s revision %d: %w", workflowID, revision, translate(err))
 	}
@@ -119,7 +120,7 @@ func (s *Store) NodeRuns(ctx context.Context, runID string) ([]NodeRun, error) {
 // output: of one workflow when workflowID isn't empty, and older than before
 // when it isn't empty.
 func (s *Store) Runs(ctx context.Context, workflowID string, limit int, before string) ([]Run, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id::text AS id, workflow_id::text AS workflow_id, revision, trigger, status,
+	rows, err := s.pool.Query(ctx, `SELECT id::text AS id, workflow_id::text AS workflow_id, revision, trigger, COALESCE(trace_id, '') AS trace_id, status,
 		COALESCE(answered, 0) AS answered, output_truncated, error, started_at, ended_at FROM runs
 		WHERE ($2::uuid IS NULL OR workflow_id = $2::uuid) AND ($3::uuid IS NULL OR id < $3::uuid)
 		ORDER BY id DESC LIMIT $1`, limit, orNull(workflowID), orNull(before))

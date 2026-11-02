@@ -20,6 +20,7 @@ import (
 
 	"github.com/Beasr1/conduit/server/internal/store"
 	"github.com/Beasr1/conduit/server/internal/store/storetest"
+	"github.com/Beasr1/conduit/server/internal/trace"
 	"github.com/Beasr1/conduit/server/internal/upstream"
 )
 
@@ -659,12 +660,121 @@ func TestStart_RefusedAtTheCap(t *testing.T) {
 	if _, err := r.Serve(ctx, w.Slug, nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("a served run: %v, want ErrBusy", err)
 	}
+	// Another workflow's run, refused at the server's cap, isn't counted
+	// against its own share.
+	other := saveWorkflow(t, h.srv.URL, holdDef)
+	if _, err := r.Serve(ctx, other.Slug, nil); !errors.Is(err, ErrBusy) || errors.Is(err, ErrWorkflowBusy) {
+		t.Errorf("another workflow's run: %v, want the server's ErrBusy", err)
+	}
 	close(h.release)
 	if got := seqs(collect(t, r, first.ID)); got != "1 a started, 2 a succeeded, end run succeeded" {
 		t.Errorf("first run = %s", got)
 	}
 	if _, err := r.Serve(ctx, w.Slug, nil); err != nil {
 		t.Errorf("once the first run ended: %v", err)
+	}
+	if _, err := r.Serve(ctx, other.Slug, nil); err != nil {
+		t.Errorf("the other workflow, once the first run ended: %v", err)
+	}
+}
+
+// A workflow may have a quarter of the slots at once, so a loop through an
+// API that drops the trace holds that workflow's runs and leaves the rest
+// to the others (plan 06).
+func TestStart_AWorkflowHasAQuarterOfTheSlots(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	h := newHold(t)
+	quick := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{}`) }))
+	t.Cleanup(quick.Close)
+	r := newRunner(t, Options{MaxRuns: 8})
+	w := saveWorkflow(t, h.srv.URL, holdDef)
+
+	var held []store.Run
+	for range 2 {
+		run, err := r.Start(ctx, w.ID, 0, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.wait(t)
+		held = append(held, run)
+	}
+	if _, err := r.Serve(ctx, w.Slug, nil); !errors.Is(err, ErrWorkflowBusy) || !errors.Is(err, ErrBusy) {
+		t.Errorf("a third run of the workflow: %v, want ErrWorkflowBusy, a kind of ErrBusy", err)
+	}
+	if _, err := r.Serve(ctx, saveWorkflow(t, quick.URL, holdDef).Slug, nil); err != nil {
+		t.Errorf("another workflow meanwhile: %v", err)
+	}
+	close(h.release)
+	for _, run := range held {
+		collect(t, r, run.ID)
+	}
+	if _, err := r.Serve(ctx, w.Slug, nil); err != nil {
+		t.Errorf("once its runs ended: %v", err)
+	}
+}
+
+// A run continues its caller's trace, or starts one, records it, and its
+// calls pass it on one hop further. A call that has passed through Conduit
+// trace.MaxHops times is refused before a run starts: a workflow calling
+// itself, round and round (plan 06).
+func TestStart_Traces(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		fmt.Fprint(w, `{}`)
+	}))
+	t.Cleanup(srv.Close)
+	r := newRunner(t, Options{})
+	w := saveWorkflow(t, srv.URL, holdDef)
+	const id = "4bf92f3577b34da6a3ce929d0e0e4736"
+	at := func(hops int) context.Context {
+		return trace.With(ctx, trace.Read(http.Header{
+			"Traceparent": {"00-" + id + "-00f067aa0ba902b7-01"},
+			"Tracestate":  {fmt.Sprintf("conduit=h:%d", hops)},
+		}))
+	}
+
+	if _, err := r.Start(at(trace.MaxHops), w.ID, 0, nil); !errors.Is(err, ErrLoop) {
+		t.Errorf("an editor run %d hops in: %v, want ErrLoop", trace.MaxHops, err)
+	}
+	if _, err := r.Serve(at(trace.MaxHops), w.Slug, nil); !errors.Is(err, ErrLoop) {
+		t.Errorf("a served run %d hops in: %v, want ErrLoop", trace.MaxHops, err)
+	}
+	out, err := r.Serve(at(trace.MaxHops-1), w.Slug, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Run.TraceID != id || !strings.HasPrefix(got.Get("Traceparent"), "00-"+id+"-") ||
+		got.Get("Tracestate") != fmt.Sprintf("conduit=h:%d", trace.MaxHops) {
+		t.Errorf("one hop fewer: recorded trace %q, called with traceparent %q and tracestate %q",
+			out.Run.TraceID, got.Get("Traceparent"), got.Get("Tracestate"))
+	}
+
+	ran, err := r.Start(ctx, w.ID, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collect(t, r, ran.ID)
+	if len(ran.TraceID) != 32 || ran.TraceID == id || !strings.HasPrefix(got.Get("Traceparent"), "00-"+ran.TraceID+"-") ||
+		got.Get("Tracestate") != "conduit=h:1" {
+		t.Errorf("no trace: recorded %q, called with traceparent %q and tracestate %q",
+			ran.TraceID, got.Get("Traceparent"), got.Get("Tracestate"))
+	}
+}
+
+// A run is of its revision filled from the upstreams its nodes use (plan
+// 07), so one that uses a version the library doesn't have isn't run.
+func TestStart_AnUpstreamTheLibraryDoesntHave(t *testing.T) {
+	t.Parallel()
+	r := newRunner(t, Options{})
+	w := saveWorkflow(t, "", `{"nodes": [{"id": "a", "kind": "http", "uses": {"upstream": "no-such", "version": 1}}]}`)
+	_, err := r.Start(t.Context(), w.ID, 0, nil)
+	var invalid *InvalidError
+	if !errors.As(err, &invalid) || len(invalid.Problems) != 1 || invalid.Problems[0].Code != "unknown_upstream" {
+		t.Errorf("Start() = %v, want unknown_upstream", err)
 	}
 }
 
@@ -744,7 +854,7 @@ func TestWatch(t *testing.T) {
 	if _, err := r.Watch(ctx, "01890000-0000-7000-8000-000000000000", 0); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("an unknown run: %v", err)
 	}
-	other, err := db.StartRun(ctx, w.ID, 1, "editor", json.RawMessage(`null`))
+	other, err := db.StartRun(ctx, w.ID, 1, "editor", "4bf92f3577b34da6a3ce929d0e0e4736", json.RawMessage(`null`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +900,7 @@ func TestRecover(t *testing.T) {
 	ctx := t.Context()
 	r := newRunner(t, Options{})
 	w := saveWorkflow(t, "", `{"nodes": []}`)
-	left, err := db.StartRun(ctx, w.ID, 1, "served", json.RawMessage(`null`))
+	left, err := db.StartRun(ctx, w.ID, 1, "served", "4bf92f3577b34da6a3ce929d0e0e4736", json.RawMessage(`null`))
 	if err != nil {
 		t.Fatal(err)
 	}

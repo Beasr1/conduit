@@ -104,9 +104,12 @@ func (v *validator) checkNode(p string, n Node) {
 	case "":
 		v.add(p+"/kind", "required", "a node needs a kind: http, transform or merge")
 	case NodeKindHTTP:
-		if n.Request == nil {
+		switch {
+		case n.Uses != nil && n.Request == nil:
+			// An upstream not in the library: Resolve says so.
+		case n.Request == nil:
 			v.add(p+"/request", "required", "an http node needs a request")
-		} else {
+		default:
 			v.checkRequest(p+"/request", n.Request)
 		}
 		if n.Expr != "" {

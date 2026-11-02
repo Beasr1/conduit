@@ -345,6 +345,69 @@ test("a step's tabs say what it sent and got, and what it got can be kept as the
   ).toHaveProperty("value", '{\n  "content-type": "application/json"\n}');
 });
 
+// A step that uses an upstream has the upstream's samples, so what it got
+// is kept as one by editing the upstream (plan 07).
+test("what a step that uses an upstream got is kept as a sample only by editing the upstream", async () => {
+  const [user, ...rest] = branched.nodes;
+  const users = {
+    parameters: [{ name: "user_id" }],
+    request: {
+      method: "GET" as const,
+      url: "https://users.example.com/v1/users/{{ user_id }}",
+    },
+    outputs: user?.outputs,
+  };
+  server.use(
+    http.get("/api/v1/upstreams/u-1", () =>
+      HttpResponse.json({
+        upstream: {
+          id: "u-1",
+          name: "Users API",
+          latest_version: 1,
+          created_at: at(0),
+        },
+        version: 1,
+        definition: users,
+        provenance: { actor: "token" },
+        created_at: at(0),
+      }),
+    ),
+  );
+  renderEditor(
+    {
+      ...branched,
+      nodes: [
+        {
+          id: "user",
+          kind: "http",
+          uses: { upstream: "u-1", version: 1 },
+          with: { user_id: "input.user_id" },
+        },
+        ...rest,
+      ],
+    },
+    [],
+    { "u-1@1": users },
+  );
+  serveRun();
+  await run();
+  await waitFor(() => expect(line("user")).toBe("404, 82 ms"));
+  fireEvent.click(
+    within(screen.getByTestId("rf__node-user")).getByText("user"),
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: "404" }));
+  const got = screen.getByRole("tabpanel", { name: "404" });
+  expect(
+    within(got).getByText("In this run it got 404, in 82 ms"),
+  ).toBeTruthy();
+  expect(
+    within(got).queryByRole("button", { name: "Keep as the 404 sample" }),
+  ).toBeNull();
+  expect(
+    within(got).getByText(/edit the upstream to keep this as one/),
+  ).toBeTruthy();
+});
+
 test("Runs lists the workflow's runs, picking one shows it, and Close run goes back to editing", async () => {
   renderEditor(branched);
   const served: Run = {
@@ -381,10 +444,21 @@ test("Runs lists the workflow's runs, picking one shows it, and Close run goes b
             workflow_id: served.workflow_id,
             revision: served.revision,
             trigger: served.trigger,
+            trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
             status: served.status,
             started_at: served.started_at,
             ended_at: at(40),
             error: served.error,
+          },
+          // From before runs kept their trace.
+          {
+            id: "r-0",
+            workflow_id: served.workflow_id,
+            revision: 1,
+            trigger: "editor",
+            status: "succeeded",
+            started_at: at(-1000),
+            ended_at: at(-900),
           },
         ],
       });
@@ -393,6 +467,12 @@ test("Runs lists the workflow's runs, picking one shows it, and Close run goes b
   );
   fireEvent.click(await screen.findByRole("button", { name: "Runs" }));
   const panel = await screen.findByRole("complementary", { name: "Runs" });
+  // Its trace, which runs calling each other share (plan 06); a run from
+  // before traces were kept has none.
+  expect(
+    await within(panel).findByText("trace 4bf92f3577b34da6a3ce929d0e0e4736"),
+  ).toBeTruthy();
+  expect(within(panel).getAllByText(/^trace/)).toHaveLength(1);
   fireEvent.click(
     await within(panel).findByRole("button", { name: /called at its URL/ }),
   );

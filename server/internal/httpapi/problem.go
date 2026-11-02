@@ -41,6 +41,10 @@ var statuses = []struct {
 		store.ErrRevisionMismatch, http.StatusPreconditionFailed, "revision_mismatch",
 		"A newer revision was saved first. Fetch it, apply your change to it, and save with its ETag.",
 	},
+	{
+		store.ErrVersionMismatch, http.StatusPreconditionFailed, "version_mismatch",
+		"A newer version was saved first. Fetch it, apply your change to it, and save with its ETag.",
+	},
 }
 
 // answerError writes err as problem details. An error it doesn't recognise

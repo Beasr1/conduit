@@ -15,7 +15,9 @@ function typeId(value: string) {
 
 test("adds a step under the id it's given, checking the id as it's typed", async () => {
   renderEditor(specExample);
-  fireEvent.click(await screen.findByRole("button", { name: "Add HTTP step" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add transform step" }),
+  );
 
   typeId("Fetch");
   expect(await screen.findByText(/^A lowercase letter/)).toBeTruthy();
@@ -27,6 +29,17 @@ test("adds a step under the id it's given, checking the id as it's typed", async
   typeId("notify");
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   expect(await screen.findByText("notify")).toBeTruthy();
-  expect(screen.getByText("GET (no URL yet)")).toBeTruthy();
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+// An HTTP step uses an upstream (plan 07), so Add asks for one first.
+test("an HTTP step needs an upstream", async () => {
+  renderEditor(specExample);
+  fireEvent.click(await screen.findByRole("button", { name: "Add HTTP step" }));
+  typeId("notify");
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  expect(
+    await screen.findByText("Pick an upstream, or make a new one."),
+  ).toBeTruthy();
+  expect(screen.getByRole("dialog")).toBeTruthy();
 });

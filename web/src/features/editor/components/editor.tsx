@@ -17,6 +17,7 @@ import {
 import type { components } from "@/gen/schema";
 
 type Revision = components["schemas"]["Revision"];
+type Upstream = components["schemas"]["Upstream"];
 type Workflow = components["schemas"]["Workflow"];
 
 // Editor edits one workflow, from the revision it opened with. Its store is
@@ -26,14 +27,19 @@ type Workflow = components["schemas"]["Workflow"];
 export function Editor({
   workflow,
   revision,
+  versions,
   onReload,
 }: {
   workflow: Workflow;
+  // Filled from versions, the upstreams its steps use (plan 07).
   revision: Revision;
+  versions: Record<string, Upstream>;
   onReload: () => void;
 }) {
   const [opened] = useState(revision);
-  const [store] = useState(() => createEditorStore(opened.definition));
+  const [store] = useState(() =>
+    createEditorStore(opened.definition, versions),
+  );
   const [first] = useState<Check>(() => ({
     of: opened.definition,
     problems: opened.problems,

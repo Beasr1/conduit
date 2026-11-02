@@ -84,8 +84,17 @@ components:
           $ref: "#/components/schemas/NodeKind"
         request:
           $ref: "#/components/schemas/HTTPRequest"
-          description: The call an http node makes.
+          description: The call an http node makes, unless it uses an upstream.
           x-go-type-skip-optional-pointer: false
+        uses:
+          $ref: "#/components/schemas/Uses"
+          description: The upstream an http node calls, at a version, in place of a request of its own (plan 07). Its request, responses and samples are the version's, and the node has none of its own.
+          x-go-type-skip-optional-pointer: false
+        with:
+          type: object
+          additionalProperties:
+            type: string
+          description: For a node that uses an upstream, a JSONata expression over the run for each of the upstream's parameters, which its request reads.
         expr:
           type: string
           description: A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch.
@@ -105,6 +114,57 @@ components:
         unhandled:
           $ref: "#/components/schemas/NodeUnhandled"
           x-go-type-skip-optional-pointer: false
+
+    Upstream:
+      type: object
+      required: [request]
+      additionalProperties: false
+      description: A saved API endpoint and how it's handled, one version of it (plan 07). Every save makes a new version, which never changes, and a step that uses the upstream pins one. Its templates and body read its parameters by name, {{ user_id }}, and each step that uses it gives them values.
+      properties:
+        parameters:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/Parameter"
+          description: What a step that uses it gives it, each a JSONata expression over the step's run. Its templates and body read them by name, and nothing else.
+        request:
+          $ref: "#/components/schemas/HTTPRequest"
+          description: The call, as an http node's, its templates and body reading the parameters.
+        sample:
+          $ref: "#/components/schemas/Sample"
+          description: Its made-up or redacted 2xx response, which previews of a step that uses it read.
+          x-go-type-skip-optional-pointer: false
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Output"
+          description: Its answers besides 2xx, as an http node's. A step that uses it has a block for each, and lines from them.
+
+    Uses:
+      type: object
+      required: [upstream, version]
+      additionalProperties: false
+      description: An upstream, pinned to a version, which never changes (plan 07).
+      properties:
+        upstream:
+          type: string
+          description: The upstream's id.
+        version:
+          type: integer
+          minimum: 1
+
+    Parameter:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,63}$"
+          description: Unique in its upstream. Its templates read it as {{ name }}, and its body as name.
+        sample:
+          description: A made-up value, any JSON, which the library's preview of the upstream gives the parameter; a step gives it its own. At most 64 KiB.
+          x-go-type: json.RawMessage
 
     NodeKind:
       type: string

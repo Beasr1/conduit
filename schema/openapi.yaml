@@ -322,7 +322,7 @@ paths:
     post:
       operationId: startRun
       summary: Run a revision in the background
-      description: The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it.
+      description: The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and one that has already passed through Conduit 8 times is refused with 508 (plan 06).
       requestBody:
         required: true
         content:
@@ -350,6 +350,184 @@ paths:
           $ref: "#/components/responses/Problem"
         "503":
           $ref: "#/components/responses/Busy"
+        "508":
+          $ref: "#/components/responses/Problem"
+
+  /v1/upstreams:
+    get:
+      operationId: listUpstreams
+      summary: List the upstream library, newest first
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: before
+          in: query
+          description: Return upstreams older than this id, for the next page.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of upstreams.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamList"
+        "401":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createUpstream
+      summary: Make an upstream; its definition becomes version 1
+      description: A saved API endpoint and how it's handled (plan 07). A step that uses it pins a version, so a definition with problems isn't saved; they're listed in the 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUpstream"
+      responses:
+        "201":
+          description: Made.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamVersion"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+
+  /v1/upstreams/validate:
+    post:
+      operationId: validateUpstream
+      summary: Check an upstream's definition without saving it
+      description: What a save would refuse it for, as the library's page checks while it's edited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./workflow.yaml#/components/schemas/Upstream"
+      responses:
+        "200":
+          description: Its problems, none when it can be saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Validation"
+        "401":
+          $ref: "#/components/responses/Problem"
+
+  /v1/upstreams/{id}:
+    parameters:
+      - $ref: "#/components/parameters/UpstreamID"
+    get:
+      operationId: getUpstream
+      summary: Get an upstream at its latest version
+      responses:
+        "200":
+          description: The upstream. Send its ETag as If-Match when saving the next version.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamVersion"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: saveUpstream
+      summary: Save the next version
+      description: If-Match must name the latest version, so a save can't silently undo someone else's. Versions never change, so a definition with problems isn't saved; they're listed in the 422.
+      parameters:
+        - name: If-Match
+          in: header
+          description: The latest version's ETag, such as "3". Without it the save is refused with 428.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./workflow.yaml#/components/schemas/Upstream"
+      responses:
+        "200":
+          description: Saved.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamVersion"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+
+  /v1/upstreams/{id}/users:
+    parameters:
+      - $ref: "#/components/parameters/UpstreamID"
+    get:
+      operationId: listUpstreamUsers
+      summary: List the workflows whose latest revision uses an upstream, and the versions each pins
+      responses:
+        "200":
+          description: The workflows, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamUsers"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
+  /v1/upstreams/{id}/versions/{version}:
+    parameters:
+      - $ref: "#/components/parameters/UpstreamID"
+      - name: version
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: getUpstreamVersion
+      summary: Get one version of an upstream
+      responses:
+        "200":
+          description: The version, which never changes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamVersion"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
 
   /v1/runs:
     get:
@@ -439,7 +617,7 @@ paths:
     post:
       operationId: serveWorkflow
       summary: Run a workflow's published revision and answer with the answer it gives
-      description: The body is the run's input. A run answers with the answer it gave, its status and its body. A run that gives none, as a node failed, or it took no line into the response, or lines from two nodes, answers with its response's default, if it has one, at the status of the cause, 502 an upstream failed, 504 a timeout, 500 otherwise. Without one, or with no response, it answers that status with problem details naming what failed; `instance` is the run, at /v1/runs/{id}. A revision saved with an output answers 200 with it. Served runs time out after 30 s.
+      description: The body is the run's input. A run answers with the answer it gave, its status and its body. A run that gives none, as a node failed, or it took no line into the response, or lines from two nodes, answers with its response's default, if it has one, at the status of the cause, 502 an upstream failed, 504 a timeout, 500 otherwise. Without one, or with no response, it answers that status with problem details naming what failed; `instance` is the run, at /v1/runs/{id}. A revision saved with an output answers 200 with it. Served runs time out after 30 s. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and the run's own calls pass it on, one hop further; a call that has already passed through Conduit 8 times, a workflow calling itself, is refused with 508 before a run starts (plan 06).
       parameters:
         - name: slug
           in: path
@@ -473,6 +651,8 @@ paths:
           $ref: "#/components/responses/Busy"
         "504":
           $ref: "#/components/responses/Problem"
+        "508":
+          $ref: "#/components/responses/Problem"
 
 components:
   securitySchemes:
@@ -488,6 +668,12 @@ components:
 
   parameters:
     WorkflowID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    UpstreamID:
       name: id
       in: path
       required: true
@@ -514,7 +700,7 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
     Busy:
-      description: Too many runs are in progress, or the server is shutting down. Try again after Retry-After seconds.
+      description: Too many runs are in progress, on the server or of the one workflow, which may have a quarter of the server's at once, or the server is shutting down. Try again after Retry-After seconds.
       headers:
         Retry-After:
           schema:
@@ -644,6 +830,11 @@ components:
           minimum: 0
           description: The connection to preview, by its place in the definition's edges. Not with node.
           x-go-type-skip-optional-pointer: false
+        upstreams:
+          type: object
+          additionalProperties:
+            $ref: "./workflow.yaml#/components/schemas/Upstream"
+          description: Unsaved versions of the upstreams steps use, by the step's id, which the preview uses in place of the version each pins, to show what an upstream being edited would do (plan 07).
 
     Preview:
       type: object
@@ -668,6 +859,9 @@ components:
           x-go-type-skip-optional-pointer: false
         sends:
           $ref: "#/components/schemas/RenderedRequest"
+        parameters:
+          description: An http step that uses an upstream, the values its parameters take, by name, which its request reads. One whose value fails is left out, as the problems say.
+          x-go-type: json.RawMessage
         gives:
           description: A transform step's value, or the workflow's output. Absent when it gave none, and for a transform with ways, as each way gives its own.
           x-go-type: json.RawMessage
@@ -771,6 +965,90 @@ components:
           items:
             $ref: "#/components/schemas/RevisionSummary"
 
+    UpstreamSummary:
+      type: object
+      required: [id, name, latest_version, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          description: Unique in the library.
+        latest_version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    UpstreamList:
+      type: object
+      required: [upstreams]
+      properties:
+        upstreams:
+          type: array
+          items:
+            $ref: "#/components/schemas/UpstreamSummary"
+        next:
+          type: string
+          description: Pass as `before` for the next page. Absent on the last page.
+
+    CreateUpstream:
+      type: object
+      required: [name, definition]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        definition:
+          $ref: "./workflow.yaml#/components/schemas/Upstream"
+
+    UpstreamUsers:
+      type: object
+      required: [workflows]
+      properties:
+        workflows:
+          type: array
+          items:
+            $ref: "#/components/schemas/UpstreamUse"
+
+    UpstreamUse:
+      type: object
+      required: [workflow_id, name, revision, versions, published]
+      properties:
+        workflow_id:
+          type: string
+        name:
+          type: string
+        revision:
+          type: integer
+          description: The workflow's latest revision, which uses the upstream.
+        versions:
+          type: array
+          items:
+            type: integer
+          description: The versions its steps pin, oldest first.
+        published:
+          type: boolean
+          description: Whether that revision is the one the workflow serves.
+
+    UpstreamVersion:
+      type: object
+      required: [upstream, version, definition, provenance, created_at]
+      properties:
+        upstream:
+          $ref: "#/components/schemas/UpstreamSummary"
+        version:
+          type: integer
+        definition:
+          $ref: "./workflow.yaml#/components/schemas/Upstream"
+        provenance:
+          $ref: "#/components/schemas/Provenance"
+        created_at:
+          type: string
+          format: date-time
+
     WorkflowRevision:
       type: object
       required: [workflow, revision]
@@ -845,6 +1123,9 @@ components:
           type: string
           enum: [editor, served]
           description: editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+        trace_id:
+          type: string
+          description: The W3C trace the run belongs to, 32 lowercase hex digits; the caller's, when the call that started it carried one. Runs that call each other through /serve share it. Absent for runs from before traces were kept.
         status:
           type: string
           enum: [running, succeeded, failed, cancelled]

@@ -37,7 +37,11 @@ export type StepField =
   | "case_status"
   | "case_body"
   | "unhandled"
-  | "unhandled_body";
+  | "unhandled_body"
+  // A step that uses an upstream (plan 07): the upstream it pins, and a
+  // parameter's value, by name.
+  | "uses"
+  | "with";
 
 // The fields an HTTP step's Request tab holds: the call and its body.
 export const REQUEST_FIELDS: ReadonlySet<StepField | undefined> = new Set([
@@ -176,8 +180,18 @@ function switchPlace(
 
 function stepPlace(index: number, [part, sub, name, end]: string[]): Place {
   const step = { on: "step", index } as const;
-  if (part === "id" || part === "kind" || part === "expr" || part === "sample")
+  if (
+    part === "id" ||
+    part === "kind" ||
+    part === "expr" ||
+    part === "sample" ||
+    part === "uses"
+  )
     return { ...step, field: part };
+  if (part === "with")
+    return sub === undefined
+      ? { ...step, field: "with" }
+      : { ...step, field: "with", name: sub };
   if (part === "outputs")
     return !isIndex(sub)
       ? { ...step, field: "outputs" }
@@ -230,6 +244,7 @@ export function stepPartOf(place: Place, draft: Definition): string {
   if (place.field === "outputs") return "add";
   if (place.field === "unhandled" || place.field === "unhandled_body")
     return "unhandled";
+  if (place.field === "with" || place.field === "uses") return "with";
   if (place.case !== undefined) return `case:${place.case}`;
   return "request";
 }
@@ -391,6 +406,14 @@ export function say(problem: ProblemError, of: Definition): string {
       return "No answer follows: join it to an answer, or to a step that leads to one.";
     case "no_answers":
       return "Add an answer, and join the step that gives it.";
+    case "unknown_upstream":
+      return "The library has no such upstream at that version: pick another, or delete the step.";
+    case "own_request":
+      return "Save it as an upstream: Publish takes only steps that use one.";
+    case "unknown_parameter":
+      return place.on === "step" && place.field === "with"
+        ? `The upstream has no parameter ${place.name ?? ""}: remove this value.`
+        : sentence(problem.detail);
     case "unhandled_undecided":
       return "Join its Unhandled to a step or an answer, or let it fail the run.";
     case "unhandled_both":
@@ -492,6 +515,10 @@ export function say(problem: ProblemError, of: Definition): string {
       return "Pick GET, HEAD, POST, PUT, PATCH or DELETE.";
     case "placeholder_in_host":
       return "Move the {{ }} into the path or the query: the scheme, host and port can't change from run to run.";
+    case "reserved_header": {
+      const name = place.on === "step" ? place.name : "";
+      return `Conduit sets ${name} on every call, to stop a workflow calling itself for ever: remove it.`;
+    }
     case "invalid_header_name": {
       const name = place.on === "step" ? place.name : "";
       return `“${name}” can't be a header name: use letters, digits and hyphens.`;
@@ -576,6 +603,8 @@ function required(place: Place): string | undefined {
       return "Add an expression.";
     case "unhandled_body":
       return "Write its body, or remove it.";
+    case "with":
+      return "Give the parameter a value.";
     case "method":
       return "Pick a method.";
     case "url":

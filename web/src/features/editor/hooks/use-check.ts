@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { PAUSE_MS, useStill } from "@/features/editor/hooks/use-still";
 import type { Check } from "@/features/editor/problems";
+import { strip } from "@/features/editor/upstreams";
 import type { components } from "@/gen/schema";
 import { api, call } from "@/lib/api";
 
@@ -39,7 +40,7 @@ export function useCheck(draft: Definition, opened: Check) {
 
 async function check(draft: Definition, signal: AbortSignal): Promise<Check> {
   const { problems } = await call(
-    (signal) => api.POST("/v1/validate", { body: draft, signal }),
+    (signal) => api.POST("/v1/validate", { body: strip(draft), signal }),
     signal,
   );
   return { of: draft, problems };

@@ -85,6 +85,9 @@ resolve, but their claims weren't re-read.
 | A tab opens as an arrow key reaches it, and the open panel takes focus (web.md) | The WAI-ARIA tabs pattern recommends tabs "activate automatically when they receive focus" when panels show "without noticeable latency", and a panel whose first content isn't focusable gets `tabindex="0"` ✓ [44] |
 | One exit, the response: an answer takes lines from any number of steps, and a run gives the first answer, top to bottom, that one reached, so no step is needed to pick (plan 14, 2026-11-02; a picking step before the card was the same day's first answer) | A Step Functions `Choice` state "examines each of the Choice Rules in the order listed" and goes to "the first Choice Rule in which the variable matches" ✓ [92]: the card's answers are read the same way. Step Functions keeps that choice apart from ending, as "`Choice` states do not support the `End` field" ✓ [92]; you chose one place for both. Its single error handler, a `Parallel` state's `Catch`, stops the rest: "If any branch fails, because of an unhandled error or by transitioning to a `Fail` state, the entire `Parallel` state is considered to have failed and all its branches are stopped" ✓ [93]. Failures joined to an answer don't stop the other branches; "Fail the run" does |
 | A line from a step's Unhandled into an answer is a link: the Unhandled names the answer, and the line is drawn, dashed, only while the step, the line or the response is picked, or a run shown took it (plan 14, 2026-11-02) | Node-RED's link nodes "Create virtual wires between flows", and "The virtual connections between Link nodes only become visible in the editor when you select" one of them, drawn dashed ✓ [94] |
+| Every run is in a W3C trace, and its calls carry a hop count on in `tracestate`; a call 8 hops in is refused with 508, and one workflow may have a quarter of the run slots (plan 06, 2026-11-02) | Hop counts are how others stop loops: Cloudflare Workers count "how many invocations are left", 16 ✓ [95]; AWS Lambda keeps a count in its trace header and stops at "approximately 16" ✓ [96]; Dataverse stops at a depth of 8 ✓ [97]. W3C Trace Context makes passing `tracestate` on a MUST ✓ [98], though it says its fields' "only purpose ... is to enable trace correlation". No header survives a party that drops it, as one "cannot be trusted" ✓ [99], so the backstop is a share of the slots, the SRE book's "only allowing 25% of your threads to be occupied by any one client" ✓ [100] |
+| A step that uses an upstream shows its request and responses locked: a disabled `fieldset` round the tab panels, never the tab lists (plan 07, 2026-11-02) | HTML disables every control in a disabled fieldset, buttons among them: one is disabled when it "is a descendant of a fieldset element whose disabled attribute is specified" ✓ [102]. Round a tab list too, it disabled the tabs, which Chromium showed and jsdom didn't |
+| A browser test names a button exactly where another's name holds it: Save, beside Save as upstream (plan 07) | Playwright's `name`: "By default, matching is case-insensitive and searches for a substring, use exact to control this behavior" ✓ [103] |
 | Each row of a step's tabs is named for a screen reader, Blocks and Request (plan 13, 2026-11-02) | The WAI-ARIA tabs pattern: with no visible label, "the `tablist` element has a label provided by aria-label" ✓ [44] |
 | What a field is for is a hint behind ⓘ beside its label, a line or two, rather than a sentence under it; a hint is a popover that opens on hover or a press (plan 13, 2026-11-02) | Base UI: "Popups that open when hovering an info icon should use Popover with the openOnHover prop on the trigger instead of a tooltip", as "Tooltips don't work well with touch input" and "are disabled on touch devices"; and "If the description is important to understanding the element, don't hide it behind a tooltip" ✓ [89], so a problem stays under its field |
 
@@ -99,6 +102,8 @@ resolve, but their claims weren't re-read.
 | gnata | created 2026-03-10 ✓, ported with AI, pre-1.0, breaking changes in 0.6.0 ✓ | the alternatives are stale (blues/jsonata-go targets JSONata 1.5.4). Pin it exact, wrap it, golden-test it |
 | No Redis in v1 | the spec lists it | nothing in v1 needs it; agreed as D7 |
 | nginx's stable branch | nginx recommends mainline: "This version is recommended for production unless your organization has strict requirements for stability" ✓ [86] | fewer changes. CI builds the images and tests nginx's config (`just images`, 2026-11-01), so following mainline is dropping one ignore rule in `dependabot.yml` |
+| Upstreams only: Publish refuses an HTTP step with a request of its own (plan 07, 2026-11-03) | every tool checked keeps a generic HTTP step beside its catalog: n8n's HTTP Request node "allows you to make HTTP requests to query data from any app or service with a REST API" ✓ [105]; Logic Apps: "To call an endpoint from anywhere else in your workflow, add the built-in action named HTTP" ✓ [106]; Step Functions' HTTP Task holds its URL and method itself, and shares only the credentials, through a connection that "helps you avoid hard-coding secrets, such as API keys, into your state machine definition" ✓ [107] | your call: every call, and how it's handled, in one place. Their catalogs are the vendor's, so a generic step is the only way to an API they lack; ours is the user's, and Add HTTP step makes an upstream from a call |
+| 508 for a loop (plan 06) | none of the gateways checked uses it: Fastly answers 503, Envoy 502, Tyk 500; RFC 5842 defines it for WebDAV's "Depth: infinity" ✓ [101] | it's the registered code named for a loop, and a 503 asks for a retry that never helps one (your call, with plan 06, 2026-11-02) |
 | Lists of looks to avoid are review questions, not rules (design.md) | the design skill design.md started from [37] treats its list as rules | a list everyone follows becomes a template of its own (decided 2026-10-28) |
 
 ## gnata facts (checked ✓)
@@ -157,6 +162,7 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 | 24 px targets, or spaced apart | 2.5.8, AA ✓. React Flow's stylesheet draws handles 6 px wide ✓ |
 | 320 px wide without sideways scrolling; the canvas exempt | 1.4.10, AA, and its exception for "parts of the content which require two-dimensional layout" ✓ |
 | Motion off under `prefers-reduced-motion` | 2.3.3, AAA ✓; held although it's above AA |
+| An upstream's parameters are rows under visible column names, Name and Sample, not a placeholder and an `aria-label` alone (plan 07) | 3.3.2, A ✓: "Labels or instructions are provided when content requires user input", and a label "is presented to all users whereas the name may be hidden and only exposed by assistive technology" ✓ [104] |
 | What shows on hover can be dismissed, hovered and stays: a hint | 1.4.13, AA ✓: dismissed "without moving pointer hover or keyboard focus", and "the pointer can be moved over the additional content without the additional content disappearing" [90]. Escape closes a hint, and it stays while the pointer is over it, checked in Chromium (plan 13) |
 
 ## Links
@@ -255,6 +261,19 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 92. https://docs.aws.amazon.com/step-functions/latest/dg/state-choice.html
 93. https://docs.aws.amazon.com/step-functions/latest/dg/state-parallel.html
 94. https://flowfuse.com/node-red/core-nodes/link/
+95. https://developers.cloudflare.com/workers/observability/errors/
+96. https://docs.aws.amazon.com/lambda/latest/dg/invocation-recursion.html
+97. https://learn.microsoft.com/en-us/dotnet/api/microsoft.xrm.sdk.iexecutioncontext.depth
+98. https://www.w3.org/TR/trace-context/
+99. https://www.rfc-editor.org/rfc/rfc8586
+100. https://sre.google/sre-book/addressing-cascading-failures/
+101. https://www.rfc-editor.org/rfc/rfc5842
+102. https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#concept-fe-disabled
+103. https://playwright.dev/docs/api/class-page#page-get-by-role
+104. https://www.w3.org/WAI/WCAG22/Understanding/labels-or-instructions.html
+105. https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.httprequest/
+106. https://learn.microsoft.com/en-us/azure/connectors/connectors-native-http
+107. https://docs.aws.amazon.com/step-functions/latest/dg/call-https-apis.html
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

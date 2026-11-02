@@ -20,8 +20,13 @@ func found(ps Problems) string {
 // ends sees only those.
 const fails = `"unhandled": {"fail": true}`
 
+// get is an HTTP node that uses an upstream, as Resolve fills it from its
+// version, which is what ReadyToPublish is given.
 func get(id, url string, extra ...string) string {
-	parts := append([]string{`"id": "` + id + `"`, `"kind": "http"`, `"request": {"method": "GET", "url": "` + url + `"}`, fails}, extra...)
+	parts := append([]string{
+		`"id": "` + id + `"`, `"kind": "http"`, `"uses": {"upstream": "u-` + id + `", "version": 1}`,
+		`"request": {"method": "GET", "url": "` + url + `"}`, fails,
+	}, extra...)
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
@@ -101,7 +106,7 @@ func TestReadyToPublish_LooseEnds(t *testing.T) {
 			// prefs' Unhandled goes on to sorry, which answers nothing; the
 			// answer needs prefs' 2xx.
 			"after an Unhandled",
-			`{"nodes": [{"id": "prefs", "kind": "http", "request": {"method": "GET", "url": "https://prefs.example.com/v1"}}, ` +
+			`{"nodes": [{"id": "prefs", "kind": "http", "uses": {"upstream": "u", "version": 1}, "request": {"method": "GET", "url": "https://prefs.example.com/v1"}}, ` +
 				value("sorry", "'down'") + `, ` + get("crm", "https://crm.example.com/v1") + `],
 			  "edges": [{"from": "prefs", "to": "crm"}, {"from": "prefs", "to": "sorry", "unhandled": true}],
 			  "response": {"answers": [{"status": 200, "lines": [{"from": "crm"}]}]}}`,
@@ -128,7 +133,7 @@ func TestReadyToPublish_LooseEnds(t *testing.T) {
 			// One exit (plan 14): every node's failures into the 500, listed
 			// first, and each result into an answer below it.
 			"failures into one answer, above the rest",
-			`{"nodes": [{"id": "prefs", "kind": "http", "request": {"method": "GET", "url": "https://prefs.example.com/v1"}, "outputs": [{"status": 404}]},
+			`{"nodes": [{"id": "prefs", "kind": "http", "uses": {"upstream": "u", "version": 1}, "request": {"method": "GET", "url": "https://prefs.example.com/v1"}, "outputs": [{"status": 404}]},
 			    {"id": "note", "kind": "transform", "expr": "'no prefs'"}],
 			  "edges": [{"from": "prefs", "to": "note", "on": 404}],
 			  "response": {"answers": [{"status": 500, "lines": [{"from": "prefs", "unhandled": true}, {"from": "note", "unhandled": true}]},
@@ -201,7 +206,7 @@ func TestReadyToPublish_Failures(t *testing.T) {
 			// says so itself.
 			"a node that never runs",
 			`{"nodes": [` + get("a", "https://a.example.com/v1", `"outputs": [{"status": 404}]`) + `,
-			    ` + value("b", "1") + `, {"id": "c", "kind": "http", "request": {"method": "GET", "url": "https://c.example.com/v1"}}],
+			    ` + value("b", "1") + `, {"id": "c", "kind": "http", "uses": {"upstream": "u", "version": 1}, "request": {"method": "GET", "url": "https://c.example.com/v1"}}],
 			  "edges": [{"from": "a", "to": "b", "on": 404}, {"from": "a", "to": "c"}, {"from": "b", "to": "c"}],
 			  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 404, "lines": [{"from": "b"}]}]}}`,
 			"",
@@ -222,7 +227,7 @@ func TestReadyToPublish_Failures(t *testing.T) {
 // above it never answers.
 func TestReadyToPublish_NeverAnswers(t *testing.T) {
 	t.Parallel()
-	crm := `{"id": "crm", "kind": "http", "request": {"method": "GET", "url": "https://crm.example.com/v1"}}`
+	crm := `{"id": "crm", "kind": "http", "uses": {"upstream": "u", "version": 1}, "request": {"method": "GET", "url": "https://crm.example.com/v1"}}`
 	fallback := `"nodes": [` + crm + `, ` + get("fallback", "https://crm.example.com/v1/cached") + `],
 	  "edges": [{"from": "crm", "to": "fallback", "unhandled": true}]`
 	// pick's failures join the 502, below the rest, unless they fail the run.
@@ -332,13 +337,54 @@ func TestReadyToPublish_NeverAnswers(t *testing.T) {
 // The words name both blocks and both answers, as the screen shows them.
 func TestReadyToPublish_NeverAnswersSays(t *testing.T) {
 	t.Parallel()
-	d := decode(t, `{"nodes": [{"id": "crm", "kind": "http", "request": {"method": "GET", "url": "https://crm.example.com/v1"}}, `+
+	d := decode(t, `{"nodes": [{"id": "crm", "kind": "http", "uses": {"upstream": "u", "version": 1}, "request": {"method": "GET", "url": "https://crm.example.com/v1"}}, `+
 		value("note", "'cached'")+`],
 	  "edges": [{"from": "crm", "to": "note", "unhandled": true}],
 	  "response": {"answers": [{"status": 500, "lines": [{"from": "crm", "unhandled": true}]}, {"status": 200, "lines": [{"from": "crm"}, {"from": "note"}]}]}}`)
 	want := "note runs only after crm's Unhandled, which gives the 500 answer, above, so its value never gives 200"
 	if ps := ReadyToPublish(d); len(ps) != 1 || ps[0].Detail != want {
 		t.Errorf("ReadyToPublish() = %+v, want one saying %q", []Problem(ps), want)
+	}
+}
+
+// Conduit sets W3C trace context on every call, carrying the hop count that
+// stops a loop (plan 06), so a step doesn't. A run overwrites one, so it's a
+// problem only at publishing.
+func TestReadyToPublish_ReservedHeaders(t *testing.T) {
+	t.Parallel()
+	d := decode(t, `{"nodes": [{"id": "crm", "kind": "http", `+fails+`, "request": {"method": "GET", "url": "https://crm.example.com/v1",
+	    "headers": {"TraceState": "conduit=h:0", "traceparent": "x", "X-Trace": "1"}}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "crm"}]}]}}`)
+	if ps := Validate(d); len(ps) > 0 {
+		t.Fatalf("Validate() = %v, want none: a run still runs", ps)
+	}
+	want := "/nodes/0/request own_request\n/nodes/0/request/headers/TraceState reserved_header\n/nodes/0/request/headers/traceparent reserved_header"
+	if got := found(ReadyToPublish(d)); got != want {
+		t.Errorf("ReadyToPublish() =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// Publish takes only HTTP steps that use an upstream (plan 07, 2026-11-03),
+// so every call, and how it's handled, is in the library. A run still runs
+// a step with a request of its own, as revisions saved before have them.
+func TestReadyToPublish_OwnRequests(t *testing.T) {
+	t.Parallel()
+	d := decode(t, `{"nodes": [{"id": "crm", "kind": "http", `+fails+`, "request": {"method": "GET", "url": "https://crm.example.com/v1"}},
+	    `+get("user", "https://users.example.com/v1")+`],
+	  "edges": [{"from": "user", "to": "crm"}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "crm"}]}]}}`)
+	if ps := Validate(d); len(ps) > 0 {
+		t.Fatalf("Validate() = %v, want none: a run still runs", ps)
+	}
+	if got := found(ReadyToPublish(d)); got != "/nodes/0/request own_request" {
+		t.Errorf("ReadyToPublish() = %s, want crm's own request", got)
+	}
+
+	// A step with neither has no request to save: Validate says it needs one.
+	d = decode(t, `{"nodes": [{"id": "crm", "kind": "http", `+fails+`}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "crm"}]}]}}`)
+	if got := found(ReadyToPublish(d)); got != "" {
+		t.Errorf("ReadyToPublish() of a step with neither = %s, want none", got)
 	}
 }
 

@@ -3,6 +3,7 @@ package transform
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"slices"
 	"strings"
@@ -199,6 +200,35 @@ func TestCompileTemplate_RejectsBadPlaceholders(t *testing.T) {
 
 // The guardrails stop runaway expressions. Each case names the JSONata error
 // code it expects.
+// What an expression or a template reads, as paths from the root of what
+// it's given, and whether that's all: an upstream's templates may read only
+// its parameters (plan 07).
+func TestReads(t *testing.T) {
+	t.Parallel()
+	x, err := Compile("{ 'email': user.email, 'orders': $count(orders) }")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths, complete := x.Reads(); !complete || fmt.Sprint(paths) != "[[user email] [orders]]" {
+		t.Errorf("Expr.Reads() = %v, %v", paths, complete)
+	}
+	tm, err := CompileTemplate("https://users.example.com/{{ user_id }}?page={{ page.next }}&q={{ user_id }}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths, complete := tm.Reads(); !complete || fmt.Sprint(paths) != "[[user_id] [page next] [user_id]]" {
+		t.Errorf("Template.Reads() = %v, %v", paths, complete)
+	}
+	// The whole input, read through a wildcard, isn't a list of paths.
+	all, err := CompileTemplate("{{ $string(*) }} {{ a }}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, complete := all.Reads(); complete {
+		t.Error("Template.Reads() of a wildcard is complete")
+	}
+}
+
 func TestGuardrails(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

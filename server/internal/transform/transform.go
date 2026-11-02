@@ -59,6 +59,14 @@ func Compile(src string) (*Expr, error) {
 	return &Expr{e: e}, nil
 }
 
+// Reads is what x reads, as paths of field names from the root of what
+// it's given, and whether that's all: complete is false when it may read
+// what it doesn't name, the whole input say. A static analysis, gnata's,
+// not a boundary.
+func (x *Expr) Reads() (paths [][]string, complete bool) {
+	return x.e.ReferencedPaths()
+}
+
 // Eval evaluates x over doc, raw JSON, and returns the value as JSON.
 func (x *Expr) Eval(ctx context.Context, doc []byte) (json.RawMessage, error) {
 	v, err := x.e.EvalBytes(ctx, doc)

@@ -414,6 +414,16 @@ test.each([
     "Joined to this answer twice: remove one.",
   ],
   [
+    "/nodes/1/request",
+    "own_request",
+    "Save it as an upstream: Publish takes only steps that use one.",
+  ],
+  [
+    "/nodes/1/request/headers/traceparent",
+    "reserved_header",
+    "Conduit sets traceparent on every call, to stop a workflow calling itself for ever: remove it.",
+  ],
+  [
     "/response/answers/2/lines/0/unhandled",
     "not_allowed",
     "A line leaves from one block: one of the step's responses, or its Unhandled.",

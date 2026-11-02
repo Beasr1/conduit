@@ -70,6 +70,10 @@ type node struct {
 	attempts   int
 	idempotent bool
 	outputs    []int // the statuses besides 2xx it answers with
+	// bound says it uses an upstream (plan 07): its request reads the values
+	// with gives its parameters, not the run.
+	bound bool
+	with  []binding // sorted by name
 
 	// catches says a line leaves its Unhandled block, which then takes its
 	// failures. unhandled is the block's body; nil: it gives what it got.
@@ -90,6 +94,13 @@ type node struct {
 type param struct {
 	name  string
 	value *transform.Template
+}
+
+// binding is a parameter of an upstream a node uses, and the expression
+// that gives it a value.
+type binding struct {
+	name  string
+	value *transform.Expr
 }
 
 // switchCase is one of a switch's cases.
@@ -144,6 +155,12 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 			}
 			for _, o := range n.Outputs {
 				pn.outputs = append(pn.outputs, o.Status)
+			}
+			if n.Uses != nil {
+				pn.bound = true
+				for _, name := range slices.Sorted(maps.Keys(n.With)) {
+					pn.with = append(pn.with, binding{name: name, value: c.expr(ptr+"/with/"+workflow.PointerToken(name), n.With[name])})
+				}
 			}
 		case n.Kind == workflow.NodeKindTransform && n.Switch != nil:
 			pn.cases, pn.whole = c.cases(ptr+"/switch", n.Switch)

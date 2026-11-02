@@ -17,13 +17,14 @@ const (
 )
 
 // retryable reports whether a failure may succeed if sent again: no usable
-// exchange, a timeout, 429, or a 5xx.
+// exchange, a timeout, 429, or a 5xx but 508, a loop refused, which meets
+// the same refusal every time (plan 06).
 func retryable(e *Error) bool {
 	switch e.Kind {
 	case KindTransport, KindTimeout:
 		return true
 	case KindStatus:
-		return e.Status == http.StatusTooManyRequests || e.Status >= 500
+		return e.Status == http.StatusTooManyRequests || (e.Status >= 500 && e.Status != http.StatusLoopDetected)
 	default:
 		return false
 	}

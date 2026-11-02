@@ -179,7 +179,7 @@ type Node struct {
 	// Outputs An http node's answers besides 2xx, which is every http node's first output. A run takes a status listed here as the node's answer, and only the edges on its output can be taken; any other status outside 2xx fails the node, and its Unhandled block takes that as it takes every failure of the node's.
 	Outputs []Output `json:"outputs,omitempty"`
 
-	// Request The call an http node makes.
+	// Request The call an http node makes, unless it uses an upstream.
 	Request *HTTPRequest `json:"request,omitempty"`
 
 	// Sample An http node's made-up or redacted 2xx response, which previews read in place of a real one. Runs ignore it.
@@ -190,6 +190,12 @@ type Node struct {
 
 	// Unhandled What a node does with its failures. Its Unhandled block takes them when a line or an answer leaves from it, and gives its body, or, without one, what an http node got back, if anything. With no line from it, they fail the run, and publishing needs that chosen, with fail (plan 12).
 	Unhandled *NodeUnhandled `json:"unhandled,omitempty"`
+
+	// Uses The upstream an http node calls, at a version, in place of a request of its own (plan 07). Its request, responses and samples are the version's, and the node has none of its own.
+	Uses *Uses `json:"uses,omitempty"`
+
+	// With For a node that uses an upstream, a JSONata expression over the run for each of the upstream's parameters, which its request reads.
+	With map[string]string `json:"with,omitempty"`
 }
 
 // NodeKind An http node calls an upstream, once every edge into it was taken. A transform node gives what its JSONata does, once every required edge into it was and, with none required, any was, reading whichever nodes came; one with no edge into it runs first.
@@ -211,6 +217,15 @@ type Output struct {
 
 	// Status Listed once in a node.
 	Status int `json:"status"`
+}
+
+// Parameter defines model for Parameter.
+type Parameter struct {
+	// Name Unique in its upstream. Its templates read it as {{ name }}, and its body as name.
+	Name string `json:"name"`
+
+	// Sample A made-up value, any JSON, which the library's preview of the upstream gives the parameter; a step gives it its own. At most 64 KiB.
+	Sample json.RawMessage `json:"sample,omitempty"`
 }
 
 // Position A point on the canvas. A missing coordinate reads as 0.
@@ -258,4 +273,26 @@ type Switch struct {
 type UI struct {
 	// Positions Where each node sits on the editor's canvas, keyed by node id. A node without one is laid out by the editor; a position for a node that isn't in the workflow is ignored.
 	Positions map[string]Position `json:"positions,omitempty"`
+}
+
+// Upstream A saved API endpoint and how it's handled, one version of it (plan 07). Every save makes a new version, which never changes, and a step that uses the upstream pins one. Its templates and body read its parameters by name, {{ user_id }}, and each step that uses it gives them values.
+type Upstream struct {
+	// Outputs Its answers besides 2xx, as an http node's. A step that uses it has a block for each, and lines from them.
+	Outputs []Output `json:"outputs,omitempty"`
+
+	// Parameters What a step that uses it gives it, each a JSONata expression over the step's run. Its templates and body read them by name, and nothing else.
+	Parameters []Parameter `json:"parameters,omitempty"`
+
+	// Request The call, as an http node's, its templates and body reading the parameters.
+	Request HTTPRequest `json:"request"`
+
+	// Sample Its made-up or redacted 2xx response, which previews of a step that uses it read.
+	Sample *Sample `json:"sample,omitempty"`
+}
+
+// Uses An upstream, pinned to a version, which never changes (plan 07).
+type Uses struct {
+	// Upstream The upstream's id.
+	Upstream string `json:"upstream"`
+	Version  int    `json:"version"`
 }

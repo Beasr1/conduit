@@ -54,7 +54,7 @@ func TestEndToEnd(t *testing.T) {
 	r := send(http.MethodPost, "/v1/workflows", `{"slug": "`+slug+`", "name": "Greet", "definition": {"nodes": []}}`)
 	want(r, http.StatusCreated, "create")
 	id := strict[gen.WorkflowRevision](t, r.body).Workflow.ID
-	def := strings.ReplaceAll(greetDef, "BASE", base)
+	def := withUpstreams(t, strings.ReplaceAll(greetDef, "BASE", base))
 	r = send(http.MethodPut, "/v1/workflows/"+id+"/draft", def, "If-Match", `"1"`)
 	want(r, http.StatusOK, "save on revision 1")
 	if r.header.Get("ETag") != `"2"` {

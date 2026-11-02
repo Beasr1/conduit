@@ -36,6 +36,8 @@ const fieldNames: Record<StepField, string> = {
   case_body: "Body",
   unhandled: "Unhandled",
   unhandled_body: "Unhandled · Body",
+  uses: "Upstream",
+  with: "Parameter",
 };
 
 const everywhere = () => true;
@@ -43,6 +45,7 @@ const everywhere = () => true;
 // The forms' element ids for a step's fields.
 const fieldIds: Partial<Record<StepField, string>> = {
   id: "step-id",
+  request: "step-save-as-upstream",
   method: "step-method",
   url: "step-url",
   body: "step-body",
@@ -54,6 +57,7 @@ const fieldIds: Partial<Record<StepField, string>> = {
   expr: "step-expr",
   unhandled: "step-unhandled-fail",
   unhandled_body: "step-unhandled-body",
+  uses: "step-upstream",
 };
 
 // fieldOf is the element a problem's field is drawn as, once its panel is
@@ -74,6 +78,7 @@ function fieldOf(
         const part = code === "invalid_header_name" ? "name" : "value";
         if (row >= 0) return `step-${field}-${row}-${part}`;
       }
+      if (field === "with" && name !== undefined) return `step-with-${name}`;
       const status = statusOf(place, draft);
       if (status !== undefined) return `step-sample-${status}-body`;
       if (place.case !== undefined && field?.startsWith("case_"))
@@ -275,7 +280,9 @@ export function Where({ place, draft }: { place: Place; draft: Definition }) {
                 ? fieldNames[place.field]
                 : place.field === "headers"
                   ? `Request header “${place.name}”`
-                  : `Query parameter “${place.name}”`;
+                  : place.field === "with"
+                    ? `Parameter “${place.name}”`
+                    : `Query parameter “${place.name}”`;
       return (
         <>
           <span className="font-mono">{id}</span>

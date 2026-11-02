@@ -59,6 +59,9 @@ export function EditorHeader({
   const editor = useEditorStore();
   const draft = useEditor((s) => s.draft);
   const openPanel = useEditor((s) => s.openPanel);
+  // An upstream open for editing in place (plan 07) is saved, or put away,
+  // before the workflow: a save would leave its changes out.
+  const editingUpstream = useEditor((s) => s.upstreamEdit !== undefined);
   const check = useContext(CheckContext);
   const { failed: unchecked } = useContext(CheckingContext);
   const problems = useProblems(everywhere).length;
@@ -121,7 +124,7 @@ export function EditorHeader({
     e.preventDefault();
     // The draft as it is now: the id field may have just applied what was
     // typed in it, after this last drew.
-    if (save.isPending || newer) return;
+    if (save.isPending || newer || editor.getState().upstreamEdit) return;
     if (changed(editor.getState().draft, saved)) void saveDraft(base);
   });
   useEffect(() => {
@@ -173,6 +176,7 @@ export function EditorHeader({
       </span>,
     );
   if (unchecked) status.push("Couldn't check for problems");
+  if (editingUpstream) status.push("Save or discard the upstream first");
 
   const served = new URL(`/serve/${workflow.slug}`, window.location.origin)
     .href;
@@ -211,20 +215,26 @@ export function EditorHeader({
         )}
         <Button
           variant="outline"
-          disabled={!dirty || save.isPending || newer}
+          disabled={!dirty || save.isPending || newer || editingUpstream}
           onClick={() => void saveDraft(base)}
         >
           {save.isPending ? "Saving…" : "Save"}
         </Button>
         <RunButton
           workflow={workflow.id}
-          disabled={save.isPending || newer}
+          disabled={save.isPending || newer || editingUpstream}
           revision={async () =>
             dirty ? (await saveDraft(base))?.revision : base
           }
         />
         <Button
-          disabled={live || save.isPending || publish.isPending || newer}
+          disabled={
+            live ||
+            save.isPending ||
+            publish.isPending ||
+            newer ||
+            editingUpstream
+          }
           onClick={() => void publishDraft()}
         >
           {publish.isPending ? "Publishing…" : live ? "Published" : "Publish"}

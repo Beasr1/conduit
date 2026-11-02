@@ -146,7 +146,11 @@ func TestCreateWorkflow_Refusals(t *testing.T) {
 func TestEveryJSONBodyRefusesUnknownFields(t *testing.T) {
 	t.Parallel()
 	id := create(t, validDef).Workflow.ID
+	upstream := makeUpstream(t, usersAPI).Upstream.ID
 	paths := map[string]string{
+		"POST /v1/upstreams":              "/v1/upstreams",
+		"PUT /v1/upstreams/{id}":          "/v1/upstreams/" + upstream,
+		"POST /v1/upstreams/validate":     "/v1/upstreams/validate",
 		"POST /v1/workflows":              "/v1/workflows",
 		"PUT /v1/workflows/{id}/draft":    "/v1/workflows/" + id + "/draft",
 		"POST /v1/workflows/{id}/publish": "/v1/workflows/" + id + "/publish",
@@ -302,6 +306,40 @@ func TestPublish_WaitsForWhatARunDoesnt(t *testing.T) {
 	}
 	if r := call(t, http.MethodPost, "/v1/workflows/"+id+"/publish", `{"revision": 2}`); r.status != 200 {
 		t.Errorf("publish once decided = %d %s", r.status, r.body)
+	}
+}
+
+// Publish takes only HTTP steps that use an upstream (plan 07, 2026-11-03):
+// a step with a request of its own saves and runs, and Publish refuses it
+// until it uses one; a revision published before is still served.
+func TestPublish_TakesStepsThatUseAnUpstream(t *testing.T) {
+	t.Parallel()
+	base := usersUpstream(t).URL
+	own := strings.ReplaceAll(`{"nodes": [{"id": "user", "kind": "http", "unhandled": {"fail": true},
+	    "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}]}}`, "BASE", base)
+	wr := create(t, own)
+	id := wr.Workflow.ID
+	if got := pointers(gen.Problem{Errors: wr.Revision.Problems}); got != "/nodes/0/request own_request" {
+		t.Errorf("saved with problems %q", got)
+	}
+	if r := call(t, http.MethodPost, "/v1/workflows/"+id+"/runs", `{"input": {"user_id": "7"}}`); r.status != http.StatusAccepted {
+		t.Errorf("run = %d %s, want 202", r.status, r.body)
+	}
+	r := call(t, http.MethodPost, "/v1/workflows/"+id+"/publish", `{"revision": 1}`)
+	if p := problemOf(t, r); r.status != 422 || pointers(p) != "/nodes/0/request own_request" {
+		t.Errorf("publish = %d %+v", r.status, p)
+	}
+	if r := call(t, http.MethodPut, "/v1/workflows/"+id+"/draft", withUpstreams(t, own), "If-Match", `"1"`); r.status != 200 {
+		t.Fatalf("save = %d %s", r.status, r.body)
+	}
+	if r := call(t, http.MethodPost, "/v1/workflows/"+id+"/publish", `{"revision": 2}`); r.status != 200 {
+		t.Errorf("publish once it uses one = %d %s", r.status, r.body)
+	}
+
+	before := publishedBefore(t, base, own).Workflow.Slug
+	if r := call(t, http.MethodPost, "/serve/"+before, `{"user_id": "7"}`); r.status != http.StatusOK {
+		t.Errorf("serve what was published before = %d %s", r.status, r.body)
 	}
 }
 

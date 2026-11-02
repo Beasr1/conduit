@@ -17,6 +17,8 @@ func ReadyToPublish(d *Definition) Problems {
 	if d.Response == nil {
 		v.add("/response/answers", "no_answers", "the workflow answers nothing: add an answer to its response, and join a step to it")
 	}
+	v.checkReservedHeaders(d)
+	v.checkOwnRequests(d)
 	index := make(map[string]int, len(d.Nodes))
 	for i, n := range d.Nodes {
 		if _, taken := index[n.ID]; !taken && n.ID != "" {
@@ -37,6 +39,29 @@ func ReadyToPublish(d *Definition) Problems {
 		v.checkAnswered(d, index, need)
 	}
 	return v.problems
+}
+
+// checkReservedHeaders reports each node's request header Conduit sets on
+// every call itself (checkReserved). A run overwrites it, so a revision
+// published with one still runs.
+func (v *validator) checkReservedHeaders(d *Definition) {
+	for i, n := range d.Nodes {
+		if n.Request != nil {
+			v.checkReserved(fmt.Sprintf("/nodes/%d/request/headers", i), n.Request.Headers)
+		}
+	}
+}
+
+// checkOwnRequests reports each HTTP node with a request of its own rather
+// than an upstream it uses: the library keeps every call, and how it's
+// handled, in one place (plan 07, 2026-11-03). A revision saved or
+// published with one still runs.
+func (v *validator) checkOwnRequests(d *Definition) {
+	for i, n := range d.Nodes {
+		if n.Kind == NodeKindHTTP && n.Uses == nil && n.Request != nil {
+			v.add(fmt.Sprintf("/nodes/%d/request", i), "own_request", "it has a request of its own: save it as an upstream, so the call and how it's handled are kept in one place")
+		}
+	}
 }
 
 // checkFailures reports each node whose failures go nowhere anyone chose:

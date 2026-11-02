@@ -2,17 +2,22 @@ import { useState } from "react";
 import { useParams } from "react-router";
 
 import { Editor } from "@/features/editor/components/editor";
+import { fill } from "@/features/editor/upstreams";
+import { useVersionsOf } from "@/features/upstreams/hooks/use-upstreams";
 import { useWorkflow } from "@/features/workflows/hooks/use-workflows";
 
 // The workflow's page: its editor, opened on the latest revision.
 export function Component() {
   const { id = "" } = useParams();
   const { data, isPending, refetch } = useWorkflow(id);
+  // The versions of upstreams its steps use, which draw those steps (plan
+  // 07).
+  const used = useVersionsOf(data?.revision.definition);
   // Counts the times the newest revision was opened afresh, as when another
   // tab saved first. Until then the editor keeps what it opened.
   const [opened, setOpened] = useState(0);
 
-  if (isPending)
+  if (isPending || used.pending)
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   // A refetch that fails keeps the workflow on screen, and the draft with it.
   if (!data)
@@ -23,7 +28,11 @@ export function Component() {
       <Editor
         key={`${data.workflow.id}#${opened}`}
         workflow={data.workflow}
-        revision={data.revision}
+        revision={{
+          ...data.revision,
+          definition: fill(data.revision.definition, used.versions),
+        }}
+        versions={used.versions}
         onReload={() =>
           void refetch().then((r) => {
             if (r.isSuccess) setOpened((n) => n + 1);

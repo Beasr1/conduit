@@ -99,8 +99,9 @@ func TestSimulate_ReadsTheSamplesAndRendersTheRequest(t *testing.T) {
 	if !sameJSON(t, s.Body, `{"email": "ada@example.com", "newsletter": true}`) {
 		t.Errorf("body %s", s.Body)
 	}
-	if pv.Skipped || pv.Gives != nil {
-		t.Errorf("skipped %v, gives %s", pv.Skipped, pv.Gives)
+	// A request of its own reads the run, and has no parameters.
+	if pv.Skipped || pv.Gives != nil || pv.Parameters != nil {
+		t.Errorf("skipped %v, gives %s, parameters %s", pv.Skipped, pv.Gives, pv.Parameters)
 	}
 }
 

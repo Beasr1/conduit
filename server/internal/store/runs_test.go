@@ -9,9 +9,12 @@ import (
 	"github.com/Beasr1/conduit/server/internal/store"
 )
 
+// traceID is the W3C spec's example trace id.
+const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+
 func startRun(t *testing.T, w store.Workflow) store.Run {
 	t.Helper()
-	r, err := db.StartRun(t.Context(), w.ID, 1, "editor", json.RawMessage(`{"user_id":"7"}`))
+	r, err := db.StartRun(t.Context(), w.ID, 1, "editor", traceID, json.RawMessage(`{"user_id":"7"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +26,7 @@ func TestRun_StartRecordFinish(t *testing.T) {
 	ctx := t.Context()
 	w := create(t)
 	r := startRun(t, w)
-	if len(r.ID) != 36 || r.WorkflowID != w.ID || r.Revision != 1 || r.Trigger != "editor" || r.Status != "running" ||
+	if len(r.ID) != 36 || r.WorkflowID != w.ID || r.Revision != 1 || r.Trigger != "editor" || r.Status != "running" || r.TraceID != traceID ||
 		string(r.Input) != `{"user_id": "7"}` || r.Output != nil || r.Error != nil || r.EndedAt != nil {
 		t.Errorf("started run = %+v", r)
 	}
@@ -86,7 +89,7 @@ func TestRun_KeepsTheAnswer(t *testing.T) {
 		t.Errorf("run = %+v", done)
 	}
 	// A list says what each run answered, without the body.
-	if list, err := db.Runs(t.Context(), w.ID, 1, ""); err != nil || len(list) != 1 || list[0].Answered != 404 || list[0].Output != nil {
+	if list, err := db.Runs(t.Context(), w.ID, 1, ""); err != nil || len(list) != 1 || list[0].Answered != 404 || list[0].Output != nil || list[0].TraceID != traceID {
 		t.Errorf("Runs() = %+v, %v", list, err)
 	}
 }

@@ -1,7 +1,7 @@
 # 00 — Roadmap
 
 Status: proposed. Each decision's own status is in the table below; D2,
-D3, D4–D13, D15, D16, D18 and D19 are decided; D1, D14 and D17 are open.
+D3, D4–D16, D18 and D19 are decided; D1 and D17 are open.
 Updated 2026-10-28.
 
 ## Goal
@@ -219,6 +219,11 @@ Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
       publishing changes the API immediately. Versioned endpoints can come
       later if callers need them.
     - It's recorded like any other run, so it shows up in history.
+    - A call carrying W3C trace context continues its trace, and every
+      call a run makes carries it on, one hop further; a call that has
+      passed through Conduit 8 times is refused with 508 before a run
+      starts. One workflow may have a quarter of the runs in progress at
+      once, so a loop Conduit can't see holds only its own (plan 06).
 
 ## Decisions
 
@@ -237,7 +242,7 @@ Plan 02 made it exact in `schema/workflow.yaml`. `input_schema`,
 | D11 | Web router | React Router 8, data mode | familiar | TanStack Router | accepted (2026-10-28, plan 04) |
 | D12 | v1 auth | one bearer token from env; listen on localhost by default | an open server that calls arbitrary URLs is an open proxy | user accounts | accepted |
 | D13 | Node kinds | `http` and `transform`; branch with outputs, a transform's cases, its exits (2026-11-01), and edge `when`s, combine with a transform's mapping. A transform runs once all edges into it have ended, if each marked required was taken and, with none marked, any was; an http node needs each one (2026-11-01) | fewer node types, same reach | dedicated merge, branch and filter nodes; a merge node was built and folded into transform (2026-11-01) | accepted (2026-10-28, plan 04; joins 2026-11-01, plan 04) |
-| D14 | Upstream reuse | the library is a template; a node keeps its own copy; credentials are by reference | workflow versions stay immutable and self-contained | nodes reference live upstream records | proposed |
+| D14 | Upstream reuse | a step pins a version of a saved upstream, which holds the API and how it's handled; every save of an upstream is a new version, never edited; a newer one is offered on the step and taken as an edit; credentials are by reference (06); Publish takes only steps that use one | a published workflow never changes under its callers, and the handling lives in one place (your call, 2026-11-02, plan 07; upstreams only, 2026-11-03) | a copy in each node, the template (as first proposed); live references to the latest; steps with a request of their own beside them, as every tool checked keeps | accepted (2026-11-02) |
 | D15 | Host and CI | GitHub, Actions running `just check` | personal account | GitLab CI | accepted |
 | D16 | Commit trailer | none | one-line commits | Co-Authored-By | accepted |
 | D17 | AI readiness | v1 keeps the seams listed in 08; no AI code | cheap now, a rewrite later | build AI first; ignore it until later | proposed |

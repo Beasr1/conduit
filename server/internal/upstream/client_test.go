@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"code.dny.dev/ssrf"
+
+	"github.com/Beasr1/conduit/server/internal/trace"
 )
 
 // loopbackClient reaches httptest servers on 127.0.0.1 and nothing else
@@ -159,6 +161,38 @@ func TestDo_SendsJSONAndKeepsCallerHeaders(t *testing.T) {
 	}
 	if gotBody != `{"email":"ada@example.com"}` {
 		t.Errorf("body sent = %s", gotBody)
+	}
+}
+
+// Every call carries the run's trace on, one hop further, whatever the
+// step's own headers say (plan 06); without one, a call starts a trace.
+func TestDo_PassesTheTraceOn(t *testing.T) {
+	t.Parallel()
+	var got []http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Clone())
+	}))
+	defer srv.Close()
+
+	in := trace.Read(http.Header{
+		"Traceparent": {"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
+		"Tracestate":  {"conduit=h:2,rojo=1"},
+	})
+	forged := http.Header{"Traceparent": {"00-11111111111111111111111111111111-1111111111111111-01"}, "Tracestate": {"conduit=h:0"}}
+	if _, err := loopbackClient().Do(trace.With(t.Context(), in), &Request{Method: http.MethodGet, URL: srv.URL, Header: forged}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loopbackClient().Do(t.Context(), get(srv.URL)); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("%d calls arrived, want 2", len(got))
+	}
+	if tp, ts := got[0].Get("Traceparent"), got[0].Get("Tracestate"); !strings.HasPrefix(tp, "00-4bf92f3577b34da6a3ce929d0e0e4736-") || ts != "conduit=h:3,rojo=1" {
+		t.Errorf("in a trace: traceparent %q, tracestate %q", tp, ts)
+	}
+	if tp, ts := got[1].Get("Traceparent"), got[1].Get("Tracestate"); len(tp) != 55 || ts != "conduit=h:1" {
+		t.Errorf("in none: traceparent %q, tracestate %q", tp, ts)
 	}
 }
 

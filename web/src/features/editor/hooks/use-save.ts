@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import { strip } from "@/features/editor/upstreams";
 import type { components } from "@/gen/schema";
 import { api, ApiError, call } from "@/lib/api";
 import { workflowKeys } from "@/lib/query-keys";
@@ -21,7 +22,8 @@ export function useSaveDraft(id: string) {
       call((signal) =>
         api.PUT("/v1/workflows/{id}/draft", {
           params: { path: { id }, header: { "If-Match": etag(base) } },
-          body: draft,
+          // What fill gave a step that uses an upstream is its version's.
+          body: strip(draft),
           signal,
         }),
       ),

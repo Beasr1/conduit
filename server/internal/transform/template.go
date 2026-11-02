@@ -19,6 +19,7 @@ type Template struct {
 type part struct {
 	text string            // literal text, or the placeholder's expression
 	e    *gnata.Expression // nil for literal text
+	raw  *gnata.Expression // the expression as written, for what it reads
 }
 
 // CompileTemplate compiles src. Each placeholder's value becomes text the way
@@ -45,16 +46,29 @@ func CompileTemplate(src string) (*Template, error) {
 		if expr == "" {
 			return nil, errors.New("a placeholder is empty")
 		}
-		if _, err := compile(expr); err != nil {
+		raw, err := compile(expr)
+		if err != nil {
 			return nil, fmt.Errorf("{{ %s }}: %w", expr, err)
 		}
 		e, err := compile("$string(" + expr + ")")
 		if err != nil {
 			return nil, fmt.Errorf("{{ %s }}: %w", expr, err)
 		}
-		t.parts = append(t.parts, part{text: expr, e: e})
+		t.parts = append(t.parts, part{text: expr, e: e, raw: raw})
 		rest = rest[i+2+j+2:]
 	}
+}
+
+// Reads is what t's placeholders read, as Expr.Reads says, in order.
+func (t *Template) Reads() (paths [][]string, complete bool) {
+	complete = true
+	for _, p := range t.parts {
+		if p.raw != nil {
+			some, all := p.raw.ReferencedPaths()
+			paths, complete = append(paths, some...), complete && all
+		}
+	}
+	return paths, complete
 }
 
 // Render evaluates each placeholder over doc and joins the parts. If escape

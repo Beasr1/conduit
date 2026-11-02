@@ -22,9 +22,13 @@ const MAX_OUTPUT = 599;
 export function StepOutput({
   index,
   status,
+  locked = false,
 }: {
   index: number;
   status?: number;
+  // Its sample is an upstream's, unless the upstream is being edited
+  // (plan 07); what follows it stays the workflow's.
+  locked?: boolean;
 }) {
   const [kept, setKept] = useState(0);
   return (
@@ -32,11 +36,14 @@ export function StepOutput({
       <RunGot
         index={index}
         status={status}
+        locked={locked}
         kept={() => setKept((n) => n + 1)}
       />
       {/* Keyed by the times a run's answer was kept, so its fields show
           the sample they were given rather than what was typed before. */}
-      <StepSample key={kept} index={index} status={status} />
+      <fieldset disabled={locked} className="contents">
+        <StepSample key={kept} index={index} status={status} />
+      </fieldset>
       <StepConnections index={index} on={status} />
     </div>
   );

@@ -14,6 +14,8 @@ export const routes = {
     from ? `/sign-in?${new URLSearchParams({ from })}` : "/sign-in",
   workflows: () => "/workflows",
   workflow: (id: string) => `/workflows/${encodeURIComponent(id)}`,
+  upstreams: () => "/upstreams",
+  upstream: (id: string) => `/upstreams/${encodeURIComponent(id)}`,
 };
 
 // safeFrom is where to go after signing in: a path on this site, or the
@@ -86,6 +88,11 @@ export const appRoutes: RouteObject[] = [
               {
                 path: "workflows/:id",
                 lazy: () => import("@/routes/workflow"),
+              },
+              { path: "upstreams", lazy: () => import("@/routes/upstreams") },
+              {
+                path: "upstreams/:id",
+                lazy: () => import("@/routes/upstream"),
               },
             ],
           },
