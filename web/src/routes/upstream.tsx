@@ -1,7 +1,7 @@
 import { useParams } from "react-router";
 
-import { UpstreamPage } from "@/features/upstreams/components/upstream-page";
-import { useUpstream } from "@/features/upstreams/hooks/use-upstreams";
+import { UpstreamPage } from "@/features/editor/components/upstream-page";
+import { useUpstream } from "@/features/editor/hooks/use-upstreams";
 
 // An upstream's page, opened on its latest version (plan 07).
 export function Component() {

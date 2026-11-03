@@ -370,3 +370,71 @@ test("a workflow as a step: pick a published one, give its input, run and serve 
   expect(served.status()).toBe(200);
   expect(await served.json()).toMatchObject({ id: "7", name: "User 7" });
 });
+
+// Plan 07's Delete: an upstream no saved revision pins goes, with every
+// version, and the library no longer lists it; one a revision pins stays,
+// the dialog saying which.
+test("delete: an upstream nothing pins goes, and one a revision pins stays", async ({
+  page,
+}) => {
+  const tag = Date.now().toString(36);
+  const auth = { Authorization: `Bearer ${stack.token}` };
+  const make = async (name: string) => {
+    const r = await page.request.post("/api/v1/upstreams", {
+      headers: auth,
+      data: {
+        name,
+        definition: {
+          parameters: [{ name: "user_id" }],
+          request: {
+            method: "GET",
+            url: `${stack.upstream}/users/{{ user_id }}`,
+          },
+        },
+      },
+    });
+    expect(r.status()).toBe(201);
+    return ((await r.json()) as { upstream: { id: string } }).upstream.id;
+  };
+  const spare = await make(`Spare ${tag}`);
+  const pinned = await make(`Pinned ${tag}`);
+  const made = await page.request.post("/api/v1/workflows", {
+    headers: auth,
+    data: {
+      slug: `pins-${tag}`,
+      name: `Pins ${tag}`,
+      definition: {
+        nodes: [
+          {
+            id: "user",
+            kind: "http",
+            uses: { upstream: pinned, version: 1 },
+            with: { user_id: "input.id" },
+          },
+        ],
+      },
+    },
+  });
+  expect(made.status()).toBe(201);
+
+  await signIn(page);
+  await page.goto(`/upstreams/${pinned}`);
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: `Delete Pinned ${tag}?` });
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(
+    dialog.getByText(
+      `Saved revisions pin it, and each must keep running: Pins ${tag} at revision 1.`,
+    ),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+
+  await page.goto(`/upstreams/${spare}`);
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: `Delete Spare ${tag}?` });
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page).toHaveURL(/\/upstreams$/);
+  await expect(page.getByRole("link", { name: `Pinned ${tag}` })).toBeVisible();
+  await expect(page.getByRole("link", { name: `Spare ${tag}` })).toHaveCount(0);
+});

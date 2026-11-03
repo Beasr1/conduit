@@ -486,6 +486,19 @@ paths:
           $ref: "#/components/responses/Problem"
         "428":
           $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteUpstream
+      summary: Delete an upstream no revision pins
+      description: Deletes the upstream and every version of it. While a saved revision of any workflow, published or not, pins one of its versions, it's refused with 409, code upstream_in_use, its detail naming those workflows and revisions, as a revision never changes and must keep running (plan 07).
+      responses:
+        "204":
+          description: Deleted, with every version.
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
 
   /v1/upstreams/{id}/users:
     parameters:

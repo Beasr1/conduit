@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useWorkflows } from "@/features/workflows/hooks/use-workflows";
+import { useWorkflows } from "@/lib/workflows";
 import { routes } from "@/router";
 
 const created = new Intl.DateTimeFormat(undefined, {

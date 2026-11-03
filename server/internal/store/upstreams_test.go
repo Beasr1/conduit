@@ -1,12 +1,16 @@
 package store_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Beasr1/conduit/server/internal/store"
 	"github.com/Beasr1/conduit/server/internal/workflow"
@@ -243,5 +247,111 @@ func TestUpstreams_PagesNewestFirst(t *testing.T) {
 	next, err := db.Upstreams(ctx, 2, first[1].ID)
 	if err != nil || len(next) == 0 || next[0].ID >= first[1].ID {
 		t.Errorf("the page after %s = %+v, %v", first[1].ID, next, err)
+	}
+}
+
+// pins is a definition whose one node pins version v of upstream id.
+func pins(id string, v int) json.RawMessage {
+	b, _ := json.Marshal(map[string]any{"nodes": []any{map[string]any{"id": "a", "kind": "http", "uses": map[string]any{"upstream": id, "version": v}}}})
+	return b
+}
+
+// An upstream no saved revision pins is deleted with every version. One a
+// revision pins is refused, naming the workflows and revisions, however old
+// the revision and whether or not it's served (plan 07).
+func TestDeleteUpstream(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	unused, _, err := db.CreateUpstream(ctx, upstreamName(t), upstreamDef(1), person)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveUpstreamVersion(ctx, unused.ID, 1, upstreamDef(2), person); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteUpstream(ctx, unused.ID); err != nil {
+		t.Fatalf("DeleteUpstream() of one nothing pins = %v", err)
+	}
+	if _, err := db.UpstreamVersion(ctx, unused.ID, 2); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("its version 2 after the delete: %v, want ErrNotFound", err)
+	}
+	for _, id := range []string{unused.ID, "not-an-id"} {
+		if err := db.DeleteUpstream(ctx, id); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("DeleteUpstream(%q) = %v, want ErrNotFound", id, err)
+		}
+	}
+
+	// Revision 1 pins it, 2 moved off it, and 3 pins it again.
+	used, _, err := db.CreateUpstream(ctx, upstreamName(t), upstreamDef(1), person)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, _, err := db.CreateWorkflow(ctx, slug(t), "Orders", pins(used.ID, 1), person)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for base, d := range []json.RawMessage{def(2), pins(used.ID, 1)} {
+		if _, err := db.SaveRevision(ctx, w.ID, base+1, d, person); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var inUse *store.InUseError
+	err = db.DeleteUpstream(ctx, used.ID)
+	if !errors.As(err, &inUse) || len(inUse.Pins) != 1 || inUse.Pins[0].WorkflowID != w.ID || inUse.Pins[0].Name != "Orders" ||
+		!slices.Equal(inUse.Pins[0].Revisions, []int{1, 3}) {
+		t.Errorf("DeleteUpstream() of one revisions pin = %v", err)
+	}
+	if _, err := db.Upstream(ctx, used.ID); err != nil {
+		t.Errorf("after a refused delete: %v", err)
+	}
+}
+
+// A revision saved while a delete checks is waited for, and then seen: no
+// revision can pin an upstream that's gone.
+func TestDeleteUpstream_ASaveInBetween(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	u, _, err := db.CreateUpstream(ctx, upstreamName(t), upstreamDef(1), person)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := create(t)
+	conn, err := pgx.Connect(ctx, dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// A save of a revision that pins it, not yet committed.
+	if _, err := tx.Exec(ctx, `INSERT INTO workflow_revisions (workflow_id, revision, definition, provenance)
+		VALUES ($1::uuid, 2, $2, $3)`, w.ID, pins(u.ID, 1), person); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- db.DeleteUpstream(context.Background(), u.ID) }()
+	// Once a delete waits for the save, the save commits.
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		var waiting int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM pg_locks
+			WHERE NOT granted AND mode = 'ShareLock' AND relation = 'workflow_revisions'::regclass`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the delete didn't wait for the save")
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var inUse *store.InUseError
+	if err := <-done; !errors.As(err, &inUse) {
+		t.Errorf("DeleteUpstream() during a save that pins it = %v, want an InUseError", err)
 	}
 }

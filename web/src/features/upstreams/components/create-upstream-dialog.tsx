@@ -36,8 +36,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useCreateUpstream } from "@/features/upstreams/hooks/use-upstreams";
 import { ApiError } from "@/lib/api";
+import { useCreateUpstream } from "@/lib/upstreams";
 import { routes } from "@/router";
 
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;

@@ -13,8 +13,8 @@ built too: a workflow calling itself is refused after 8 hops. Plan 07's
 upstreams are built (2026-11-03): a library of them, each save that
 changes something a version that never changes, which a step uses at a
 pinned version, edited in place from the step or on the upstream's own
-page; Publish takes only steps that use one, and a published workflow is
-one too.**
+page; Publish takes only steps that use one, a published workflow is one
+too, and an upstream no saved revision pins can be deleted.**
 The web app signs in with a session cookie, which sign-out or 30 minutes
 unused ends, lists workflows and creates them, and edits, checks, saves
 and publishes one in graph mode, previewing what each step reads and sends
@@ -53,7 +53,8 @@ library. A step can use a published workflow instead, at the revision
 served: it gives the workflow's input fields values, its responses the
 workflow's answers, previewed by the workflow's own preview, and it runs
 as a run of its own, linked to its caller, a hop further in its trace. A
-workflow can't use itself, directly or through others. What was built, and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
+workflow can't use itself, directly or through others. An upstream's page
+deletes it once no saved revision of any workflow pins it. What was built, and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
 13-minimal-editor.md, 14-the-response-picks.md, 06-hardening.md and
 07-tests-and-catalogue.md; the bigger picture is docs/plans/README.md.
 

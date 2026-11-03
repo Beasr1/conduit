@@ -3,8 +3,8 @@ import { useParams } from "react-router";
 
 import { Editor } from "@/features/editor/components/editor";
 import { fill } from "@/features/editor/upstreams";
-import { useVersionsOf } from "@/features/upstreams/hooks/use-upstreams";
-import { useWorkflow } from "@/features/workflows/hooks/use-workflows";
+import { useVersionsOf } from "@/features/editor/hooks/use-upstreams";
+import { useWorkflow } from "@/lib/workflows";
 
 // The workflow's page: its editor, opened on the latest revision.
 export function Component() {

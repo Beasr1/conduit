@@ -57,7 +57,11 @@ the API is `/api` on the page's own origin.
 - Import from `src` through the `@/` alias. No `../` across features.
 - No barrel `index.ts` files inside the app.
 - A feature never reaches into another feature's internals. Code moves to
-  `components/` or `lib/` when a second feature needs it.
+  `components/` or `lib/` when a second feature needs it: the queries the
+  editor shares with the library and the workflow list are in
+  `lib/upstreams.ts` and `lib/workflows.ts`. The upstream's page is the
+  editor's (`features/editor/components/upstream-page.tsx`), as it edits
+  an upstream as a step, with the editor's step parts and store.
 
 ## Routing
 

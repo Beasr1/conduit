@@ -129,6 +129,67 @@ func (s *Store) SaveUpstreamVersion(ctx context.Context, id string, base int, de
 	return v, nil
 }
 
+// UpstreamPin is a workflow with saved revisions that pin an upstream:
+// which ones, oldest first.
+type UpstreamPin struct {
+	WorkflowID string `db:"workflow_id"`
+	Name       string `db:"name"`
+	Revisions  []int  `db:"revisions"`
+}
+
+// InUseError is a delete refused because saved revisions pin what it
+// would delete: a revision never changes, and each must keep running
+// (plan 07).
+type InUseError struct {
+	Pins []UpstreamPin
+}
+
+func (e *InUseError) Error() string {
+	return fmt.Sprintf("saved revisions of %d workflows pin it", len(e.Pins))
+}
+
+// DeleteUpstream deletes upstream id and every version of it, unless a
+// saved revision of a workflow, published or not, pins one of them: then
+// it's refused with an *InUseError naming them.
+func (s *Store) DeleteUpstream(ctx context.Context, id string) error {
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// SHARE lets reads through and holds back every insert, so no
+		// revision is saved, pinning it, between the check and the delete.
+		if _, err := tx.Exec(ctx, `LOCK TABLE workflow_revisions IN SHARE MODE`); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT 1 FROM upstreams WHERE id = $1::uuid FOR UPDATE`, id).Scan(new(int)); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT w.id::text AS workflow_id, w.name,
+			array_agg(DISTINCT r.revision ORDER BY r.revision) AS revisions
+			FROM workflow_revisions r
+			JOIN workflows w ON w.id = r.workflow_id
+			-- A definition saved with no nodes has them as null, not [].
+			CROSS JOIN LATERAL jsonb_array_elements(CASE jsonb_typeof(r.definition->'nodes') WHEN 'array' THEN r.definition->'nodes' ELSE '[]' END) n
+			WHERE n->'uses'->>'upstream' = $1
+			GROUP BY w.id, w.name
+			ORDER BY w.id`, id)
+		if err != nil {
+			return err
+		}
+		pins, err := pgx.CollectRows(rows, pgx.RowToStructByName[UpstreamPin])
+		if err != nil {
+			return err
+		}
+		if len(pins) > 0 {
+			return &InUseError{Pins: pins}
+		}
+		// Its versions go with it (ON DELETE CASCADE).
+		_, err = tx.Exec(ctx, `DELETE FROM upstreams WHERE id = $1::uuid`, id)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("delete upstream %s: %w", id, translate(err))
+	}
+	return nil
+}
+
 // UpstreamUse is a workflow whose latest revision uses an upstream: the
 // versions its nodes pin, oldest first, and whether that revision is the
 // one the workflow serves.

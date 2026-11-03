@@ -25,8 +25,8 @@ import {
 } from "@/features/editor/hooks/use-problems";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 import { asUpstream, pin, versionKey } from "@/features/editor/upstreams";
-import { useCreateUpstream } from "@/features/upstreams/hooks/use-upstreams";
 import { ApiError } from "@/lib/api";
+import { useCreateUpstream } from "@/lib/upstreams";
 
 // SaveAsUpstream moves a step's own request into the library (plan 07):
 // each placeholder becomes a parameter, which the step gives what it read,

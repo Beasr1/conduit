@@ -423,7 +423,8 @@ workflow, and the store keeps `called`, each revision with its
 workflow's name. Checked in Chromium through nginx, light and dark,
 desktop and phone, with no console errors. At phone width an open step
 panel makes the page 42px wider than the screen, an upstream step's too,
-which predates this phase. In the browser test, a workflow made through
+which predates this phase; you put it off until just before page mode
+(05). In the browser test, a workflow made through
 the API is picked, given its input, reopened, run to a 200 and a 404, and
 served. Mutation checks: 24 on the server and 21 in the web code, all
 caught once four tests were added (the preview as deep as a run, what a
@@ -436,12 +437,34 @@ pick another answer than the line aims at, the preview says so. The tests
 the coverage floor asked for found the second; the engine is back at its
 96%.
 
+**E. Deleting an upstream** (your call, 2026-11-03: "we dont delete
+upstream if used by workflow"; asked then, any saved revision counts).
+- [x] `DELETE /v1/upstreams/{id}` deletes an upstream and every version
+      of it while no saved revision of a workflow, published or not, pins
+      one; otherwise it's refused, 409 `upstream_in_use`, naming the
+      workflows and their revisions. Step Functions refuses to delete "a
+      state machine version currently referenced by one or more aliases"
+      ✓, and Zapier a version until "0 users remain", paused Zaps among
+      them ✓.
+- [x] The upstream's page has Delete, which asks again, then goes back to
+      the library, or says which revisions pin it.
+
+As built: any saved revision counts, as every revision saved before still
+runs (C2), so an upstream a revision ever pinned stays. The check and the
+delete share one transaction, which locks the revisions table against
+saves (SHARE), so no revision pins it in between; a test holds a save
+open and sees the delete wait for it, then refuse. Its versions go with it
+(ON DELETE CASCADE). Mutation checks: 11, 10 caught. The one that survived
+drops the library list's refresh after a delete, which nothing can see:
+the list fetches again whenever it opens, as after New upstream. The same
+day, as you agreed, the editor and the library stopped reaching into each
+other's code: the queries both use moved to `lib/`, and the upstream's
+page, built from the editor's step parts, into the editor.
+
 ### Open questions
 
 - Taking a newer version in every workflow at once, as Zapier migrates:
   each would become a new revision, published or not?
-- Whether an upstream can be deleted while a revision, published or not,
-  uses one of its versions.
 
 ## Open questions (decide when 07 starts)
 
@@ -490,6 +513,11 @@ the coverage floor asked for found the second; the engine is back at its
     https://docs.aws.amazon.com/step-functions/latest/apireference/API_PublishStateMachineVersion.html
   - Kubernetes, Deployments' revisions ✓:
     https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+- Deleting what's pinned (2026-11-03):
+  - Step Functions, DeleteStateMachineVersion ✓:
+    https://docs.aws.amazon.com/step-functions/latest/apireference/API_DeleteStateMachineVersion.html
+  - Zapier, deprecate or delete a version ✓:
+    https://docs.zapier.com/platform/manage/deprecate
 - Workflows as steps (2026-11-03):
   - n8n sub-workflows, their inputs and who may call them ✓:
     https://docs.n8n.io/flow-logic/subworkflows/

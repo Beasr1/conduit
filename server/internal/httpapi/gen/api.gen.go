@@ -802,6 +802,9 @@ type ServerInterface interface {
 	// ValidateUpstream Check an upstream's definition without saving it
 	// (POST /v1/upstreams/validate)
 	ValidateUpstream(w http.ResponseWriter, r *http.Request)
+	// DeleteUpstream Delete an upstream no revision pins
+	// (DELETE /v1/upstreams/{id})
+	DeleteUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID)
 	// GetUpstream Get an upstream at its latest version
 	// (GET /v1/upstreams/{id})
 	GetUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID)
@@ -1169,6 +1172,32 @@ func (siw *ServerInterfaceWrapper) ValidateUpstream(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ValidateUpstream(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteUpstream operation middleware
+func (siw *ServerInterfaceWrapper) DeleteUpstream(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UpstreamID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteUpstream(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1715,6 +1744,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams", wrapper.ListUpstreams)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams", wrapper.CreateUpstream)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams/validate", wrapper.ValidateUpstream)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/upstreams/{id}", wrapper.DeleteUpstream)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}", wrapper.GetUpstream)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/upstreams/{id}", wrapper.SaveUpstream)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}/users", wrapper.ListUpstreamUsers)
@@ -2421,6 +2451,66 @@ func (response ValidateUpstream401ApplicationProblemPlusJSONResponse) VisitValid
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUpstreamRequestObject struct {
+	ID UpstreamID `json:"id"`
+}
+
+type DeleteUpstreamResponseObject interface {
+	VisitDeleteUpstreamResponse(w http.ResponseWriter) error
+}
+
+type DeleteUpstream204Response struct {
+}
+
+func (response DeleteUpstream204Response) VisitDeleteUpstreamResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteUpstream401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteUpstream401ApplicationProblemPlusJSONResponse) VisitDeleteUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUpstream404ApplicationProblemPlusJSONResponse Problem
+
+func (response DeleteUpstream404ApplicationProblemPlusJSONResponse) VisitDeleteUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUpstream409ApplicationProblemPlusJSONResponse Problem
+
+func (response DeleteUpstream409ApplicationProblemPlusJSONResponse) VisitDeleteUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3354,6 +3444,9 @@ type StrictServerInterface interface {
 	// ValidateUpstream Check an upstream's definition without saving it
 	// (POST /v1/upstreams/validate)
 	ValidateUpstream(ctx context.Context, request ValidateUpstreamRequestObject) (ValidateUpstreamResponseObject, error)
+	// DeleteUpstream Delete an upstream no revision pins
+	// (DELETE /v1/upstreams/{id})
+	DeleteUpstream(ctx context.Context, request DeleteUpstreamRequestObject) (DeleteUpstreamResponseObject, error)
 	// GetUpstream Get an upstream at its latest version
 	// (GET /v1/upstreams/{id})
 	GetUpstream(ctx context.Context, request GetUpstreamRequestObject) (GetUpstreamResponseObject, error)
@@ -3766,6 +3859,32 @@ func (sh *strictHandler) ValidateUpstream(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ValidateUpstreamResponseObject); ok {
 		if err := validResponse.VisitValidateUpstreamResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteUpstream operation middleware
+func (sh *strictHandler) DeleteUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID) {
+	var request DeleteUpstreamRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteUpstream(ctx, request.(DeleteUpstreamRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteUpstream")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteUpstreamResponseObject); ok {
+		if err := validResponse.VisitDeleteUpstreamResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

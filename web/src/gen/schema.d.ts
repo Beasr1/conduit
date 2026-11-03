@@ -305,7 +305,11 @@ export interface paths {
          */
         put: operations["saveUpstream"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete an upstream no revision pins
+         * @description Deletes the upstream and every version of it. While a saved revision of any workflow, published or not, pins one of its versions, it's refused with 409, code upstream_in_use, its detail naming those workflows and revisions, as a revision never changes and must keep running (plan 07).
+         */
+        delete: operations["deleteUpstream"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1489,6 +1493,29 @@ export interface operations {
             412: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             428: components["responses"]["Problem"];
+        };
+    };
+    deleteUpstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted, with every version. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
     listUpstreamUsers: {

@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useUpstreams } from "@/features/upstreams/hooks/use-upstreams";
+import { useUpstreams } from "@/lib/upstreams";
 import { routes } from "@/router";
 
 const created = new Intl.DateTimeFormat(undefined, {

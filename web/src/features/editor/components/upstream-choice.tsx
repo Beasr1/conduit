@@ -27,12 +27,11 @@ import { asUpstream, fill, pin, versionKey } from "@/features/editor/upstreams";
 import {
   fetchLatest,
   fetchServed,
-  useCreateUpstream,
-  useUpstreams,
-} from "@/features/upstreams/hooks/use-upstreams";
-import { useWorkflows } from "@/features/workflows/hooks/use-workflows";
+} from "@/features/editor/hooks/use-upstreams";
 import type { components } from "@/gen/schema";
 import { ApiError } from "@/lib/api";
+import { useCreateUpstream, useUpstreams } from "@/lib/upstreams";
+import { useWorkflows } from "@/lib/workflows";
 
 type Node = components["schemas"]["Node"];
 type Method = components["schemas"]["HTTPRequest"]["method"];

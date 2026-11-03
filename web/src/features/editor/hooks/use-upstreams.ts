@@ -1,6 +1,5 @@
 import {
   type QueryClient,
-  useInfiniteQuery,
   useMutation,
   useQueries,
   useQuery,
@@ -11,33 +10,15 @@ import { type Called, versionKey } from "@/features/editor/upstreams";
 import type { components } from "@/gen/schema";
 import { api, call } from "@/lib/api";
 import { upstreamKeys, workflowKeys } from "@/lib/query-keys";
+import type { UpstreamVersion } from "@/lib/upstreams";
+import { workflowQuery } from "@/lib/workflows";
 
 type Definition = components["schemas"]["Definition"];
 type Upstream = components["schemas"]["Upstream"];
 type Uses = components["schemas"]["Uses"];
-export type UpstreamVersion = components["schemas"]["UpstreamVersion"];
-export type CreateUpstream = components["schemas"]["CreateUpstream"];
 
 // A version as an entity tag, the way the API sends them: "3".
 const etag = (version: number) => `"${version}"`;
-
-// useUpstreams pages through the library, newest first.
-export function useUpstreams() {
-  return useInfiniteQuery({
-    queryKey: upstreamKeys.list(),
-    queryFn: ({ pageParam, signal }) =>
-      call(
-        (signal) =>
-          api.GET("/v1/upstreams", {
-            params: { query: pageParam ? { before: pageParam } : {} },
-            signal,
-          }),
-        signal,
-      ),
-    initialPageParam: "",
-    getNextPageParam: (page) => page.next || undefined,
-  });
-}
 
 // useUpstream is an upstream at its latest version.
 export function useUpstream(id: string) {
@@ -102,24 +83,13 @@ function revisionQuery(uses: Uses) {
   };
 }
 
-// workflowQuery is a workflow a step uses, with its latest revision: its
-// name, and the revision it serves.
-function workflowQuery(id: string) {
-  return {
-    queryKey: workflowKeys.detail(id),
-    queryFn: ({ signal }: { signal: AbortSignal }) =>
-      call(
-        (signal) =>
-          api.GET("/v1/workflows/{id}", { params: { path: { id } }, signal }),
-        signal,
-      ),
-    meta: { quiet: true },
-  };
-}
+// used is a workflow a step uses (plan 07): the step says what's wrong
+// with it, and a toast would only repeat it.
+const used = (id: string) => ({ ...workflowQuery(id), meta: { quiet: true } });
 
 // useUsedWorkflow is a workflow a step uses, as it is now.
 export function useUsedWorkflow(id: string) {
-  return useQuery(workflowQuery(id));
+  return useQuery(used(id));
 }
 
 // fetchCalled gets a revision of a workflow a step uses, with the
@@ -130,7 +100,7 @@ export async function fetchCalled(
 ): Promise<Called> {
   const [r, w] = await Promise.all([
     client.fetchQuery(revisionQuery(uses)),
-    client.fetchQuery(workflowQuery(uses.workflow ?? "")),
+    client.fetchQuery(used(uses.workflow ?? "")),
   ]);
   return {
     name: w.workflow.name,
@@ -145,10 +115,7 @@ export async function fetchServed(
   client: QueryClient,
   workflow: string,
 ): Promise<{ uses: Uses; called: Called }> {
-  const w = await client.fetchQuery({
-    ...workflowQuery(workflow),
-    staleTime: 0,
-  });
+  const w = await client.fetchQuery({ ...used(workflow), staleTime: 0 });
   const revision = w.workflow.published_revision;
   if (revision === undefined)
     throw new Error(`${w.workflow.name} serves no revision`);
@@ -201,7 +168,7 @@ export function useVersionsOf(d: Definition | undefined): {
     }),
   });
   const workflows = useQueries({
-    queries: ids.map(workflowQuery),
+    queries: ids.map(used),
     combine: (results) => ({
       got: new Map(
         results.flatMap((r) =>
@@ -245,23 +212,6 @@ export function useUpstreamUsers(id: string) {
   });
 }
 
-export function useCreateUpstream() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateUpstream) =>
-      call((signal) => api.POST("/v1/upstreams", { body, signal })),
-    // The form shows what went wrong, on its fields.
-    meta: { quiet: true },
-    onSuccess: (made) => {
-      queryClient.setQueryData(
-        upstreamKeys.version(made.upstream.id, made.version),
-        made,
-      );
-      void queryClient.invalidateQueries({ queryKey: upstreamKeys.list() });
-    },
-  });
-}
-
 // useSaveUpstream saves the next version, on base, the latest, sent as
 // If-Match, so nothing is saved over a version saved elsewhere.
 export function useSaveUpstream() {
@@ -288,6 +238,31 @@ export function useSaveUpstream() {
       const id = saved.upstream.id;
       queryClient.setQueryData(upstreamKeys.version(id, saved.version), saved);
       queryClient.setQueryData(upstreamKeys.detail(id), saved);
+      void queryClient.invalidateQueries({ queryKey: upstreamKeys.list() });
+    },
+  });
+}
+
+// useDeleteUpstream deletes an upstream with every version, which the
+// server refuses while a saved revision pins one (plan 07).
+export function useDeleteUpstream() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      call((signal) =>
+        api.DELETE("/v1/upstreams/{id}", {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    // The page says why it couldn't.
+    meta: { quiet: true },
+    onSuccess: (_, id) => {
+      queryClient.removeQueries({ queryKey: upstreamKeys.detail(id) });
+      queryClient.removeQueries({ queryKey: upstreamKeys.users(id) });
+      queryClient.removeQueries({
+        queryKey: [...upstreamKeys.all, "version", id],
+      });
       void queryClient.invalidateQueries({ queryKey: upstreamKeys.list() });
     },
   });

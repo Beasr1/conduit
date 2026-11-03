@@ -33,7 +33,7 @@ import {
   useSaveUpstream,
   useUpstream,
   useUsedWorkflow,
-} from "@/features/upstreams/hooks/use-upstreams";
+} from "@/features/editor/hooks/use-upstreams";
 import type { components } from "@/gen/schema";
 import { ApiError } from "@/lib/api";
 import { routes } from "@/router";

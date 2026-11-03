@@ -6,10 +6,20 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useShallow } from "zustand/react/shallow";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { SampleInput } from "@/components/upstream-samples";
 import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -38,12 +48,13 @@ import {
   without,
 } from "@/features/editor/upstreams";
 import {
-  type UpstreamVersion,
+  useDeleteUpstream,
   useSaveUpstream,
   useUpstreamUsers,
-} from "@/features/upstreams/hooks/use-upstreams";
+} from "@/features/editor/hooks/use-upstreams";
 import type { components } from "@/gen/schema";
 import { api, ApiError, call } from "@/lib/api";
+import type { UpstreamVersion } from "@/lib/upstreams";
 import { routes } from "@/router";
 
 type Parameter = components["schemas"]["Parameter"];
@@ -151,8 +162,8 @@ function Checked({ children }: { children: ReactNode }) {
   );
 }
 
-// Header names the upstream and its version, says what's unsaved, and saves
-// the next version.
+// Header names the upstream and its version, says what's unsaved, saves
+// the next version, and deletes it.
 function Header({ version }: { version: UpstreamVersion }) {
   const editor = useEditorStore();
   const draft = useEditor((s) => s.draft);
@@ -210,13 +221,72 @@ function Header({ version }: { version: UpstreamVersion }) {
           ))}
         </p>
       </div>
-      <Button
-        disabled={!dirty || save.isPending}
-        onClick={() => void saveVersion()}
-      >
-        Save version {version.version + 1}
-      </Button>
+      <div className="flex gap-2">
+        <DeleteUpstream upstream={version.upstream} />
+        <Button
+          disabled={!dirty || save.isPending}
+          onClick={() => void saveVersion()}
+        >
+          Save version {version.version + 1}
+        </Button>
+      </div>
     </div>
+  );
+}
+
+// DeleteUpstream deletes the upstream, once asked again, and goes back to
+// the library. While a saved revision pins it, the server refuses, and the
+// dialog says which revisions do (plan 07).
+function DeleteUpstream({
+  upstream,
+}: {
+  upstream: UpstreamVersion["upstream"];
+}) {
+  const [open, setOpen] = useState(false);
+  const del = useDeleteUpstream();
+  const navigate = useNavigate();
+  const failed = !del.isError
+    ? undefined
+    : del.error instanceof ApiError && del.error.problem?.detail
+      ? del.error.problem.detail
+      : `Not deleted. ${del.error.message}`;
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) del.reset();
+      }}
+    >
+      <DialogTrigger render={<Button variant="outline" />}>
+        Delete
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete {upstream.name}?</DialogTitle>
+          <DialogDescription>
+            It goes for good, with every version.
+          </DialogDescription>
+        </DialogHeader>
+        {failed && <p className="text-sm text-destructive">{failed}</p>}
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" />}>
+            Cancel
+          </DialogClose>
+          <Button
+            variant="destructive"
+            disabled={del.isPending || failed !== undefined}
+            onClick={() =>
+              del.mutate(upstream.id, {
+                onSuccess: () => void navigate(routes.upstreams()),
+              })
+            }
+          >
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

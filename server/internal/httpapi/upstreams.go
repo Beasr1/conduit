@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/Beasr1/conduit/server/internal/engine"
@@ -177,6 +179,46 @@ func checkUpstream(prefix string, u *workflow.Upstream) error {
 }
 
 // noUpstream says an upstream isn't there in the library's words.
+func (a *api) DeleteUpstream(ctx context.Context, req gen.DeleteUpstreamRequestObject) (gen.DeleteUpstreamResponseObject, error) {
+	var inUse *store.InUseError
+	switch err := a.store.DeleteUpstream(ctx, req.ID); {
+	case errors.As(err, &inUse):
+		return nil, &problem{
+			status: http.StatusConflict, code: "upstream_in_use",
+			detail: "Saved revisions pin it, and each must keep running: " + pinnedBy(inUse.Pins) + ".",
+		}
+	case err != nil:
+		return nil, noUpstream(err)
+	}
+	return gen.DeleteUpstream204Response{}, nil
+}
+
+// pinnedBy names the workflows whose revisions pin an upstream, and which
+// revisions: "Orders at revisions 2 and 4; Billing at revision 1".
+func pinnedBy(pins []store.UpstreamPin) string {
+	said := make([]string, len(pins))
+	for i, p := range pins {
+		revisions := make([]string, len(p.Revisions))
+		for k, r := range p.Revisions {
+			revisions[k] = strconv.Itoa(r)
+		}
+		which := "revision"
+		if len(revisions) > 1 {
+			which = "revisions"
+		}
+		said[i] = fmt.Sprintf("%s at %s %s", p.Name, which, and(revisions))
+	}
+	return strings.Join(said, "; ")
+}
+
+// and joins words as a list: "a", "a and b", "a, b and c".
+func and(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}
+
 func noUpstream(err error) error {
 	if errors.Is(err, store.ErrNotFound) {
 		return &problem{status: http.StatusNotFound, code: "not_found", detail: "There's no such upstream."}
