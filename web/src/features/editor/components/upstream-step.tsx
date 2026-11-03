@@ -1,10 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { MappingField } from "@/features/editor/components/mapping-field";
+import {
+  JsonBlock,
+  MappingField,
+  Skipped,
+} from "@/features/editor/components/mapping-field";
 import { Sends } from "@/features/editor/components/step-body";
 import { parents, updateNode } from "@/features/editor/edits";
 import {
@@ -14,13 +19,26 @@ import {
 } from "@/features/editor/hooks/use-problems";
 import { usePreview } from "@/features/editor/hooks/use-preview";
 import { useEditor, useEditorStore } from "@/features/editor/store";
-import { pin, upstreamOf, versionKey } from "@/features/editor/upstreams";
 import {
+  inputOf,
+  pin,
+  pinCalled,
+  sameUpstream,
+  upstreamOf,
+  versionKey,
+} from "@/features/editor/upstreams";
+import {
+  fetchCalled,
   fetchVersion,
   useSaveUpstream,
   useUpstream,
+  useUsedWorkflow,
 } from "@/features/upstreams/hooks/use-upstreams";
+import type { components } from "@/gen/schema";
 import { ApiError } from "@/lib/api";
+import { routes } from "@/router";
+
+type Preview = components["schemas"]["Preview"];
 
 // A parameter's name, as an upstream names it (plan 07).
 const NAME = /^[a-z][a-z0-9_]{0,63}$/;
@@ -28,33 +46,45 @@ const NAME = /^[a-z][a-z0-9_]{0,63}$/;
 // UpstreamLine says which upstream a step uses, at which version, offers a
 // newer one, and edits the upstream in place (plan 07): Edit unlocks the
 // step's request and responses, previewed over this workflow, Save upstream
-// makes the next version, which the step moves to, and Discard puts the
-// pinned version back. A step pinned to an older version takes the newest
-// before it's edited, so an edit never undoes another.
+// makes the next version, which the step moves to, once something's
+// changed, and Discard puts the pinned version back. A step pinned to an
+// older version takes the newest before it's edited, so an edit never
+// undoes another.
 export function UpstreamLine({ index }: { index: number }) {
   const uses = useEditor((s) => s.draft.nodes[index]?.uses);
+  const upstream = uses?.upstream ?? "";
+  const version = uses?.version ?? 0;
   const id = useEditor((s) => s.draft.nodes[index]?.id ?? "");
   const pinned = useEditor((s) =>
     uses ? s.versions[versionKey(uses)] : undefined,
   );
   const editing = useEditor((s) => s.upstreamEdit?.node === id);
+  const unchanged = useEditor((s) => {
+    const n = s.draft.nodes[index];
+    const parameters = s.upstreamEdit?.parameters;
+    return (
+      !n ||
+      !parameters ||
+      !pinned ||
+      sameUpstream(upstreamOf(n, parameters), pinned)
+    );
+  });
   const editUpstream = useEditor((s) => s.editUpstream);
   const addVersion = useEditor((s) => s.addVersion);
   const edit = useEditor((s) => s.edit);
   const editor = useEditorStore();
   const client = useQueryClient();
-  const library = useUpstream(uses?.upstream ?? "");
+  const library = useUpstream(upstream);
   const save = useSaveUpstream();
   const problems = useProblems(atStep(index, "uses"));
   const [failed, setFailed] = useState<string[]>([]);
   if (!uses) return null;
-  const name = library.data?.upstream.name ?? uses.upstream;
+  const name = library.data?.upstream.name ?? upstream;
   const latest = library.data?.version;
-  const newer = latest !== undefined && latest > uses.version;
+  const newer = latest !== undefined && latest > version;
 
-  async function take(version: number) {
-    if (!uses) return;
-    const to = { upstream: uses.upstream, version };
+  async function take(next: number) {
+    const to = { upstream, version: next };
     const v = await fetchVersion(client, to);
     addVersion(versionKey(to), v.definition);
     edit((d) => updateNode(d, index, (n) => pin(n, to, v.definition)));
@@ -67,11 +97,11 @@ export function UpstreamLine({ index }: { index: number }) {
     if (!uses || !node || !parameters) return;
     try {
       const saved = await save.mutateAsync({
-        id: uses.upstream,
-        base: uses.version,
+        id: upstream,
+        base: version,
         upstream: upstreamOf(node, parameters),
       });
-      const to = { upstream: uses.upstream, version: saved.version };
+      const to = { upstream, version: saved.version };
       addVersion(versionKey(to), saved.definition);
       edit((d) => updateNode(d, index, (n) => pin(n, to, saved.definition)));
       editUpstream(undefined);
@@ -105,7 +135,7 @@ export function UpstreamLine({ index }: { index: number }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p>
           <span className="font-medium">{name}</span>{" "}
-          <span className="text-muted-foreground">· v{uses.version}</span>
+          <span className="text-muted-foreground">· v{version}</span>
         </p>
         <div className="flex gap-1">
           {editing ? (
@@ -116,7 +146,7 @@ export function UpstreamLine({ index }: { index: number }) {
               <Button
                 size="sm"
                 onClick={() => void saveUpstream()}
-                disabled={save.isPending}
+                disabled={save.isPending || unchanged}
               >
                 Save upstream
               </Button>
@@ -146,8 +176,8 @@ export function UpstreamLine({ index }: { index: number }) {
       </div>
       {editing && (
         <p className="text-muted-foreground">
-          Its request and responses are open. Save upstream makes v
-          {uses.version + 1}, which this step then uses.
+          Its request and responses are open. Save upstream makes v{version + 1}
+          , which this step then uses.
         </p>
       )}
       <FieldError
@@ -157,6 +187,196 @@ export function UpstreamLine({ index }: { index: number }) {
         ]}
       />
     </section>
+  );
+}
+
+// WorkflowLine says which workflow a step uses, at which revision, offers
+// the one it serves when that's newer, and opens it (plan 07). A workflow
+// is edited on its own page, so there's no editing in place.
+export function WorkflowLine({ index }: { index: number }) {
+  const uses = useEditor((s) => s.draft.nodes[index]?.uses);
+  const addCalled = useEditor((s) => s.addCalled);
+  const edit = useEditor((s) => s.edit);
+  const client = useQueryClient();
+  const workflow = uses?.workflow ?? "";
+  const revision = uses?.revision ?? 0;
+  const used = useUsedWorkflow(workflow);
+  const problems = useProblems(atStep(index, "uses"));
+  const [failed, setFailed] = useState<string[]>([]);
+  if (!uses) return null;
+  const name = used.data?.workflow.name ?? workflow;
+  const served = used.data?.workflow.published_revision;
+
+  async function take(next: number) {
+    const to = { workflow, revision: next };
+    try {
+      const c = await fetchCalled(client, to);
+      addCalled(versionKey(to), c);
+      edit((d) => updateNode(d, index, (n) => pinCalled(n, to, c)));
+      setFailed([]);
+    } catch {
+      setFailed([`Couldn't get revision ${next}. Try again.`]);
+    }
+  }
+
+  return (
+    <section
+      id="step-upstream"
+      aria-label="Workflow"
+      className="flex flex-col gap-2 rounded-md border p-3 text-sm"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p>
+          <span className="font-medium">{name}</span>{" "}
+          <span className="text-muted-foreground">· r{revision}</span>
+        </p>
+        <div className="flex gap-1">
+          {served !== undefined && served > revision && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void take(served)}
+            >
+              Use r{served}
+            </Button>
+          )}
+          <Link
+            to={routes.workflow(workflow)}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Open workflow
+          </Link>
+        </div>
+      </div>
+      <FieldError
+        errors={[
+          ...asErrors(problems),
+          ...failed.map((message) => ({ message })),
+        ]}
+      />
+    </section>
+  );
+}
+
+// StepInput gives each field of the input the workflow a step uses takes a
+// value, JSONata over the run, previewed as what the step gives it and the
+// answer it gets back, from the workflow's own preview (plan 07). A field
+// left empty takes the workflow's sample in previews, and a required one is
+// what Publish asks for.
+export function StepInput({ index }: { index: number }) {
+  const definition = useEditor((s) => {
+    const uses = s.draft.nodes[index]?.uses;
+    return uses ? s.called[versionKey(uses)]?.definition : undefined;
+  });
+  if (!definition)
+    return (
+      <p className="text-sm text-muted-foreground">
+        The revision it uses didn&apos;t load, so its input isn&apos;t known.
+      </p>
+    );
+  const { fields, required } = inputOf(definition);
+  const sample = definition.sample_input;
+  const samples =
+    typeof sample === "object" && sample !== null && !Array.isArray(sample)
+      ? (sample as Record<string, unknown>)
+      : {};
+  return (
+    <div className="flex flex-col gap-5">
+      {fields.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          The workflow takes no input.
+        </p>
+      )}
+      {fields.map((name) => (
+        <InputField
+          key={name}
+          index={index}
+          name={name}
+          required={required.has(name)}
+          sample={Object.hasOwn(samples, name) ? samples[name] : undefined}
+        />
+      ))}
+    </div>
+  );
+}
+
+// InputField is one field of a workflow's input: JSONata over the run,
+// which the workflow reads as input.name.
+function InputField({
+  index,
+  name,
+  required,
+  sample,
+}: {
+  index: number;
+  name: string;
+  required: boolean;
+  sample: unknown;
+}) {
+  const editor = useEditorStore();
+  const edit = useEditor((s) => s.edit);
+  const preview = usePreview({ step: index });
+  const problems = useProblems(
+    (p) =>
+      p.on === "step" &&
+      p.index === index &&
+      p.field === "with" &&
+      p.name === name,
+  );
+  return (
+    <MappingField
+      id={`step-with-${name}`}
+      label={name}
+      hint={
+        <>
+          JSONata over the input. The workflow reads it as{" "}
+          <span className="font-mono">input.{name}</span>.{" "}
+          {required ? "Required: Publish asks for it. " : ""}
+          {sample === undefined
+            ? "Left empty, previews give it nothing."
+            : `Left empty, previews give it the workflow's sample, ${JSON.stringify(sample)}.`}
+        </>
+      }
+      placeholder={`input.${name}`}
+      initial={editor.getState().draft.nodes[index]?.with?.[name] ?? ""}
+      apply={(text) =>
+        edit((d) =>
+          updateNode(d, index, (n) => ({
+            ...n,
+            with: { ...n.with, [name]: text },
+          })),
+        )
+      }
+      problems={problems}
+      preview={preview}
+      open={(of) => parents(of, of.nodes[index]?.id)}
+      result={(p) => <Calls preview={p} />}
+    />
+  );
+}
+
+// Calls is what a step that uses a workflow gives it, the values of its
+// input's fields, and the answer it gets back, as the workflow's own
+// preview gives it.
+function Calls({ preview: p }: { preview: Preview }) {
+  if (p.skipped) return <Skipped />;
+  const gets = p.gives as { status: number; body?: unknown } | undefined;
+  return (
+    <>
+      <h3 className="font-medium">Gives</h3>
+      <JsonBlock value={p.parameters ?? {}} />
+      <h3 className="font-medium">Gets</h3>
+      {gets === undefined ? (
+        <p className="text-muted-foreground">
+          Nothing: the workflow&apos;s preview reaches no answer.
+        </p>
+      ) : (
+        <>
+          <p className="font-mono">{gets.status}</p>
+          <JsonBlock value={gets.body ?? null} />
+        </>
+      )}
+    </>
   );
 }
 

@@ -1,9 +1,12 @@
 import { expect, test } from "vitest";
 
 import {
+  answersOf,
   asUpstream,
   fill,
+  inputOf,
   pin,
+  pinCalled,
   strip,
   upstreamOf,
   versionKey,
@@ -162,5 +165,95 @@ test("pin moves a step to a version, keeping what it gives the parameters still 
     unhandled: { fail: true },
     request: v3.request,
     outputs: v3.outputs,
+  });
+});
+
+// greeter is a workflow that takes a user_id, required, and fields, and
+// answers 404 and 502 besides 200, 404 from two places.
+const greeter: Definition = {
+  nodes: [],
+  input_schema: {
+    type: "object",
+    properties: { user_id: { type: "string" }, fields: { type: "string" } },
+    required: ["user_id"],
+  },
+  sample_input: { user_id: "1" },
+  response: {
+    answers: [
+      { status: 404, lines: [{ from: "a", on: 404 }] },
+      { status: 200, lines: [{ from: "a" }] },
+      { status: 502, lines: [{ from: "a", unhandled: true }] },
+      { status: 404, lines: [{ from: "b", on: 404 }] },
+    ],
+  },
+};
+
+// A step that uses a workflow gives values to the fields of its input and
+// answers through the workflow's answers, as the server has them (plan 07).
+test("inputOf is a workflow's input fields, and answersOf its answers besides 2xx", () => {
+  expect(inputOf(greeter)).toEqual({
+    fields: ["fields", "user_id"],
+    required: new Set(["user_id"]),
+  });
+  // With no input schema, its sample input's fields; with neither, none.
+  expect(inputOf({ nodes: [], sample_input: { b: 1, a: 2 } })).toEqual({
+    fields: ["a", "b"],
+    required: new Set(),
+  });
+  expect(inputOf({ nodes: [], sample_input: [1] })).toEqual({
+    fields: [],
+    required: new Set(),
+  });
+  expect(answersOf(greeter)).toEqual([{ status: 404 }, { status: 502 }]);
+  expect(
+    answersOf({
+      nodes: [],
+      response: { answers: [{ status: 200, lines: [{ from: "a" }] }] },
+    }),
+  ).toBeUndefined();
+});
+
+test("fill gives a node that uses a workflow its answers, and pinCalled moves it to another revision", () => {
+  const calling: Definition = {
+    nodes: [
+      {
+        id: "greet",
+        kind: "http",
+        uses: { workflow: "w-1", revision: 1 },
+        with: { user_id: "input.id", page: "1" },
+      },
+    ],
+  };
+  const key = versionKey({ workflow: "w-1", revision: 1 });
+  expect(key).toBe("wf:w-1@1");
+  const filled = fill(
+    calling,
+    {},
+    { [key]: { name: "Greeter", published: 1, definition: greeter } },
+  );
+  expect(filled.nodes[0]).toEqual({
+    ...calling.nodes[0],
+    outputs: [{ status: 404 }, { status: 502 }],
+  });
+  expect(strip(filled)).toEqual(calling);
+  // A revision the editor hasn't got leaves the node as it is.
+  expect(fill(calling, {})).toBe(calling);
+
+  // Moved, it keeps the values of the fields it still takes.
+  const r2: Definition = {
+    nodes: [],
+    input_schema: { properties: { user_id: {} } },
+  };
+  expect(
+    pinCalled(
+      filled.nodes[0]!,
+      { workflow: "w-1", revision: 2 },
+      { name: "Greeter", published: 2, definition: r2 },
+    ),
+  ).toEqual({
+    id: "greet",
+    kind: "http",
+    uses: { workflow: "w-1", revision: 2 },
+    with: { user_id: "input.id" },
   });
 });

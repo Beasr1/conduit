@@ -17,13 +17,25 @@ const (
 	CodeCancelled = "cancelled"       // the caller went away, or the server shut down
 )
 
+// CallError is a workflow a node uses failing to answer (plan 07): Code is
+// the caller's word for it, as Classify gives it, and Detail says why.
+type CallError struct {
+	Code   string
+	Detail string
+}
+
+func (e *CallError) Error() string { return e.Detail }
+
 // Classify says whose fault err, a node's or a run's failure, is.
 func Classify(err error) string {
 	var ue *upstream.Error
 	var pe *PanicError
+	var ce *CallError
 	switch {
 	case errors.As(err, &pe):
 		return CodeInternal
+	case errors.As(err, &ce):
+		return ce.Code
 	case errors.Is(err, ErrRunTimeout):
 		return CodeTimeout
 	case errors.As(err, &ue):

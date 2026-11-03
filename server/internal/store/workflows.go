@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -115,7 +116,9 @@ func (s *Store) Revisions(ctx context.Context, id string) ([]Revision, error) {
 
 // SaveRevision stores def as the revision after base. base must be the
 // latest revision, or the save fails with ErrRevisionMismatch: someone else
-// saved in between, and this save would silently undo their change.
+// saved in between, and this save would silently undo their change. A def
+// that's base's, by value, makes no revision: base is the answer, as it
+// was.
 func (s *Store) SaveRevision(ctx context.Context, id string, base int, def json.RawMessage, p Provenance) (Revision, error) {
 	var r Revision
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -128,7 +131,13 @@ func (s *Store) SaveRevision(ctx context.Context, id string, base int, def json.
 		if latest != base {
 			return fmt.Errorf("%w: it's at %d, not %d", ErrRevisionMismatch, latest, base)
 		}
+		// jsonb compares by value, so key order and spacing don't count.
 		var err error
+		r, err = one[Revision](ctx, tx, `SELECT `+revisionColumns+` FROM workflow_revisions
+			WHERE workflow_id = $1::uuid AND revision = $2 AND definition = $3::jsonb`, id, base, def)
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err // nil: nothing changed
+		}
 		r, err = one[Revision](ctx, tx, `INSERT INTO workflow_revisions (workflow_id, revision, definition, provenance)
 			VALUES ($1::uuid, $2, $3, $4) RETURNING `+revisionColumns, id, latest+1, def, p)
 		if err != nil {

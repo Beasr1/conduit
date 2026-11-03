@@ -166,6 +166,15 @@ func TestPass_AtMost32Members(t *testing.T) {
 	}
 }
 
+// A hop inside the server keeps the trace, one hop further.
+func TestNext(t *testing.T) {
+	t.Parallel()
+	first := New()
+	if next := first.Next(); next.ID != first.ID || next.Hops != first.Hops+1 {
+		t.Errorf("Next() = %+v, from %+v", next, first)
+	}
+}
+
 func TestContext(t *testing.T) {
 	t.Parallel()
 	if _, ok := From(context.Background()); ok {

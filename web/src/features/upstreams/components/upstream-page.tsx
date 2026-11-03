@@ -9,8 +9,8 @@ import {
 import { Link } from "react-router";
 import { useShallow } from "zustand/react/shallow";
 
-import { Hint } from "@/components/hint";
 import { Button } from "@/components/ui/button";
+import { SampleInput } from "@/components/upstream-samples";
 import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -32,6 +32,7 @@ import {
 } from "@/features/editor/store";
 import {
   fill,
+  sameUpstream,
   upstreamOf,
   versionKey,
   without,
@@ -46,7 +47,6 @@ import { api, ApiError, call } from "@/lib/api";
 import { routes } from "@/router";
 
 type Parameter = components["schemas"]["Parameter"];
-type Upstream = components["schemas"]["Upstream"];
 type ProblemError = components["schemas"]["ProblemError"];
 
 // The one step the page edits the upstream as. The tabs a step has edit its
@@ -160,9 +160,7 @@ function Header({ version }: { version: UpstreamVersion }) {
   const save = useSaveUpstream();
   const node = draft.nodes[0];
   const now = node ? upstreamOf(node, parameters) : undefined;
-  const dirty =
-    now !== undefined &&
-    JSON.stringify(now) !== JSON.stringify(normal(version.definition));
+  const dirty = now !== undefined && !sameUpstream(now, version.definition);
 
   async function saveVersion() {
     const s = editor.getState();
@@ -222,15 +220,6 @@ function Header({ version }: { version: UpstreamVersion }) {
   );
 }
 
-// normal is an upstream as upstreamOf builds one, so the two compare as
-// JSON: parameters always there, its fields in the same order.
-function normal(u: Upstream): Upstream {
-  const out: Upstream = { parameters: u.parameters ?? [], request: u.request };
-  if (u.outputs) out.outputs = u.outputs;
-  if (u.sample) out.sample = u.sample;
-  return out;
-}
-
 // UsedBy lists the workflows whose latest revision uses the upstream, and
 // at which versions.
 function UsedBy({ id }: { id: string }) {
@@ -278,6 +267,12 @@ function Parameters() {
     edit((d) => updateNode(d, 0, (n) => ({ ...n, with: given(next) })));
   };
   const taken = parameters.some((p) => p.name === added);
+  const names = parameters.map((p) => p.name);
+  const samples = Object.fromEntries(
+    parameters.flatMap((p) =>
+      p.sample === undefined ? [] : [[p.name, p.sample]],
+    ),
+  );
   return (
     <section aria-label="Parameters" className="flex flex-col gap-2 text-sm">
       <h2 className="font-medium">Parameters</h2>
@@ -290,13 +285,6 @@ function Parameters() {
       {parameters.length > 0 && (
         <div className="flex items-center gap-2 text-muted-foreground">
           <span className="flex-1">Name</span>
-          <span className="flex flex-1 items-center gap-1">
-            Sample
-            <Hint about="Sample">
-              JSON, such as <span className="font-mono">&quot;7&quot;</span>:
-              the value the preview gives the parameter, as a step would.
-            </Hint>
-          </span>
           <span className="w-16" />
         </div>
       )}
@@ -304,8 +292,10 @@ function Parameters() {
         <ParameterRow
           key={k}
           parameter={p}
-          problems={problems.filter((e) =>
-            e.pointer.startsWith(`/parameters/${k}/`),
+          problems={problems.filter(
+            (e) =>
+              e.pointer.startsWith(`/parameters/${k}/`) &&
+              !e.pointer.startsWith(`/parameters/${k}/sample`),
           )}
           onChange={(next) => set(parameters.with(k, next))}
           onRemove={() => set(parameters.filter((_, j) => j !== k))}
@@ -331,12 +321,30 @@ function Parameters() {
           Add
         </Button>
       </form>
+      {/* Drawn afresh as the names change, from the samples they keep. */}
+      <SampleInput
+        key={names.join(" ")}
+        id="upstream-page"
+        parameters={names}
+        samples={samples}
+        onChange={(next) =>
+          set(
+            parameters.map((p) =>
+              Object.hasOwn(next, p.name)
+                ? { ...p, sample: next[p.name] }
+                : without(p, ["sample"]),
+            ),
+          )
+        }
+        problems={problems
+          .filter((e) => /^\/parameters\/\d+\/sample/.test(e.pointer))
+          .map((e) => e.detail)}
+      />
     </section>
   );
 }
 
-// ParameterRow is a parameter's name and sample. A sample is JSON; one that
-// isn't stays as typed and says so.
+// ParameterRow is a parameter's name, and its problems.
 function ParameterRow({
   parameter,
   problems,
@@ -348,10 +356,6 @@ function ParameterRow({
   onChange: (p: Parameter) => void;
   onRemove: () => void;
 }) {
-  const [text, setText] = useState(() =>
-    parameter.sample === undefined ? "" : JSON.stringify(parameter.sample),
-  );
-  const [notJSON, setNotJSON] = useState(false);
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
@@ -360,27 +364,6 @@ function ParameterRow({
           className="flex-1 font-mono"
           value={parameter.name}
           onChange={(e) => onChange({ ...parameter, name: e.target.value })}
-        />
-        <Input
-          aria-label={`Sample of ${parameter.name}`}
-          className="flex-1 font-mono"
-          placeholder='"7"'
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            if (e.target.value.trim() === "") {
-              setNotJSON(false);
-              onChange(without(parameter, ["sample"]));
-              return;
-            }
-            try {
-              const sample: unknown = JSON.parse(e.target.value);
-              setNotJSON(false);
-              onChange({ ...parameter, sample });
-            } catch {
-              setNotJSON(true);
-            }
-          }}
         />
         <Button
           variant="ghost"
@@ -392,12 +375,7 @@ function ParameterRow({
           Remove
         </Button>
       </div>
-      <FieldError
-        errors={[
-          ...problems.map((p) => ({ message: p.detail })),
-          ...(notJSON ? [{ message: 'A sample is JSON, such as "7".' }] : []),
-        ]}
-      />
+      <FieldError errors={problems.map((p) => ({ message: p.detail }))} />
     </div>
   );
 }

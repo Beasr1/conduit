@@ -191,10 +191,10 @@ type Node struct {
 	// Unhandled What a node does with its failures. Its Unhandled block takes them when a line or an answer leaves from it, and gives its body, or, without one, what an http node got back, if anything. With no line from it, they fail the run, and publishing needs that chosen, with fail (plan 12).
 	Unhandled *NodeUnhandled `json:"unhandled,omitempty"`
 
-	// Uses The upstream an http node calls, at a version, in place of a request of its own (plan 07). Its request, responses and samples are the version's, and the node has none of its own.
+	// Uses What an http node calls in place of a request of its own (plan 07), an upstream at a version or a published workflow at a revision. An upstream's request, responses and samples are the version's; a workflow's responses are its answers, and it runs as a run of its own. The node has none of its own.
 	Uses *Uses `json:"uses,omitempty"`
 
-	// With For a node that uses an upstream, a JSONata expression over the run for each of the upstream's parameters, which its request reads.
+	// With For a node that uses an upstream or a workflow, a JSONata expression over the run for each of its parameters, which the upstream's request reads, or the workflow takes as its input's fields.
 	With map[string]string `json:"with,omitempty"`
 }
 
@@ -290,9 +290,14 @@ type Upstream struct {
 	Sample *Sample `json:"sample,omitempty"`
 }
 
-// Uses An upstream, pinned to a version, which never changes (plan 07).
+// Uses What a node calls, pinned, so it never changes under it (plan 07). It names one of the two, an upstream at a version, or a workflow at a revision published when the step took it.
 type Uses struct {
-	// Upstream The upstream's id.
-	Upstream string `json:"upstream"`
-	Version  int    `json:"version"`
+	Revision int `json:"revision,omitempty"`
+
+	// Upstream An upstream's id, with its version.
+	Upstream string `json:"upstream,omitempty"`
+	Version  int    `json:"version,omitempty"`
+
+	// Workflow A workflow's id, with its revision.
+	Workflow string `json:"workflow,omitempty"`
 }

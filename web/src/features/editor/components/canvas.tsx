@@ -45,9 +45,10 @@ import { type Refused, useEditor } from "@/features/editor/store";
 // The room kept between a picked step and the canvas's edge.
 const MARGIN = 24;
 
-// Canvas draws the draft and turns what's done on it into edits of the
-// draft: a drag, a new edge, a deletion. React Flow keeps nothing of its own.
-export function Canvas() {
+// Canvas draws the draft of workflow and turns what's done on it into edits
+// of the draft: a drag, a new edge, a deletion. React Flow keeps nothing of
+// its own.
+export function Canvas({ workflow }: { workflow: string }) {
   const draft = useEditor((s) => s.draft);
   const moving = useEditor((s) => s.moving);
   const selected = useEditor((s) => s.selected);
@@ -288,8 +289,8 @@ export function Canvas() {
       {/* nokey: Delete or Backspace on these buttons would otherwise delete
           what's selected on the canvas. */}
       <Panel position="top-left" className="nokey flex gap-2">
-        <AddNodeDialog kind="http" />
-        <AddNodeDialog kind="transform" />
+        <AddNodeDialog kind="http" workflow={workflow} />
+        <AddNodeDialog kind="transform" workflow={workflow} />
         <Button
           variant="outline"
           size="sm"

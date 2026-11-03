@@ -169,7 +169,7 @@ func (a *api) PublishWorkflow(ctx context.Context, req gen.PublishWorkflowReques
 }
 
 func (a *api) ValidateDefinition(ctx context.Context, req gen.ValidateDefinitionRequestObject) (gen.ValidateDefinitionResponseObject, error) {
-	ps, err := a.problemsOf(ctx, req.Body)
+	ps, err := a.problemsOf(ctx, req.Body, "")
 	if err != nil {
 		return nil, err
 	}
@@ -184,8 +184,9 @@ func (a *api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRe
 	ctx, cancel := context.WithTimeout(ctx, previewTimeout)
 	defer cancel()
 	b := req.Body
-	// Filled from the upstreams its nodes use, as a run would be (plan 07).
-	vs, err := a.store.Versions(ctx, &b.Definition)
+	// Filled from the upstreams and workflows its nodes use, as a run would
+	// be, a workflow's own preview previewing a step that uses it (plan 07).
+	deps, err := a.store.Deps(ctx, &b.Definition)
 	if err != nil {
 		return nil, err
 	}
@@ -195,10 +196,10 @@ func (a *api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRe
 	for i, n := range b.Definition.Nodes {
 		if u, ok := b.Upstreams[n.ID]; ok && n.Uses != nil {
 			unsaved := workflow.Uses{Upstream: "unsaved " + n.ID, Version: n.Uses.Version}
-			b.Definition.Nodes[i].Uses, vs[unsaved] = &unsaved, &u
+			b.Definition.Nodes[i].Uses, deps.Versions[unsaved] = &unsaved, &u
 		}
 	}
-	rd, _ := workflow.Resolve(&b.Definition, vs)
+	rd, _ := workflow.Resolve(&b.Definition, deps, "")
 	var pv *engine.Preview
 	switch {
 	case b.Edge != nil && b.Node != "":
@@ -207,9 +208,9 @@ func (a *api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRe
 			errors: []gen.ProblemError{{Pointer: "/edge", Code: "not_allowed", Detail: "a preview is of a node or an edge, not both"}},
 		}
 	case b.Edge != nil:
-		pv, err = engine.SimulateEdge(ctx, rd, *b.Edge)
+		pv, err = engine.SimulateEdge(ctx, rd, *b.Edge, deps)
 	default:
-		pv, err = engine.Simulate(ctx, rd, b.Node)
+		pv, err = engine.Simulate(ctx, rd, b.Node, deps)
 	}
 	switch {
 	case errors.Is(err, engine.ErrNoSuchNode):
@@ -266,16 +267,16 @@ func pageLimit(limit int) (int, error) {
 	return limit, nil
 }
 
-// problemsOf is everything wrong with d: how its nodes use upstreams, as
-// workflow.Resolve says (plan 07), then what engine.Compile finds in it,
-// filled from those, and what workflow.ReadyToPublish says Publish needs
-// besides.
-func (a *api) problemsOf(ctx context.Context, d *workflow.Definition) ([]gen.ProblemError, error) {
-	vs, err := a.store.Versions(ctx, d)
+// problemsOf is everything wrong with d, a revision of workflow self, ""
+// for none: how its nodes use upstreams and workflows, as workflow.Resolve
+// says (plan 07), then what engine.Compile finds in it, filled from those,
+// and what workflow.ReadyToPublish says Publish needs besides.
+func (a *api) problemsOf(ctx context.Context, d *workflow.Definition, self string) ([]gen.ProblemError, error) {
+	deps, err := a.store.Deps(ctx, d)
 	if err != nil {
 		return nil, err
 	}
-	rd, ps := workflow.Resolve(d, vs)
+	rd, ps := workflow.Resolve(d, deps, self)
 	_, err = engine.Compile(rd)
 	var compiled workflow.Problems
 	errors.As(err, &compiled)
@@ -318,7 +319,7 @@ func (a *api) revisionOut(ctx context.Context, r store.Revision) (gen.Revision, 
 	if err := json.Unmarshal(r.Definition, &d); err != nil {
 		return gen.Revision{}, fmt.Errorf("decode revision %d of %s: %w", r.Revision, r.WorkflowID, err)
 	}
-	ps, err := a.problemsOf(ctx, &d)
+	ps, err := a.problemsOf(ctx, &d, r.WorkflowID)
 	if err != nil {
 		return gen.Revision{}, err
 	}

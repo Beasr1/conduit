@@ -6,8 +6,56 @@ type Upstream = components["schemas"]["Upstream"];
 type Uses = components["schemas"]["Uses"];
 type Parameter = components["schemas"]["Parameter"];
 
-// versionKey names a version of an upstream: "id@3".
-export const versionKey = (uses: Uses) => `${uses.upstream}@${uses.version}`;
+// versionKey names what a step pins (plan 07): a version of an upstream,
+// "id@3", or a revision of a workflow, "wf:id@3".
+export const versionKey = (uses: Uses) =>
+  uses.workflow !== undefined
+    ? `wf:${uses.workflow}@${uses.revision}`
+    : `${uses.upstream}@${uses.version}`;
+
+// Called is a revision of a workflow a step uses (plan 07): the workflow's
+// name, the revision it serves now, if any, and the revision itself.
+export interface Called {
+  name: string;
+  published: number | undefined;
+  definition: Definition;
+}
+
+// answersOf is a workflow's answers besides 2xx, each once, in order: the
+// responses of a step that uses it, beside its 2xx, as the server has them.
+export function answersOf(d: Definition): { status: number }[] | undefined {
+  const statuses = [
+    ...new Set(
+      (d.response?.answers ?? []).map((a) => a.status).filter((s) => s >= 300),
+    ),
+  ];
+  return statuses.length > 0
+    ? statuses.map((status) => ({ status }))
+    : undefined;
+}
+
+// inputOf is the fields of the input a workflow takes, which a step that
+// uses it gives values, as the server has them: its input schema's
+// properties, the required ones required; with none, its sample input's
+// fields; with neither, none. By name.
+export function inputOf(d: Definition): {
+  fields: string[];
+  required: Set<string>;
+} {
+  const schema = d.input_schema;
+  const props = schema?.properties;
+  if (typeof props === "object" && props !== null && !Array.isArray(props)) {
+    const req = Array.isArray(schema?.required) ? schema.required : [];
+    return {
+      fields: Object.keys(props).sort(),
+      required: new Set(req.filter((r): r is string => typeof r === "string")),
+    };
+  }
+  const sample = d.sample_input;
+  if (typeof sample === "object" && sample !== null && !Array.isArray(sample))
+    return { fields: Object.keys(sample).sort(), required: new Set() };
+  return { fields: [], required: new Set() };
+}
 
 // fill gives each node that uses an upstream its version's request,
 // responses and samples, as the server does (plan 07), so the editor draws
@@ -16,9 +64,17 @@ export const versionKey = (uses: Uses) => `${uses.upstream}@${uses.version}`;
 export function fill(
   d: Definition,
   versions: Record<string, Upstream>,
+  called: Record<string, Called> = {},
 ): Definition {
   let changed = false;
   const nodes = d.nodes.map((n) => {
+    if (n.uses?.workflow !== undefined) {
+      // A step that uses a workflow has its answers as its responses.
+      const c = called[versionKey(n.uses)];
+      if (!c) return n;
+      changed = true;
+      return withoutOwn({ ...n, outputs: answersOf(c.definition) });
+    }
     const u = n.uses && versions[versionKey(n.uses)];
     if (!u) return n;
     changed = true;
@@ -62,6 +118,23 @@ export function without<T extends object>(o: T, keys: readonly (keyof T)[]): T {
   return out;
 }
 
+// pinCalled moves node to uses, a workflow's revision, filled from c: the
+// values it gives the fields c still takes stay, and the rest go.
+export function pinCalled(n: Node, uses: Uses, c: Called): Node {
+  const { fields } = inputOf(c.definition);
+  const kept = Object.entries(n.with ?? {}).filter(([name]) =>
+    fields.includes(name),
+  );
+  const out: Node = {
+    ...without(n, ["request", "outputs", "sample", "with"]),
+    uses,
+  };
+  if (kept.length > 0) out.with = Object.fromEntries(kept);
+  const outputs = answersOf(c.definition);
+  if (outputs) out.outputs = outputs;
+  return out;
+}
+
 // pin moves node to uses, filled from u, that version: the values it gives
 // parameters u still has stay, and the rest go.
 export function pin(n: Node, uses: Uses, u: Upstream): Node {
@@ -88,6 +161,19 @@ export function upstreamOf(n: Node, parameters: Parameter[]): Upstream {
   if (n.outputs) u.outputs = n.outputs;
   if (n.sample) u.sample = n.sample;
   return u;
+}
+
+// sameUpstream says whether built, as upstreamOf builds an upstream, is
+// saved, so a save of it would change nothing. As JSON: what hasn't been
+// touched keeps saved's order.
+export function sameUpstream(built: Upstream, saved: Upstream): boolean {
+  const normal: Upstream = {
+    parameters: saved.parameters ?? [],
+    request: saved.request,
+  };
+  if (saved.outputs) normal.outputs = saved.outputs;
+  if (saved.sample) normal.sample = saved.sample;
+  return JSON.stringify(built) === JSON.stringify(normal);
 }
 
 // A placeholder in a template: {{ expression }}, ending at the first }}.

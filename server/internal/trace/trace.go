@@ -93,6 +93,13 @@ func (t Trace) Pass(h http.Header) {
 	h.Set("tracestate", strings.Join(state[:min(len(state), maxMembers)], ","))
 }
 
+// Next is t one hop further: what a run of a workflow a step uses carries,
+// as it runs inside the server rather than through a call (plan 07).
+func (t Trace) Next() Trace {
+	t.Hops++
+	return t
+}
+
 type contextKey struct{}
 
 // With is ctx carrying t.

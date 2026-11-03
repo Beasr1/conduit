@@ -130,7 +130,8 @@ calls an upstream "a single API endpoint". Accepted the same day as
 drafted, each choice below as recommended: pinned versions with newer ones
 offered, steps with their own request kept, a workflow used as a step run
 inside the server. On 2026-11-03 you dropped steps with a request of their
-own for new work (4 below). Being built, in the phases under Steps.
+own for new work (4 below). Built by 2026-11-03, in the phases under
+Steps.
 
 ### How it would work
 
@@ -325,11 +326,115 @@ server and 17 in the web code, all caught, with tests written first for
 the gaps expected (a step with neither a request nor an upstream, the
 method kept, what's missing, a 409 and a 422 under their fields).
 
-**D. Workflows as steps.**
-- [ ] A node uses a published revision of another workflow, its input
-      bound; it runs as a run of its own, in the caller's trace, and its
-      answer is the step's response.
-- [ ] Tests, mutation checks and docs at the end of each phase.
+**C3. Samples where an upstream is made** (your call, 2026-11-03: "let
+sample input and output be the part of it too").
+- [x] New upstream, in the library and in Add HTTP step, takes a sample
+      input, one JSON object for the parameters the URL reads, its keys
+      checked against them, as a workflow's sample input is one object;
+      and a sample of each response the API can give, as its documentation
+      says, its 2xx first, then each status 300 to 599 a step can follow.
+- [x] The upstream's page shows its parameters as names, and their samples
+      as that one object, applied as it's typed once it fits.
+
+As built: the samples fields are one component, `components/upstream-samples.tsx`,
+as two features use them; what's checked is said when the upstream is
+made, and cleared by the next change. Stored as before, a sample on each
+parameter, so the API didn't change. Recommended first was a sample per
+parameter; you leaned to one object, and the better reason is yours: a
+workflow's sample input is one, and a workflow is an upstream too.
+Mutation checks: 10, all caught once three tests were added (Add HTTP
+step's refused sample, a first status of 300, the page keeping its sample
+while the text doesn't fit).
+
+**C4. A save that changes nothing makes nothing** (your report,
+2026-11-03: "I can just keep saving it and version will start
+increasing").
+- [x] Save upstream, in a step's panel, waits for a change, as Save
+      version on the upstream's page and the workflow's Save do.
+- [x] The API makes no version from a save equal to the version it builds
+      on, and no revision from a draft equal to its revision: it answers
+      that one, as it was. Lambda "doesn't publish a version if the
+      function's configuration and code haven't changed" ✓, Step
+      Functions' publish "doesn't create a duplicate state machine
+      version" ✓, and a Deployment's "new revision is created if and only
+      if" its Pod template changes ✓. Agents (plan 08) save through the
+      same API, so the button alone wouldn't do.
+
+As built: Postgres compares the two as jsonb, by value, so key order and
+spacing don't count, inside the save's transaction; If-Match is checked
+first, so a stale base is refused all the same. Mutation checks: 5, all
+caught.
+
+**D. Workflows as steps.** Asked on 2026-11-03, your answers: every
+published workflow can be used, as n8n's sub-workflows can unless "This
+workflow can be called by" says otherwise ✓; a step's parameters are the
+input the workflow defines, its input schema's fields, or its sample
+input's when it has none, or one, input, when it has neither, as n8n's
+inputs are "individual input names and data types that the calling
+workflow needs to provide" ✓; previews run the revision a step pins; and
+nothing is defined twice: previews take the workflow's own sample input
+for a value the step hasn't given, and its answers from its own preview,
+while each value starts empty and Publish asks for the required ones.
+Drafted too, yours to change: an http step's `uses` names a workflow and
+revision, drawn and wired as any step that uses an upstream, its blocks
+the workflow's answers; it runs as a recorded run of its own, linked to
+its caller, a hop further in its trace and within the workflow's share,
+waiting as long as the caller's run has left, as Logic Apps' parent "continues
+to wait for a response until all the steps are completed" ✓; it pins only
+a published revision, a newer one offered; a workflow can't use itself,
+as Kestra refuses ✓; and its line offers Open workflow, not Edit upstream.
+- [x] A node uses a revision of another workflow, its input bound; it runs
+      as a run of its own, in the caller's trace, and its answer is the
+      step's response.
+- [x] The editor: Add HTTP step offers the published workflows, but not
+      the one being edited, and pins the revision served; the step's line
+      names the workflow and revision, offers the one served when it's
+      newer, and opens the workflow; its Input tab, in place of Request,
+      gives the workflow's input fields values; its blocks are the
+      workflow's answers.
+- [x] Tests, mutation checks and docs at the end of each phase.
+
+As built: `uses` names an upstream and version or a workflow and revision,
+never both. Resolve gives the node the revision's answers besides 2xx as
+its responses (`AnswersOf`), and checks its values against the revision's
+input fields (`InputOf`): its input schema's, its sample input's, or none
+with neither, where the draft said one, input. A workflow that defines no
+input reads none, so a step gives it none. The store's `Deps` fetches
+versions and revisions in rounds, each revision's own pins in the next,
+none asked twice, so it ends even on a draft that uses itself. A workflow
+can't reach itself through others at any revision (`uses_itself`), checked
+by Publish and by every run: a draft is saved with its problems, so it
+can pin a revision not saved yet, and pinning alone doesn't rule a cycle
+out. At run time the engine calls the runner through `engine.Caller`. The
+runner records a run with trigger `workflow` and its parent's run and
+node, a hop further in the caller's trace, within the workflow's share,
+on the editor's engine, ending with the caller's run. Its answer is the
+step's response; one the step doesn't list fails it. An answer that
+passes an error on with no error body gives the step `{code, detail,
+node}`. A run that answers nothing fails the step: a timeout, a
+cancellation or our bug as they were, the rest `upstream_failed`. A
+preview of the step is the revision's own, over the values given and its
+sample input for the rest: its 2xx, or, for a line from another of the
+step's responses, that answer, aimed at the answer's first line as a
+connection's preview aims. It goes as deep as a run: the seventh workflow
+down, as a run eight hops in is refused. A mutation check found it went
+one deeper. In the editor, `versionKey` is `wf:` and the id for a
+workflow, and the store keeps `called`, each revision with its
+workflow's name. Checked in Chromium through nginx, light and dark,
+desktop and phone, with no console errors. At phone width an open step
+panel makes the page 42px wider than the screen, an upstream step's too,
+which predates this phase. In the browser test, a workflow made through
+the API is picked, given its input, reopened, run to a 200 and a 404, and
+served. Mutation checks: 24 on the server and 21 in the web code, all
+caught once four tests were added (the preview as deep as a run, what a
+call's run gives the step, the offered list read while it's open, what
+each kind of answer previews as) and two preview bugs were fixed: it went
+one workflow deeper than a run does, and an answer from a transform that
+picks among answers was previewed at the status aimed at, with the body
+of the one picked. It's previewed as picked now, and when the samples
+pick another answer than the line aims at, the preview says so. The tests
+the coverage floor asked for found the second; the engine is back at its
+96%.
 
 ### Open questions
 
@@ -378,3 +483,15 @@ method kept, what's missing, a 409 and a 422 under their fields).
   - Power Automate, custom connectors' versions ✓:
     https://learn.microsoft.com/en-us/connectors/custom-connectors/operational-versioning
   - Semantic Versioning ✓: https://semver.org/
+- A save that changes nothing (2026-11-03):
+  - Lambda, PublishVersion ✓:
+    https://docs.aws.amazon.com/lambda/latest/api/API_PublishVersion.html
+  - Step Functions, PublishStateMachineVersion ✓:
+    https://docs.aws.amazon.com/step-functions/latest/apireference/API_PublishStateMachineVersion.html
+  - Kubernetes, Deployments' revisions ✓:
+    https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+- Workflows as steps (2026-11-03):
+  - n8n sub-workflows, their inputs and who may call them ✓:
+    https://docs.n8n.io/flow-logic/subworkflows/
+  - Logic Apps, nested workflows and the Response action ✓:
+    https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-http-endpoint

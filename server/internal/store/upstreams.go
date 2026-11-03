@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -93,6 +94,8 @@ func (s *Store) UpstreamVersion(ctx context.Context, id string, version int) (Up
 // SaveUpstreamVersion stores def as the version after base. base must be
 // the latest version, or the save fails with ErrVersionMismatch: someone
 // else saved in between, and this save would silently undo their change.
+// A def that's base's, by value, makes no version: base is the answer, as
+// it was.
 func (s *Store) SaveUpstreamVersion(ctx context.Context, id string, base int, def json.RawMessage, p Provenance) (UpstreamVersion, error) {
 	var v UpstreamVersion
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -105,7 +108,13 @@ func (s *Store) SaveUpstreamVersion(ctx context.Context, id string, base int, de
 		if latest != base {
 			return fmt.Errorf("%w: it's at %d, not %d", ErrVersionMismatch, latest, base)
 		}
+		// jsonb compares by value, so key order and spacing don't count.
 		var err error
+		v, err = one[UpstreamVersion](ctx, tx, `SELECT `+versionColumns+` FROM upstream_versions
+			WHERE upstream_id = $1::uuid AND version = $2 AND definition = $3::jsonb`, id, base, def)
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err // nil: nothing changed
+		}
 		v, err = one[UpstreamVersion](ctx, tx, `INSERT INTO upstream_versions (upstream_id, version, definition, provenance)
 			VALUES ($1::uuid, $2, $3, $4) RETURNING `+versionColumns, id, latest+1, def, p)
 		if err != nil {
@@ -157,42 +166,108 @@ func (s *Store) UpstreamUsers(ctx context.Context, id string) ([]UpstreamUse, er
 	return us, nil
 }
 
-// Versions is the upstream versions d's nodes use, decoded, for
-// workflow.Resolve (plan 07). One the library doesn't have is left out,
-// and Resolve says so of the node that uses it.
-func (s *Store) Versions(ctx context.Context, d *workflow.Definition) (workflow.Versions, error) {
-	var ids []string
-	var versions []int
-	for _, n := range d.Nodes {
-		if n.Uses != nil {
-			ids, versions = append(ids, n.Uses.Upstream), append(versions, n.Uses.Version)
+// Deps is what d's nodes use, decoded, for workflow.Resolve (plan 07): the
+// upstream versions, and the workflow revisions with what each of those
+// uses in turn, so theirs resolve too. A query for each, each round, and
+// none asked twice, so it ends even on a draft that uses itself. One the
+// store doesn't have is left out, and Resolve says so of the node that
+// uses it.
+func (s *Store) Deps(ctx context.Context, d *workflow.Definition) (workflow.Deps, error) {
+	deps := workflow.Deps{Versions: workflow.Versions{}, Revisions: workflow.Revisions{}}
+	asked := map[workflow.Uses]bool{}
+	for todo := []*workflow.Definition{d}; len(todo) > 0; {
+		var ups, wfs []workflow.Uses
+		for _, def := range todo {
+			for _, n := range def.Nodes {
+				if n.Uses == nil || asked[*n.Uses] {
+					continue
+				}
+				asked[*n.Uses] = true
+				if n.Uses.Workflow != "" {
+					wfs = append(wfs, *n.Uses)
+				} else {
+					ups = append(ups, *n.Uses)
+				}
+			}
+		}
+		if err := s.versions(ctx, ups, deps.Versions); err != nil {
+			return workflow.Deps{}, err
+		}
+		var err error
+		if todo, err = s.revisions(ctx, wfs, deps.Revisions); err != nil {
+			return workflow.Deps{}, err
 		}
 	}
-	vs := workflow.Versions{}
-	if len(ids) == 0 {
-		return vs, nil
+	return deps, nil
+}
+
+// revisions adds the workflow revisions refs name to rs, decoded, and
+// gives back those it added.
+func (s *Store) revisions(ctx context.Context, refs []workflow.Uses, rs workflow.Revisions) ([]*workflow.Definition, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	ids, revs := make([]string, len(refs)), make([]int, len(refs))
+	for i, r := range refs {
+		ids[i], revs[i] = r.Workflow, r.Revision
+	}
+	// As text, so an id that isn't a UUID is one the store doesn't have.
+	rows, err := s.pool.Query(ctx, `SELECT workflow_id::text, revision, definition FROM workflow_revisions
+		WHERE (workflow_id::text, revision) IN (SELECT * FROM unnest($1::text[], $2::int[]))`, ids, revs)
+	if err != nil {
+		return nil, fmt.Errorf("get the workflows a definition uses: %w", translate(err))
+	}
+	defer rows.Close()
+	var added []*workflow.Definition
+	for rows.Next() {
+		var ref workflow.Uses
+		var def json.RawMessage
+		if err := rows.Scan(&ref.Workflow, &ref.Revision, &def); err != nil {
+			return nil, fmt.Errorf("get the workflows a definition uses: %w", translate(err))
+		}
+		var d workflow.Definition
+		if err := json.Unmarshal(def, &d); err != nil {
+			return nil, fmt.Errorf("decode revision %d of workflow %s: %w", ref.Revision, ref.Workflow, err)
+		}
+		rs[ref] = &d
+		added = append(added, &d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get the workflows a definition uses: %w", translate(err))
+	}
+	return added, nil
+}
+
+// versions adds the upstream versions refs name to vs, decoded.
+func (s *Store) versions(ctx context.Context, refs []workflow.Uses, vs workflow.Versions) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	ids, versions := make([]string, len(refs)), make([]int, len(refs))
+	for i, r := range refs {
+		ids[i], versions[i] = r.Upstream, r.Version
 	}
 	// As text, so an id that isn't a UUID is one the library doesn't have.
 	rows, err := s.pool.Query(ctx, `SELECT upstream_id::text, version, definition FROM upstream_versions
 		WHERE (upstream_id::text, version) IN (SELECT * FROM unnest($1::text[], $2::int[]))`, ids, versions)
 	if err != nil {
-		return nil, fmt.Errorf("get the upstreams a definition uses: %w", translate(err))
+		return fmt.Errorf("get the upstreams a definition uses: %w", translate(err))
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var ref workflow.Uses
 		var def json.RawMessage
 		if err := rows.Scan(&ref.Upstream, &ref.Version, &def); err != nil {
-			return nil, fmt.Errorf("get the upstreams a definition uses: %w", translate(err))
+			return fmt.Errorf("get the upstreams a definition uses: %w", translate(err))
 		}
 		var u workflow.Upstream
 		if err := json.Unmarshal(def, &u); err != nil {
-			return nil, fmt.Errorf("decode version %d of upstream %s: %w", ref.Version, ref.Upstream, err)
+			return fmt.Errorf("decode version %d of upstream %s: %w", ref.Version, ref.Upstream, err)
 		}
 		vs[ref] = &u
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("get the upstreams a definition uses: %w", translate(err))
+		return fmt.Errorf("get the upstreams a definition uses: %w", translate(err))
 	}
-	return vs, nil
+	return nil
 }

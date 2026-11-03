@@ -88,13 +88,13 @@ components:
           x-go-type-skip-optional-pointer: false
         uses:
           $ref: "#/components/schemas/Uses"
-          description: The upstream an http node calls, at a version, in place of a request of its own (plan 07). Its request, responses and samples are the version's, and the node has none of its own.
+          description: What an http node calls in place of a request of its own (plan 07), an upstream at a version or a published workflow at a revision. An upstream's request, responses and samples are the version's; a workflow's responses are its answers, and it runs as a run of its own. The node has none of its own.
           x-go-type-skip-optional-pointer: false
         with:
           type: object
           additionalProperties:
             type: string
-          description: For a node that uses an upstream, a JSONata expression over the run for each of the upstream's parameters, which its request reads.
+          description: For a node that uses an upstream or a workflow, a JSONata expression over the run for each of its parameters, which the upstream's request reads, or the workflow takes as its input's fields.
         expr:
           type: string
           description: A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch.
@@ -142,14 +142,19 @@ components:
 
     Uses:
       type: object
-      required: [upstream, version]
       additionalProperties: false
-      description: An upstream, pinned to a version, which never changes (plan 07).
+      description: What a node calls, pinned, so it never changes under it (plan 07). It names one of the two, an upstream at a version, or a workflow at a revision published when the step took it.
       properties:
         upstream:
           type: string
-          description: The upstream's id.
+          description: An upstream's id, with its version.
         version:
+          type: integer
+          minimum: 1
+        workflow:
+          type: string
+          description: A workflow's id, with its revision.
+        revision:
           type: integer
           minimum: 1
 

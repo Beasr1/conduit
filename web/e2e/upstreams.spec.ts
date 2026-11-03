@@ -17,18 +17,24 @@ test("the library: make an upstream, use it from a step, run and serve it, edit 
   const slug = `uses-${tag}`;
   await signIn(page);
 
-  // Made from its call: the name its URL reads is a parameter.
+  // Made from its call and its sample input: the name its URL reads is a
+  // parameter, and the input gives it a sample.
   await page.getByRole("link", { name: "Upstreams" }).click();
   await page.getByRole("button", { name: "New upstream" }).click();
   const made = page.getByRole("dialog", { name: "New upstream" });
   await made.getByLabel("Name").fill(users);
   await made.getByLabel("URL").fill(`${stack.upstream}/users/{{ user_id }}`);
+  await made
+    .getByRole("textbox", { name: "Sample input" })
+    .fill('{ "user_id": "7" }');
   await made.getByRole("button", { name: "Make" }).click();
   await expect(page.getByRole("heading", { name: users })).toBeVisible();
 
   // On its page, the parameter's sample is what its body reads and its
   // request renders; a 404 is added, and saved as version 2.
-  await page.getByLabel("Sample of user_id").fill('"7"');
+  await expect(page.getByRole("textbox", { name: "Sample input" })).toHaveValue(
+    '{\n  "user_id": "7"\n}',
+  );
   await page.getByRole("tab", { name: "Body" }).click();
   await expect(
     page.getByRole("button", { name: "Insert user_id" }),
@@ -217,6 +223,149 @@ test("a request of its own: Publish asks for an upstream, and Save as upstream m
   const served = await page.request.post(`/serve/${slug}`, {
     headers: { Authorization: `Bearer ${stack.token}` },
     data: { user_id: "7" },
+  });
+  expect(served.status()).toBe(200);
+  expect(await served.json()).toMatchObject({ id: "7", name: "User 7" });
+});
+
+// Plan 07's workflows as steps: a published workflow, made through the API,
+// is picked in Add HTTP step; the step gives its input a value and answers
+// through its answers, its 404 too, run and served.
+test("a workflow as a step: pick a published one, give its input, run and serve it", async ({
+  page,
+}) => {
+  const tag = Date.now().toString(36);
+  const auth = { Authorization: `Bearer ${stack.token}` };
+  const upstream = await page.request.post("/api/v1/upstreams", {
+    headers: auth,
+    data: {
+      name: `Users ${tag}`,
+      definition: {
+        parameters: [{ name: "user_id" }],
+        request: {
+          method: "GET",
+          url: `${stack.upstream}/users/{{ user_id }}`,
+        },
+        outputs: [{ status: 404 }],
+      },
+    },
+  });
+  expect(upstream.status()).toBe(201);
+  const users = ((await upstream.json()) as { upstream: { id: string } })
+    .upstream.id;
+  const lookup = `Lookup ${tag}`;
+  const made = await page.request.post("/api/v1/workflows", {
+    headers: auth,
+    data: {
+      slug: `lookup-${tag}`,
+      name: lookup,
+      definition: {
+        nodes: [
+          {
+            id: "user",
+            kind: "http",
+            uses: { upstream: users, version: 1 },
+            with: { user_id: "input.user_id" },
+            unhandled: { fail: true },
+          },
+        ],
+        input_schema: {
+          type: "object",
+          required: ["user_id"],
+          properties: { user_id: { type: "string" } },
+        },
+        sample_input: { user_id: "7" },
+        response: {
+          answers: [
+            { status: 404, lines: [{ from: "user", on: 404 }] },
+            { status: 200, lines: [{ from: "user" }] },
+          ],
+        },
+      },
+    },
+  });
+  expect(made.status()).toBe(201);
+  const { workflow } = (await made.json()) as { workflow: { id: string } };
+  const published = await page.request.post(
+    `/api/v1/workflows/${workflow.id}/publish`,
+    { headers: auth, data: { revision: 1 } },
+  );
+  expect(published.status()).toBe(200);
+
+  await signIn(page);
+  const slug = `calls-${tag}`;
+  await page.getByRole("button", { name: "New workflow" }).click();
+  const created = page.getByRole("dialog", { name: "New workflow" });
+  await created.getByLabel("Name").fill(`Calls ${tag}`);
+  await created.getByLabel("Slug").fill(slug);
+  await created.getByRole("button", { name: "Create" }).click();
+  await expect(page).toHaveURL(/\/workflows\/[0-9a-f-]+$/);
+  const response = page.getByRole("complementary", { name: "Response" });
+  const answer = response.getByRole("textbox", { name: "Add an answer" });
+  for (const a of ["502", "404", "200"]) {
+    await page.getByRole("button", { name: "Fit View" }).click();
+    await page.getByTestId("rf__node-#response").getByText("+ Add").click();
+    await answer.fill(a);
+    await answer.press("Enter");
+  }
+
+  // Add HTTP step offers it among the workflows: the step is drawn by its
+  // name and revision, its 404 the workflow's.
+  await page.getByRole("button", { name: "Add HTTP step" }).click();
+  const add = page.getByRole("dialog");
+  await add.getByLabel("Id").fill("find");
+  await add.getByRole("combobox", { name: "Upstream" }).click();
+  await page.getByRole("option", { name: lookup, exact: true }).click();
+  await add.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(step(page, "find").getByText(`${lookup} · r1`)).toBeVisible();
+  await expect(step(page, "find").locator("[data-part='404']")).toBeVisible();
+
+  // Its request block opens its Input, which takes the workflow's field.
+  const panel = await open(page, "find");
+  await expect(panel.getByText("· r1")).toBeVisible();
+  await expect(panel.getByRole("tab", { name: "Request" })).toHaveCount(0);
+  await panel.getByLabel("user_id", { exact: true }).fill("input.id");
+  await failsInto(page, "find", 502);
+  await connect(page, "find", "Response 404", "404");
+  await connect(page, "find", "Response 200");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/^Revision \d/)).toHaveText(/^Revision 2\b/);
+  await expect(page.getByRole("button", { name: /problems?$/ })).toHaveCount(0);
+  // Opened afresh, it's drawn from the revision it pins.
+  await page.reload();
+  await expect(step(page, "find").getByText(`${lookup} · r1`)).toBeVisible();
+  await expect(step(page, "find").locator("[data-part='404']")).toBeVisible();
+
+  // Run, it answers through the workflow's answers.
+  for (const [id, got] of [
+    ["7", 200],
+    ["gone", 404],
+  ] as const) {
+    await page.getByRole("button", { name: "Run", exact: true }).click();
+    const run = page.getByRole("dialog", { name: "Run" });
+    await run.getByLabel("Input").fill(JSON.stringify({ id }));
+    await run.getByRole("button", { name: "Run", exact: true }).click();
+    await expect(run).toBeHidden();
+    await expect(said(page, "find")).toHaveText(
+      new RegExp(`^${got}, \\d+ ms$`),
+    );
+    await expect(
+      page.getByText(
+        new RegExp(
+          `^Run of revision 2, started .*: succeeded in .*, answered ${got}$`,
+        ),
+      ),
+    ).toBeVisible();
+  }
+
+  // Published, it's served, the workflow it uses run inside the server.
+  await page.getByRole("button", { name: "Publish" }).click();
+  await expect(
+    page.getByText(new RegExp(`^Revision 2 is served at .*/serve/${slug}$`)),
+  ).toBeVisible();
+  const served = await page.request.post(`/serve/${slug}`, {
+    headers: auth,
+    data: { id: "7" },
   });
   expect(served.status()).toBe(200);
   expect(await served.json()).toMatchObject({ id: "7", name: "User 7" });

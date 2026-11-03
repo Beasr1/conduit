@@ -219,6 +219,9 @@ func runSummaryOut(r store.Run) (gen.RunSummary, error) {
 	if r.EndedAt != nil {
 		out.EndedAt = r.EndedAt.UTC()
 	}
+	if r.ParentRun != "" {
+		out.Parent = &gen.RunParent{Run: r.ParentRun, Node: r.ParentNode}
+	}
 	return out, decodeDoc(r.Error, &out.Error, "run "+r.ID+"'s error")
 }
 
@@ -226,7 +229,7 @@ func runOut(r store.Run) (gen.Run, error) {
 	s, err := runSummaryOut(r)
 	return gen.Run{
 		ID: s.ID, WorkflowID: s.WorkflowID, Revision: s.Revision,
-		Trigger: gen.RunTrigger(s.Trigger), TraceID: s.TraceID, Status: gen.RunStatus(s.Status),
+		Trigger: gen.RunTrigger(s.Trigger), Parent: s.Parent, TraceID: s.TraceID, Status: gen.RunStatus(s.Status),
 		Answered: s.Answered, Error: s.Error, StartedAt: s.StartedAt, EndedAt: s.EndedAt,
 		Input: r.Input, Output: r.Output, OutputTruncated: r.OutputTruncated,
 	}, err

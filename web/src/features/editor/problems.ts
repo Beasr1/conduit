@@ -395,6 +395,10 @@ function partOf(d: Definition, place: Place): unknown {
 // The most steps a workflow may have (schema/workflow.yaml).
 const MAX_STEPS = 200;
 
+// calls says whether step i uses a workflow (plan 07).
+const calls = (of: Definition, i: number) =>
+  of.nodes[i]?.uses?.workflow !== undefined;
+
 // say is what a problem means, in the screen's words: a step and a
 // connection rather than a node and an edge, and what to do about it. Where
 // the server's detail is the specific part, such as an expression's syntax
@@ -408,17 +412,29 @@ export function say(problem: ProblemError, of: Definition): string {
       return "Add an answer, and join the step that gives it.";
     case "unknown_upstream":
       return "The library has no such upstream at that version: pick another, or delete the step.";
+    case "unknown_workflow":
+      return "There's no such workflow at that revision: pick another, or delete the step.";
+    case "uses_itself":
+      return "A workflow can't use itself, or a workflow that uses it: pick another, or delete the step.";
     case "own_request":
       return "Save it as an upstream: Publish takes only steps that use one.";
     case "unknown_parameter":
-      return place.on === "step" && place.field === "with"
-        ? `The upstream has no parameter ${place.name ?? ""}: remove this value.`
-        : sentence(problem.detail);
+      if (place.on !== "step" || place.field !== "with")
+        return sentence(problem.detail);
+      return calls(of, place.index)
+        ? `The workflow takes no input field ${place.name ?? ""}: remove this value.`
+        : `The upstream has no parameter ${place.name ?? ""}: remove this value.`;
     case "unhandled_undecided":
       return "Join its Unhandled to a step or an answer, or let it fail the run.";
     case "unhandled_both":
       return "Its Unhandled has a line and fails the run: keep one.";
     case "required":
+      if (
+        place.on === "step" &&
+        place.field === "with" &&
+        calls(of, place.index)
+      )
+        return "Give the input field a value.";
       return required(place) ?? sentence(problem.detail);
     case "invalid_id":
       return ID_RULE;

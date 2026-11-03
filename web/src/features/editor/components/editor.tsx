@@ -14,6 +14,7 @@ import {
   EditorContext,
   useEditor,
 } from "@/features/editor/store";
+import type { Called } from "@/features/editor/upstreams";
 import type { components } from "@/gen/schema";
 
 type Revision = components["schemas"]["Revision"];
@@ -28,17 +29,20 @@ export function Editor({
   workflow,
   revision,
   versions,
+  called,
   onReload,
 }: {
   workflow: Workflow;
-  // Filled from versions, the upstreams its steps use (plan 07).
+  // Filled from versions and called, the upstreams and workflows its steps
+  // use (plan 07).
   revision: Revision;
   versions: Record<string, Upstream>;
+  called: Record<string, Called>;
   onReload: () => void;
 }) {
   const [opened] = useState(revision);
   const [store] = useState(() =>
-    createEditorStore(opened.definition, versions),
+    createEditorStore(opened.definition, versions, undefined, called),
   );
   const [first] = useState<Check>(() => ({
     of: opened.definition,
@@ -50,7 +54,7 @@ export function Editor({
         <EditorHeader workflow={workflow} opened={opened} onReload={onReload} />
         <div className="flex min-h-0 flex-1 gap-4">
           <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border">
-            <Canvas />
+            <Canvas workflow={workflow.id} />
           </div>
           <SidePanel workflow={workflow.id} />
         </div>

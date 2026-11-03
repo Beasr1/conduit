@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Beasr1/conduit/server/internal/store"
@@ -45,6 +46,17 @@ func TestUpstreams_Versions(t *testing.T) {
 	if _, err := db.SaveUpstreamVersion(ctx, u.ID, 1, upstreamDef(3), person); !errors.Is(err, store.ErrVersionMismatch) {
 		t.Errorf("a save on version 1, after 2: %v, want ErrVersionMismatch", err)
 	}
+	// A save that changes nothing makes no version: version 2 is the
+	// answer, as it was, whoever saves. Key order and spacing don't count;
+	// on a stale base, it's refused all the same.
+	same, err := db.SaveUpstreamVersion(ctx, u.ID, 2, json.RawMessage(`{"request": {"url": "https://users.example.com/v1", "method": "GET"}, "n": 2}`),
+		store.Provenance{Actor: "token", Client: "other"})
+	if err != nil || same.Version != 2 || same.Provenance != person {
+		t.Errorf("a save that changes nothing = %+v, %v; want version 2, as it was", same, err)
+	}
+	if _, err := db.SaveUpstreamVersion(ctx, u.ID, 1, upstreamDef(1), person); !errors.Is(err, store.ErrVersionMismatch) {
+		t.Errorf("a save of version 1 as it was, after 2: %v, want ErrVersionMismatch", err)
+	}
 	if got, err := db.Upstream(ctx, u.ID); err != nil || got.LatestVersion != 2 {
 		t.Errorf("Upstream() = %+v, %v; want version 2 the latest", got, err)
 	}
@@ -62,7 +74,7 @@ func TestUpstreams_Versions(t *testing.T) {
 
 // A definition's upstreams come from the library in one go, decoded; one
 // it doesn't have is left out.
-func TestVersions(t *testing.T) {
+func TestDeps_Versions(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	u, _, err := db.CreateUpstream(ctx, upstreamName(t), upstreamDef(1), person)
@@ -78,15 +90,67 @@ func TestVersions(t *testing.T) {
 		{ID: "c", Uses: &workflow.Uses{Upstream: "not-an-id", Version: 1}},
 		{ID: "d"},
 	}}
-	vs, err := db.Versions(ctx, d)
+	deps, err := db.Deps(ctx, d)
 	if err != nil {
 		t.Fatal(err)
 	}
+	vs := deps.Versions
 	if v, ok := vs[workflow.Uses{Upstream: u.ID, Version: 2}]; len(vs) != 1 || !ok || v.Request.URL != "https://users.example.com/v1" {
-		t.Errorf("Versions() = %v", vs)
+		t.Errorf("Deps().Versions = %v", vs)
 	}
-	if none, err := db.Versions(ctx, &workflow.Definition{}); err != nil || len(none) != 0 {
-		t.Errorf("Versions() of no uses = %v, %v", none, err)
+	if none, err := db.Deps(ctx, &workflow.Definition{}); err != nil || len(none.Versions) != 0 || len(none.Revisions) != 0 {
+		t.Errorf("Deps() of no uses = %v, %v", none, err)
+	}
+}
+
+// The workflow revisions a definition uses come with what they use in
+// turn, an upstream's version among them, each once, though a revision
+// uses the one that uses it.
+func TestDeps_Revisions(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	u, _, err := db.CreateUpstream(ctx, upstreamName(t), upstreamDef(1), person)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner, _, err := db.CreateWorkflow(ctx, slug(t), "inner", json.RawMessage(`{"nodes": [{"id": "call", "kind": "http", "uses": {"upstream": "`+u.ID+`", "version": 1}}]}`), person)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, _, err := db.CreateWorkflow(ctx, slug(t), "outer", json.RawMessage(`{"nodes": [{"id": "in", "kind": "http", "uses": {"workflow": "`+inner.ID+`", "revision": 1}}]}`), person)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// inner's second revision uses outer, as a draft may.
+	if _, err := db.SaveRevision(ctx, inner.ID, 1, json.RawMessage(`{"nodes": [{"id": "back", "kind": "http", "uses": {"workflow": "`+outer.ID+`", "revision": 1}}]}`), person); err != nil {
+		t.Fatal(err)
+	}
+	d := &workflow.Definition{Nodes: []workflow.Node{
+		{ID: "a", Uses: &workflow.Uses{Workflow: outer.ID, Revision: 1}},
+		{ID: "b", Uses: &workflow.Uses{Workflow: inner.ID, Revision: 2}},
+		{ID: "c", Uses: &workflow.Uses{Workflow: "not-an-id", Revision: 1}},
+	}}
+	deps, err := db.Deps(ctx, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for ref := range deps.Revisions {
+		switch ref.Workflow {
+		case outer.ID:
+			got = append(got, fmt.Sprintf("outer %d", ref.Revision))
+		case inner.ID:
+			got = append(got, fmt.Sprintf("inner %d", ref.Revision))
+		default:
+			got = append(got, ref.Workflow)
+		}
+	}
+	slices.Sort(got)
+	if strings.Join(got, ", ") != "inner 1, inner 2, outer 1" || len(deps.Versions) != 1 {
+		t.Errorf("Deps() = revisions %v, versions %v", got, deps.Versions)
+	}
+	if d := deps.Revisions[workflow.Uses{Workflow: inner.ID, Revision: 1}]; d == nil || d.Nodes[0].ID != "call" {
+		t.Errorf("inner 1 = %+v", d)
 	}
 }
 
@@ -134,7 +198,8 @@ func TestUpstreamUsers(t *testing.T) {
 	if _, err := db.Publish(ctx, d.ID, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.SaveRevision(ctx, d.ID, 1, uses(1), person); err != nil {
+	// A second node, as a save that changes nothing makes no revision.
+	if _, err := db.SaveRevision(ctx, d.ID, 1, uses(1, 1), person); err != nil {
 		t.Fatal(err)
 	}
 	got, err := db.UpstreamUsers(ctx, u.ID)

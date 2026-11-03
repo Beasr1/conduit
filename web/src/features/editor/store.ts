@@ -15,6 +15,7 @@ import {
   toFlow,
   UNHANDLED_HANDLE,
 } from "@/features/editor/flow";
+import type { Called } from "@/features/editor/upstreams";
 import type { components } from "@/gen/schema";
 
 type Definition = components["schemas"]["Definition"];
@@ -47,6 +48,10 @@ export interface EditorState {
   // kept.
   versions: Record<string, Upstream>;
   addVersion: (key: string, version: Upstream) => void;
+  // The revisions of workflows the draft's steps use, by versionKey, which
+  // fill those steps (plan 07).
+  called: Record<string, Called>;
+  addCalled: (key: string, called: Called) => void;
   upstreamEdit: UpstreamEdit | undefined;
   editUpstream: (edit: UpstreamEdit | undefined) => void;
   // The step that a revision's output, kept from before the response, moved
@@ -109,6 +114,7 @@ export function createEditorStore(
   opened: Definition,
   versions: Record<string, Upstream> = {},
   upstreamEdit?: UpstreamEdit,
+  called: Record<string, Called> = {},
 ): EditorStore {
   const { draft, step } = outputToStep(opened);
   return createStore<EditorState>()((set) => ({
@@ -116,6 +122,8 @@ export function createEditorStore(
     versions,
     addVersion: (key, version) =>
       set((s) => ({ versions: { ...s.versions, [key]: version } })),
+    called,
+    addCalled: (key, c) => set((s) => ({ called: { ...s.called, [key]: c } })),
     upstreamEdit,
     // + Response goes when the edit does: a step's responses are then its
     // upstream's again.

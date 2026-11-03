@@ -21,6 +21,7 @@ import { atStep, useProblemCount } from "@/features/editor/hooks/use-problems";
 import { useRun, useStepRun } from "@/features/editor/hooks/use-runs";
 import { runSaid, wayOf } from "@/features/editor/runs";
 import { isLocked, type Refused, useEditor } from "@/features/editor/store";
+import { versionKey } from "@/features/editor/upstreams";
 
 // Frame is a step's request block, and the inside of a step that has no
 // others: its id, a line saying what it does, and the handle connections
@@ -144,10 +145,18 @@ function UnhandledStrip({ step }: { step: string }) {
 // leave from, then + Add, and its Unhandled strip along the bottom. Each
 // block says which part of the step it is, and the canvas opens that part
 // when it's clicked. A step that uses an upstream has its responses from it,
-// so no + Add, unless the upstream is being edited in place.
+// so no + Add, unless the upstream is being edited in place. One that uses a
+// workflow is drawn by the workflow's name and revision, its responses the
+// workflow's answers.
 const HttpNode = memo(function HttpNode({ id, data }: NodeProps<FlowNode>) {
   const node = useEditor((s) => s.draft.nodes[data.index]);
   const locked = useEditor((s) => isLocked(s, data.index));
+  const called = useEditor((s) => {
+    const uses = s.draft.nodes[data.index]?.uses;
+    if (uses?.workflow === undefined) return undefined;
+    const name = s.called[versionKey(uses)]?.name ?? uses.workflow;
+    return `${name} · r${uses.revision}`;
+  });
   const problems = useProblemCount(atStep(data.index));
   const outputs = node ? handlesOf(node) : [];
   // React Flow finds a node's handles when it mounts; one added or taken
@@ -170,6 +179,8 @@ const HttpNode = memo(function HttpNode({ id, data }: NodeProps<FlowNode>) {
       <Frame id={node.id} problems={problems} part="request">
         {run ? (
           <RunMark run={run} />
+        ) : called !== undefined ? (
+          called
         ) : node.request ? (
           `${node.request.method} ${node.request.url || "(no URL yet)"}`
         ) : (

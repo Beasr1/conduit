@@ -83,8 +83,8 @@ func TestSimulate_AParameterThatDoesntCompile(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"nodes": [{"id": "user", "kind": "http", "uses": {"upstream": "u", "version": 1}, "with": {"user_id": "("}}]}`), &d); err != nil {
 		t.Fatal(err)
 	}
-	rd, _ := workflow.Resolve(&d, workflow.Versions{{Upstream: "u", Version: 1}: &u})
-	pv, err := Simulate(t.Context(), rd, "user")
+	rd, _ := workflow.Resolve(&d, workflow.Deps{Versions: workflow.Versions{{Upstream: "u", Version: 1}: &u}}, "")
+	pv, err := Simulate(t.Context(), rd, "user", workflow.Deps{})
 	if err != nil || !slices.ContainsFunc(pv.Problems, func(p workflow.Problem) bool { return p.Pointer == "/nodes/0/with/user_id" }) {
 		t.Errorf("Simulate() = %+v, %v; want the parameter's problem", pv, err)
 	}
@@ -104,8 +104,8 @@ func TestSimulate_Parameters(t *testing.T) {
 	  "uses": {"upstream": "u", "version": 1}, "with": {"user_id": "input.id", "page": "input.page"}}]}`), &d); err != nil {
 		t.Fatal(err)
 	}
-	rd, _ := workflow.Resolve(&d, workflow.Versions{{Upstream: "u", Version: 1}: &u})
-	pv, err := Simulate(t.Context(), rd, "user")
+	rd, _ := workflow.Resolve(&d, workflow.Deps{Versions: workflow.Versions{{Upstream: "u", Version: 1}: &u}}, "")
+	pv, err := Simulate(t.Context(), rd, "user", workflow.Deps{})
 	if err != nil || !sameJSON(t, pv.Parameters, `{"user_id": "7"}`) || problemCodes(pv) != "/nodes/0/with/page evaluation_failed" {
 		t.Errorf("Simulate() = %s, %s, %v; want user_id's value, and page's problem", pv.Parameters, problemCodes(pv), err)
 	}
@@ -154,7 +154,7 @@ func TestRun_ANodeThatUsesAnUpstream(t *testing.T) {
 		  "with": `+with+`}]}`), &d); err != nil {
 			t.Fatal(err)
 		}
-		rd, ps := workflow.Resolve(&d, vs)
+		rd, ps := workflow.Resolve(&d, workflow.Deps{Versions: vs}, "")
 		if len(ps) > 0 {
 			t.Fatalf("Resolve() = %v", ps)
 		}

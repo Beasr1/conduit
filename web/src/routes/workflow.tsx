@@ -10,8 +10,8 @@ import { useWorkflow } from "@/features/workflows/hooks/use-workflows";
 export function Component() {
   const { id = "" } = useParams();
   const { data, isPending, refetch } = useWorkflow(id);
-  // The versions of upstreams its steps use, which draw those steps (plan
-  // 07).
+  // The versions of upstreams and the revisions of workflows its steps
+  // use, which draw those steps (plan 07).
   const used = useVersionsOf(data?.revision.definition);
   // Counts the times the newest revision was opened afresh, as when another
   // tab saved first. Until then the editor keeps what it opened.
@@ -30,9 +30,14 @@ export function Component() {
         workflow={data.workflow}
         revision={{
           ...data.revision,
-          definition: fill(data.revision.definition, used.versions),
+          definition: fill(
+            data.revision.definition,
+            used.versions,
+            used.called,
+          ),
         }}
         versions={used.versions}
+        called={used.called}
         onReload={() =>
           void refetch().then((r) => {
             if (r.isSuccess) setOpened((n) => n + 1);

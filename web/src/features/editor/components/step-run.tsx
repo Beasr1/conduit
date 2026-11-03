@@ -115,16 +115,19 @@ export function RunSent({ index }: { index: number }) {
 // RunGot is what an HTTP step got back in the run shown, in the tab of the
 // response it was (status, none for 2xx), beside that response's sample,
 // with a way to keep it as the sample. kept is told once it's been kept.
-// Locked, the samples are an upstream's, kept by editing it (plan 07).
+// Locked, the samples are an upstream's, kept by editing it, or a step
+// that uses a workflow has none (plan 07).
 export function RunGot({
   index,
   status,
   locked = false,
+  calls = false,
   kept,
 }: {
   index: number;
   status?: number;
   locked?: boolean;
+  calls?: boolean;
   kept: () => void;
 }) {
   const step = useEditor((s) => s.draft.nodes[index]?.id ?? "");
@@ -148,7 +151,7 @@ export function RunGot({
         <p className="text-muted-foreground">
           Too big to keep as the sample: only its first 256 KiB was kept.
         </p>
-      ) : locked ? (
+      ) : calls ? null : locked ? (
         <p className="text-muted-foreground">
           Its samples are the upstream&apos;s: edit the upstream to keep this as
           one.

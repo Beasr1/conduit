@@ -231,6 +231,12 @@ func TestSaveDraft(t *testing.T) {
 	if err := json.Unmarshal(r.body, &rev); err != nil || rev.Revision != 2 || len(rev.Problems) != 2 {
 		t.Errorf("saved %+v, %v; want revision 2 with its 2 problems", rev, err)
 	}
+	// A save that changes nothing makes no revision: 2 is the answer, its
+	// problems with it.
+	r = call(t, http.MethodPut, path, invalidDef, "If-Match", `"2"`)
+	if err := json.Unmarshal(r.body, &rev); r.status != http.StatusOK || r.header.Get("ETag") != `"2"` || err != nil || rev.Revision != 2 || len(rev.Problems) != 2 {
+		t.Errorf("a save on 2 that changes nothing = %d, ETag %q; %s", r.status, r.header.Get("ETag"), r.body)
+	}
 	r = call(t, http.MethodPut, "/v1/workflows/0190d2a5-0000-7000-8000-000000000000/draft", validDef, "If-Match", `"1"`)
 	if r.status != http.StatusNotFound {
 		t.Errorf("save to a missing workflow = %d %s", r.status, r.body)

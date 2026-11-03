@@ -143,6 +143,66 @@ test("New upstream says when the name is taken", async () => {
   );
 });
 
+// New upstream takes its samples too: one input object for the parameters
+// the URL reads, and a sample of each response the API can give.
+test("New upstream makes one with its sample input and each response", async () => {
+  let sent: CreateUpstream | undefined;
+  server.use(
+    http.post<PathParams, CreateUpstream, UpstreamVersion>(
+      "/api/v1/upstreams",
+      async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json(version(sent.definition, 1), { status: 201 });
+      },
+    ),
+  );
+  renderAt(<CreateUpstreamDialog />, {
+    path: "/upstreams",
+    routes: ["/upstreams/:id"],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "New upstream" }));
+  fireEvent.change(await screen.findByLabelText("Name"), {
+    target: { value: "Users API" },
+  });
+  fireEvent.change(screen.getByLabelText("URL"), {
+    target: { value: "https://users.example.com/v1/users/{{ user_id }}" },
+  });
+  const input = screen.getByLabelText("Sample input");
+  fireEvent.change(input, { target: { value: '{ "usr": "7" }' } });
+  fireEvent.click(screen.getByRole("button", { name: "Add a response" }));
+  fireEvent.click(screen.getByRole("button", { name: "Make" }));
+  // Checked when it's made: nothing is sent while a sample doesn't fit.
+  expect(
+    await screen.findByText(
+      "No parameter is named usr: the URL reads user_id.",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByText("A status: three digits.")).toBeTruthy();
+  expect(sent).toBeUndefined();
+
+  fireEvent.change(input, { target: { value: '{ "user_id": "7" }' } });
+  fireEvent.change(screen.getByLabelText("Response 1 body"), {
+    target: { value: '{ "id": "7", "name": "Ada" }' },
+  });
+  fireEvent.change(screen.getByLabelText("Response 2 status"), {
+    target: { value: "404" },
+  });
+  fireEvent.change(screen.getByLabelText("Response 2 body"), {
+    target: { value: '{ "error": "not found" }' },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Make" }));
+  await waitFor(() => expect(sent).toBeDefined());
+  expect(sent?.definition).toEqual({
+    parameters: [{ name: "user_id", sample: "7" }],
+    request: {
+      method: "GET",
+      url: "https://users.example.com/v1/users/{{ user_id }}",
+    },
+    sample: { body: { id: "7", name: "Ada" } },
+    outputs: [{ status: 404, sample: { body: { error: "not found" } } }],
+  });
+});
+
 // answerPage has the server answer what the upstream's page asks: who uses
 // it, its check, and previews.
 function answerPage(problems: Validation["problems"] = []) {
@@ -201,20 +261,26 @@ test("an upstream's page edits it, and saves its next version", async () => {
   const usedBy = await screen.findByRole("region", { name: "Used by" });
   expect(within(usedBy).getByRole("link", { name: "Orders" })).toBeTruthy();
   expect(usedBy.textContent).toContain("v2 · served");
-  // Each parameter is a name and a sample, under the columns' names.
+  // Each parameter is a name, under the column's, and their samples one
+  // input object.
   const parameters = screen.getByRole("region", { name: "Parameters" });
   expect(within(parameters).getByText("Name")).toBeTruthy();
-  expect(within(parameters).getByText("Sample")).toBeTruthy();
-  expect(screen.getByLabelText("Sample of user_id")).toHaveProperty(
-    "value",
-    '"7"',
-  );
+  const input = screen.getByLabelText("Sample input");
+  expect(input).toHaveProperty("value", '{\n  "user_id": "7"\n}');
 
   const save = screen.getByRole("button", { name: "Save version 3" });
   expect(save.matches(":disabled")).toBe(true);
   fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
     target: { value: "https://users.example.com/v2/users/{{ user_id }}" },
   });
+  // A key that names no parameter is said, and not taken: the sample saved
+  // is the one before.
+  fireEvent.change(input, { target: { value: '{ "usr": "8" }' } });
+  expect(
+    await screen.findByText(
+      "No parameter is named usr: the URL reads user_id.",
+    ),
+  ).toBeTruthy();
   await waitFor(() => expect(save.matches(":disabled")).toBe(false));
   fireEvent.click(save);
   await waitFor(() => expect(sent).toBeDefined());

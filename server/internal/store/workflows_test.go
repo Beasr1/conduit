@@ -99,6 +99,12 @@ func TestSaveRevision(t *testing.T) {
 	if _, err := db.SaveRevision(t.Context(), w.ID, 1, def(3), person); !errors.Is(err, store.ErrRevisionMismatch) {
 		t.Errorf("save on a stale base: error = %v, want ErrRevisionMismatch", err)
 	}
+	// A save that changes nothing makes no revision: 2 is the answer, as it
+	// was, whoever saves. Key order and spacing don't count.
+	same, err := db.SaveRevision(t.Context(), w.ID, 2, json.RawMessage(`{"output": 2, "nodes": []}`), store.Provenance{Actor: "token", Client: "other"})
+	if err != nil || same.Revision != 2 || same.Provenance != person {
+		t.Errorf("a save that changes nothing = %+v, %v; want revision 2, as it was", same, err)
+	}
 	if _, err := db.SaveRevision(t.Context(), "0190d2a5-0000-7000-8000-000000000000", 1, def(3), person); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("save to a missing workflow: error = %v, want ErrNotFound", err)
 	}

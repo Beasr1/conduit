@@ -7,10 +7,10 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
-import { versionKey } from "@/features/editor/upstreams";
+import { type Called, versionKey } from "@/features/editor/upstreams";
 import type { components } from "@/gen/schema";
 import { api, call } from "@/lib/api";
-import { upstreamKeys } from "@/lib/query-keys";
+import { upstreamKeys, workflowKeys } from "@/lib/query-keys";
 
 type Definition = components["schemas"]["Definition"];
 type Upstream = components["schemas"]["Upstream"];
@@ -53,13 +53,15 @@ export function useUpstream(id: string) {
 }
 
 function versionQuery(uses: Uses) {
+  const id = uses.upstream ?? "";
+  const version = uses.version ?? 0;
   return {
-    queryKey: upstreamKeys.version(uses.upstream, uses.version),
+    queryKey: upstreamKeys.version(id, version),
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       call(
         (signal) =>
           api.GET("/v1/upstreams/{id}/versions/{version}", {
-            params: { path: { id: uses.upstream, version: uses.version } },
+            params: { path: { id, version } },
             signal,
           }),
         signal,
@@ -78,25 +80,153 @@ export function fetchVersion(
   return client.fetchQuery(versionQuery(uses));
 }
 
-// useVersionsOf fetches every version a definition's steps use, keyed by
-// versionKey, and says whether any is still on its way. One that fails is
-// left out: the step that uses it says so.
+// revisionQuery is a revision of a workflow a step uses (plan 07), which
+// never changes.
+function revisionQuery(uses: Uses) {
+  const id = uses.workflow ?? "";
+  const revision = uses.revision ?? 0;
+  return {
+    queryKey: workflowKeys.revision(id, revision),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      call(
+        (signal) =>
+          api.GET("/v1/workflows/{id}/revisions/{revision}", {
+            params: { path: { id, revision } },
+            signal,
+          }),
+        signal,
+      ),
+    staleTime: Infinity,
+    // The step that uses it says what's wrong; a toast would only repeat it.
+    meta: { quiet: true },
+  };
+}
+
+// workflowQuery is a workflow a step uses, with its latest revision: its
+// name, and the revision it serves.
+function workflowQuery(id: string) {
+  return {
+    queryKey: workflowKeys.detail(id),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      call(
+        (signal) =>
+          api.GET("/v1/workflows/{id}", { params: { path: { id } }, signal }),
+        signal,
+      ),
+    meta: { quiet: true },
+  };
+}
+
+// useUsedWorkflow is a workflow a step uses, as it is now.
+export function useUsedWorkflow(id: string) {
+  return useQuery(workflowQuery(id));
+}
+
+// fetchCalled gets a revision of a workflow a step uses, with the
+// workflow's name and the revision it serves.
+export async function fetchCalled(
+  client: QueryClient,
+  uses: Uses,
+): Promise<Called> {
+  const [r, w] = await Promise.all([
+    client.fetchQuery(revisionQuery(uses)),
+    client.fetchQuery(workflowQuery(uses.workflow ?? "")),
+  ]);
+  return {
+    name: w.workflow.name,
+    published: w.workflow.published_revision,
+    definition: r.definition,
+  };
+}
+
+// fetchServed gets the revision a workflow serves now, for a step that's to
+// use it, with what fill needs.
+export async function fetchServed(
+  client: QueryClient,
+  workflow: string,
+): Promise<{ uses: Uses; called: Called }> {
+  const w = await client.fetchQuery({
+    ...workflowQuery(workflow),
+    staleTime: 0,
+  });
+  const revision = w.workflow.published_revision;
+  if (revision === undefined)
+    throw new Error(`${w.workflow.name} serves no revision`);
+  const uses = { workflow, revision };
+  const r = await client.fetchQuery(revisionQuery(uses));
+  return {
+    uses,
+    called: {
+      name: w.workflow.name,
+      published: revision,
+      definition: r.definition,
+    },
+  };
+}
+
+// pendingOf says whether any of results is still on its way.
+const pendingOf = (results: { isPending: boolean; fetchStatus: string }[]) =>
+  results.some((r) => r.isPending && r.fetchStatus !== "idle");
+
+// useVersionsOf fetches what a definition's steps use, keyed by
+// versionKey: the upstream versions, and the workflow revisions, each with
+// its workflow's name and the revision it serves (plan 07). It says
+// whether any is still on its way. One that fails is left out: the step
+// that uses it says so.
 export function useVersionsOf(d: Definition | undefined): {
   versions: Record<string, Upstream>;
+  called: Record<string, Called>;
   pending: boolean;
 } {
   const uses = (d?.nodes ?? []).flatMap((n) => (n.uses ? [n.uses] : []));
-  return useQueries({
-    queries: uses.map(versionQuery),
+  const upstreams = uses.filter((u) => u.workflow === undefined);
+  const revisions = uses.filter((u) => u.workflow !== undefined);
+  const ids = [...new Set(revisions.map((u) => u.workflow ?? ""))];
+  const versions = useQueries({
+    queries: upstreams.map(versionQuery),
     combine: (results) => ({
-      versions: Object.fromEntries(
+      got: Object.fromEntries(
         results.flatMap((r, k) =>
-          r.data ? [[versionKey(uses[k]!), r.data.definition]] : [],
+          r.data ? [[versionKey(upstreams[k]!), r.data.definition]] : [],
         ),
       ),
-      pending: results.some((r) => r.isPending && r.fetchStatus !== "idle"),
+      pending: pendingOf(results),
     }),
   });
+  const definitions = useQueries({
+    queries: revisions.map(revisionQuery),
+    combine: (results) => ({
+      got: results.map((r) => r.data?.definition),
+      pending: pendingOf(results),
+    }),
+  });
+  const workflows = useQueries({
+    queries: ids.map(workflowQuery),
+    combine: (results) => ({
+      got: new Map(
+        results.flatMap((r) =>
+          r.data ? [[r.data.workflow.id, r.data.workflow] as const] : [],
+        ),
+      ),
+      pending: pendingOf(results),
+    }),
+  });
+  const called: Record<string, Called> = {};
+  revisions.forEach((u, k) => {
+    const definition = definitions.got[k];
+    const w = workflows.got.get(u.workflow ?? "");
+    if (definition && w)
+      called[versionKey(u)] = {
+        name: w.name,
+        published: w.published_revision,
+        definition,
+      };
+  });
+  return {
+    versions: versions.got,
+    called,
+    pending: versions.pending || definitions.pending || workflows.pending,
+  };
 }
 
 // useUpstreamUsers is the workflows whose latest revision uses an upstream.

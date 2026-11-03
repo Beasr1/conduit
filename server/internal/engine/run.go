@@ -23,11 +23,40 @@ import (
 type Options struct {
 	Concurrency int           // nodes in flight per run; default 8
 	RunTimeout  time.Duration // default 5 minutes
+	// Workflows runs the workflows nodes use (plan 07); nil, and a node that
+	// uses one fails.
+	Workflows Caller
+}
+
+// Caller runs a workflow a node uses, at the revision it pins, as a run of
+// its own in the caller's trace one hop further, and gives its answer
+// (plan 07). A run that gives no answer is an error, a *CallError, beside
+// what it answered with, if anything. The runner is one.
+type Caller interface {
+	Call(ctx context.Context, c Call, input json.RawMessage) (Answer, error)
+}
+
+// Call is a node running the workflow it uses: which, at which revision,
+// and the run and node it's called from.
+type Call struct {
+	Workflow string
+	Revision int
+	Run      string
+	Node     string
+}
+
+// Answer is what a workflow a node uses answered: its status, headers and
+// body, as /serve would send them.
+type Answer struct {
+	Status int
+	Header http.Header
+	Body   json.RawMessage
 }
 
 // Engine runs programs. It's safe for concurrent use.
 type Engine struct {
 	client      *upstream.Client
+	workflows   Caller
 	concurrency int
 	runTimeout  time.Duration
 }
@@ -36,6 +65,7 @@ type Engine struct {
 func New(client *upstream.Client, o Options) *Engine {
 	return &Engine{
 		client:      client,
+		workflows:   o.Workflows,
 		concurrency: cmp.Or(o.Concurrency, 8),
 		runTimeout:  cmp.Or(o.RunTimeout, 5*time.Minute),
 	}

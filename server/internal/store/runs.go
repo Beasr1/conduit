@@ -14,7 +14,9 @@ type Run struct {
 	ID              string          `db:"id"`
 	WorkflowID      string          `db:"workflow_id"`
 	Revision        int             `db:"revision"`
-	Trigger         string          `db:"trigger"`  // editor or served
+	Trigger         string          `db:"trigger"`    // editor, served, or workflow: a step's (plan 07)
+	ParentRun       string          `db:"parent_run"` // the run a workflow run was called from, and its node; else empty
+	ParentNode      string          `db:"parent_node"`
 	TraceID         string          `db:"trace_id"` // its W3C trace (plan 06); empty for runs from before
 	Status          string          `db:"status"`   // running, succeeded, failed or cancelled
 	Input           json.RawMessage `db:"input"`    // empty in lists
@@ -41,15 +43,24 @@ type NodeRun struct {
 }
 
 const (
-	runColumns = `id::text AS id, workflow_id::text AS workflow_id, revision, trigger, COALESCE(trace_id, '') AS trace_id, status,
+	runColumns = `id::text AS id, workflow_id::text AS workflow_id, revision, trigger, COALESCE(trace_id, '') AS trace_id,
+		COALESCE(parent_run::text, '') AS parent_run, COALESCE(parent_node, '') AS parent_node, status,
 		input, COALESCE(answered, 0) AS answered, output, output_truncated, error, started_at, ended_at`
 	nodeRunColumns = `run_id::text AS run_id, node_id, status, attempts, request, response, error, took, started_at, ended_at`
 )
 
+// Parent is the run, and the node in it, a run of a workflow a step uses
+// was called from (plan 07); zero for any other run.
+type Parent struct {
+	Run  string
+	Node string
+}
+
 // StartRun records a run of revision as running, and returns it with its id.
-func (s *Store) StartRun(ctx context.Context, workflowID string, revision int, trigger, traceID string, input json.RawMessage) (Run, error) {
-	r, err := one[Run](ctx, s.pool, `INSERT INTO runs (workflow_id, revision, trigger, trace_id, status, input)
-		VALUES ($1::uuid, $2, $3, $4, 'running', $5) RETURNING `+runColumns, workflowID, revision, trigger, traceID, input)
+func (s *Store) StartRun(ctx context.Context, workflowID string, revision int, trigger, traceID string, parent Parent, input json.RawMessage) (Run, error) {
+	r, err := one[Run](ctx, s.pool, `INSERT INTO runs (workflow_id, revision, trigger, trace_id, parent_run, parent_node, status, input)
+		VALUES ($1::uuid, $2, $3, $4, NULLIF($5, '')::uuid, NULLIF($6, ''), 'running', $7) RETURNING `+runColumns,
+		workflowID, revision, trigger, traceID, parent.Run, parent.Node, input)
 	if err != nil {
 		return Run{}, fmt.Errorf("start a run of %s revision %d: %w", workflowID, revision, translate(err))
 	}
@@ -120,7 +131,8 @@ func (s *Store) NodeRuns(ctx context.Context, runID string) ([]NodeRun, error) {
 // output: of one workflow when workflowID isn't empty, and older than before
 // when it isn't empty.
 func (s *Store) Runs(ctx context.Context, workflowID string, limit int, before string) ([]Run, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id::text AS id, workflow_id::text AS workflow_id, revision, trigger, COALESCE(trace_id, '') AS trace_id, status,
+	rows, err := s.pool.Query(ctx, `SELECT id::text AS id, workflow_id::text AS workflow_id, revision, trigger, COALESCE(trace_id, '') AS trace_id,
+		COALESCE(parent_run::text, '') AS parent_run, COALESCE(parent_node, '') AS parent_node, status,
 		COALESCE(answered, 0) AS answered, output_truncated, error, started_at, ended_at FROM runs
 		WHERE ($2::uuid IS NULL OR workflow_id = $2::uuid) AND ($3::uuid IS NULL OR id < $3::uuid)
 		ORDER BY id DESC LIMIT $1`, limit, orNull(workflowID), orNull(before))

@@ -99,8 +99,9 @@ func (e RunStatus) Valid() bool {
 
 // Defines values for RunTrigger.
 const (
-	RunTriggerEditor RunTrigger = "editor"
-	RunTriggerServed RunTrigger = "served"
+	RunTriggerEditor   RunTrigger = "editor"
+	RunTriggerServed   RunTrigger = "served"
+	RunTriggerWorkflow RunTrigger = "workflow"
 )
 
 // Valid indicates whether the value is a known member of the RunTrigger enum.
@@ -109,6 +110,8 @@ func (e RunTrigger) Valid() bool {
 	case RunTriggerEditor:
 		return true
 	case RunTriggerServed:
+		return true
+	case RunTriggerWorkflow:
 		return true
 	default:
 		return false
@@ -171,8 +174,9 @@ func (e RunSummaryStatus) Valid() bool {
 
 // Defines values for RunSummaryTrigger.
 const (
-	RunSummaryTriggerEditor RunSummaryTrigger = "editor"
-	RunSummaryTriggerServed RunSummaryTrigger = "served"
+	RunSummaryTriggerEditor   RunSummaryTrigger = "editor"
+	RunSummaryTriggerServed   RunSummaryTrigger = "served"
+	RunSummaryTriggerWorkflow RunSummaryTrigger = "workflow"
 )
 
 // Valid indicates whether the value is a known member of the RunSummaryTrigger enum.
@@ -181,6 +185,8 @@ func (e RunSummaryTrigger) Valid() bool {
 	case RunSummaryTriggerEditor:
 		return true
 	case RunSummaryTriggerServed:
+		return true
+	case RunSummaryTriggerWorkflow:
 		return true
 	default:
 		return false
@@ -298,13 +304,13 @@ type NodeRunStatus string
 
 // Preview defines model for Preview.
 type Preview struct {
-	// Gives A transform step's value, or the workflow's output. Absent when it gave none, and for a transform with ways, as each way gives its own.
+	// Gives A transform step's value, the workflow's output, or, for an http step that uses a workflow, the answer it gets back, {"status", "body"}, from the workflow's own preview. Absent when it gave none, and for a transform with ways, as each way gives its own.
 	Gives json.RawMessage `json:"gives,omitempty,omitzero"`
 
 	// Outcomes For a step, or a connection's source, what each step before it may have done in a run that reaches it, by id, worked out from the edges whatever the samples. Absent when it never runs, or the edges have a cycle.
 	Outcomes map[string]StepOutcome `json:"outcomes,omitempty,omitzero"`
 
-	// Parameters An http step that uses an upstream, the values its parameters take, by name, which its request reads. One whose value fails is left out, as the problems say.
+	// Parameters An http step that uses an upstream, the values its parameters take, by name, which its request reads; one that uses a workflow, the input it gives it, by field. One whose value fails is left out, as the problems say.
 	Parameters json.RawMessage `json:"parameters,omitempty,omitzero"`
 
 	// Problems What kept a part from rendering, each sample missing on the way, and what's wrong with the definition there.
@@ -442,14 +448,17 @@ type Run struct {
 	// Output The body of the answer the run gave, unless it has none. Over 256 KiB, its first 256 KiB as a string, and output_truncated is true.
 	Output          json.RawMessage `json:"output,omitempty,omitzero"`
 	OutputTruncated bool            `json:"output_truncated,omitempty,omitzero"`
-	Revision        int             `json:"revision"`
-	StartedAt       time.Time       `json:"started_at"`
-	Status          RunStatus       `json:"status"`
+
+	// Parent A run of a workflow a step uses, the run and the step it was called from. Absent for any other run.
+	Parent    *RunParent `json:"parent,omitempty"`
+	Revision  int        `json:"revision"`
+	StartedAt time.Time  `json:"started_at"`
+	Status    RunStatus  `json:"status"`
 
 	// TraceID The W3C trace the run belongs to, 32 lowercase hex digits; the caller's, when the call that started it carried one. Runs that call each other through /serve share it. Absent for runs from before traces were kept.
 	TraceID string `json:"trace_id,omitempty,omitzero"`
 
-	// Trigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+	// Trigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}; workflow, from a step of another run that uses the workflow (plan 07), which parent names.
 	Trigger    RunTrigger `json:"trigger"`
 	WorkflowID string     `json:"workflow_id"`
 }
@@ -457,7 +466,7 @@ type Run struct {
 // RunStatus defines model for Run.Status.
 type RunStatus string
 
-// RunTrigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+// RunTrigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}; workflow, from a step of another run that uses the workflow (plan 07), which parent names.
 type RunTrigger string
 
 // RunError Why a run or a node didn't succeed.
@@ -493,6 +502,12 @@ type RunList struct {
 	Runs []RunSummary `json:"runs"`
 }
 
+// RunParent The run, and the step in it, a run of a workflow a step uses was called from (plan 07).
+type RunParent struct {
+	Node string `json:"node"`
+	Run  string `json:"run"`
+}
+
 // RunSummary defines model for RunSummary.
 type RunSummary struct {
 	// Answered The status of the answer the run gave, its own once it succeeded, or, once it failed, the status by cause its response's error body answered with, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
@@ -502,8 +517,11 @@ type RunSummary struct {
 	EndedAt time.Time `json:"ended_at,omitempty,omitzero"`
 
 	// Error Why a run or a node didn't succeed.
-	Error     RunError         `json:"error,omitempty,omitzero"`
-	ID        string           `json:"id"`
+	Error RunError `json:"error,omitempty,omitzero"`
+	ID    string   `json:"id"`
+
+	// Parent A run of a workflow a step uses, the run and the step it was called from. Absent for any other run.
+	Parent    *RunParent       `json:"parent,omitempty"`
 	Revision  int              `json:"revision"`
 	StartedAt time.Time        `json:"started_at"`
 	Status    RunSummaryStatus `json:"status"`
@@ -511,7 +529,7 @@ type RunSummary struct {
 	// TraceID The W3C trace the run belongs to, 32 lowercase hex digits; the caller's, when the call that started it carried one. Runs that call each other through /serve share it. Absent for runs from before traces were kept.
 	TraceID string `json:"trace_id,omitempty,omitzero"`
 
-	// Trigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+	// Trigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}; workflow, from a step of another run that uses the workflow (plan 07), which parent names.
 	Trigger    RunSummaryTrigger `json:"trigger"`
 	WorkflowID string            `json:"workflow_id"`
 }
@@ -519,7 +537,7 @@ type RunSummary struct {
 // RunSummaryStatus defines model for RunSummary.Status.
 type RunSummaryStatus string
 
-// RunSummaryTrigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+// RunSummaryTrigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}; workflow, from a step of another run that uses the workflow (plan 07), which parent names.
 type RunSummaryTrigger string
 
 // SignIn defines model for SignIn.

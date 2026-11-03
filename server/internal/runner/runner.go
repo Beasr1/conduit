@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"slices"
 	"sync"
 	"time"
@@ -56,14 +57,13 @@ type Runner struct {
 	stop     context.CancelFunc
 }
 
-// New returns a Runner whose runs call upstreams through client.
+// New returns a Runner whose runs call upstreams through client, and run
+// the workflows their steps use itself (plan 07).
 func New(s *store.Store, client *upstream.Client, log *slog.Logger, o Options) *Runner {
 	stopping, stop := context.WithCancel(context.Background())
 	slots := cmp.Or(o.MaxRuns, 32)
-	return &Runner{
+	r := &Runner{
 		store:    s,
-		editor:   engine.New(client, engine.Options{RunTimeout: cmp.Or(o.EditorTimeout, 5*time.Minute)}),
-		served:   engine.New(client, engine.Options{RunTimeout: cmp.Or(o.ServedTimeout, 30*time.Second)}),
 		log:      log,
 		events:   newHub(),
 		slots:    make(chan struct{}, slots),
@@ -72,6 +72,9 @@ func New(s *store.Store, client *upstream.Client, log *slog.Logger, o Options) *
 		stopping: stopping,
 		stop:     stop,
 	}
+	r.editor = engine.New(client, engine.Options{RunTimeout: cmp.Or(o.EditorTimeout, 5*time.Minute), Workflows: r})
+	r.served = engine.New(client, engine.Options{RunTimeout: cmp.Or(o.ServedTimeout, 30*time.Second), Workflows: r})
+	return r
 }
 
 var (
@@ -142,7 +145,7 @@ func (r *Runner) Start(ctx context.Context, workflowID string, revision int, inp
 	if err != nil {
 		return store.Run{}, err
 	}
-	run, err := r.begin(ctx, w.ID, revision, "editor", input)
+	run, err := r.begin(ctx, w.ID, revision, "editor", store.Parent{}, input)
 	if err != nil {
 		return store.Run{}, err
 	}
@@ -174,7 +177,7 @@ func (r *Runner) Serve(ctx context.Context, slug string, input json.RawMessage) 
 	if err != nil {
 		return Outcome{}, err
 	}
-	run, err := r.begin(ctx, w.ID, *w.PublishedRevision, "served", input)
+	run, err := r.begin(ctx, w.ID, *w.PublishedRevision, "served", store.Parent{}, input)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -184,6 +187,78 @@ func (r *Runner) Serve(ctx context.Context, slug string, input json.RawMessage) 
 	gone := context.AfterFunc(ctx, func() { cancel(ErrCallerGone) })
 	defer gone()
 	return r.execute(runCtx, r.served, p, run), nil
+}
+
+// Call runs revision c.Revision of workflow c.Workflow for a step of run
+// c.Run that uses it (plan 07): as a run of its own, recorded, in the step
+// run's trace one hop further, within the workflow's share, and as long as
+// the step's run has left; and gives its answer, as /serve would. A run
+// that gives no answer, or is refused, is an *engine.CallError the step
+// fails with, beside what it answered, if anything.
+func (r *Runner) Call(ctx context.Context, c engine.Call, input json.RawMessage) (engine.Answer, error) {
+	t, _ := trace.From(traced(ctx))
+	ctx = trace.With(ctx, t.Next())
+	input = orNull(input)
+	p, err := r.prepare(ctx, c.Workflow, c.Revision, input)
+	if err != nil {
+		return engine.Answer{}, refused(c, err)
+	}
+	run, err := r.begin(ctx, c.Workflow, c.Revision, "workflow", store.Parent{Run: c.Run, Node: c.Node}, input)
+	if err != nil {
+		return engine.Answer{}, refused(c, err)
+	}
+	return answered(r.execute(ctx, r.editor, p, run))
+}
+
+// refused is the run of a workflow a step uses not starting, as the step's
+// failure: the input it gives not matching the workflow's input schema is
+// the step's workflow's fault; the rest, the workflow's.
+func refused(c engine.Call, err error) error {
+	var input *InputError
+	var invalid *InvalidError
+	switch {
+	case errors.As(err, &input):
+		return &engine.CallError{Code: engine.CodeWorkflow, Detail: fmt.Sprintf("the input it gives doesn't match the input schema of revision %d of the workflow", c.Revision)}
+	case errors.As(err, &invalid):
+		return &engine.CallError{Code: engine.CodeUpstream, Detail: fmt.Sprintf("revision %d of the workflow has problems, so it can't run", c.Revision)}
+	default:
+		return &engine.CallError{Code: engine.CodeUpstream, Detail: fmt.Sprintf("revision %d of the workflow didn't run: %v", c.Revision, err)}
+	}
+}
+
+// answered is what a run of a workflow a step uses gives the step (plan
+// 07): its answer, as /serve sends it, one that passes an error on with no
+// error body to say it as that error; or, when it gave none, its failure,
+// in the step's words, beside what its error body answered, if it has one.
+func answered(out Outcome) (engine.Answer, error) {
+	a := engine.Answer{Status: out.Answer, Body: out.Output}
+	if out.Answer != 0 {
+		a.Header = http.Header{"Content-Type": {"application/json"}}
+	}
+	switch f := out.Failure; {
+	case f != nil:
+		return a, &engine.CallError{Code: callCode(f.Code), Detail: fmt.Sprintf("the workflow's run %s failed: %s", out.Run.ID, f.Detail)}
+	case out.Answer == 0:
+		return a, &engine.CallError{Code: engine.CodeUpstream, Detail: fmt.Sprintf("the workflow's run %s gave no answer", out.Run.ID)}
+	case out.Problem != nil:
+		body, err := json.Marshal(engine.ErrorAnswer{Code: out.Problem.Code, Detail: out.Problem.Detail, Node: out.Problem.Node})
+		if err != nil {
+			return engine.Answer{}, err
+		}
+		a.Body = body
+	}
+	return a, nil
+}
+
+// callCode is a failure of a workflow a step uses in the step's words: a
+// timeout, a cancellation and our bug are as they were; anything else is
+// the workflow failing, as an upstream does.
+func callCode(code string) string {
+	switch code {
+	case CodeTimeout, CodeCancelled, CodeInternal:
+		return code
+	}
+	return CodeUpstream
 }
 
 // Recover marks failed every run still recorded as running: at startup,
@@ -292,13 +367,13 @@ func (r *Runner) prepare(ctx context.Context, workflowID string, revision int, i
 	if err := json.Unmarshal(rev.Definition, &d); err != nil {
 		return nil, fmt.Errorf("decode revision %d of %s: %w", revision, workflowID, err)
 	}
-	// Filled from the upstreams its nodes use, pinned, so as they were when
-	// it was saved (plan 07).
-	vs, err := r.store.Versions(ctx, &d)
+	// Filled from the upstreams and workflows its nodes use, pinned, so as
+	// they were when it was saved (plan 07).
+	deps, err := r.store.Deps(ctx, &d)
 	if err != nil {
 		return nil, err
 	}
-	rd, ps := workflow.Resolve(&d, vs)
+	rd, ps := workflow.Resolve(&d, deps, workflowID)
 	p, err := engine.Compile(rd)
 	var compiled workflow.Problems
 	if errors.As(err, &compiled) || len(ps) > 0 {
@@ -325,8 +400,9 @@ func traced(ctx context.Context) context.Context {
 }
 
 // begin takes a slot, one of the workflow's share, and records the run as
-// running, in its trace; unless the trace has gone round too often.
-func (r *Runner) begin(ctx context.Context, workflowID string, revision int, trigger string, input json.RawMessage) (store.Run, error) {
+// running, in its trace, called from parent if it's a step's; unless the
+// trace has gone round too often.
+func (r *Runner) begin(ctx context.Context, workflowID string, revision int, trigger string, parent store.Parent, input json.RawMessage) (store.Run, error) {
 	t, _ := trace.From(ctx)
 	if t.Hops >= trace.MaxHops {
 		return store.Run{}, ErrLoop
@@ -343,7 +419,7 @@ func (r *Runner) begin(ctx context.Context, workflowID string, revision int, tri
 		r.leave(workflowID)
 		return store.Run{}, ErrBusy
 	}
-	run, err := r.store.StartRun(ctx, workflowID, revision, trigger, t.ID, input)
+	run, err := r.store.StartRun(ctx, workflowID, revision, trigger, t.ID, parent, input)
 	if err != nil {
 		<-r.slots
 		r.leave(workflowID)

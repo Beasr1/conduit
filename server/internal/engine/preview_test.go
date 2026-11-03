@@ -49,7 +49,7 @@ func previewOf(t *testing.T, def, id string, edit func(*workflow.Definition)) *P
 	if edit != nil {
 		edit(&d)
 	}
-	pv, err := Simulate(t.Context(), &d, id)
+	pv, err := Simulate(t.Context(), &d, id, workflow.Deps{})
 	if err != nil {
 		t.Fatalf("Simulate: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestSimulate_UnknownStep(t *testing.T) {
 	if err := json.Unmarshal([]byte(sampled), &d); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Simulate(t.Context(), &d, "nope"); !errors.Is(err, ErrNoSuchNode) {
+	if _, err := Simulate(t.Context(), &d, "nope", workflow.Deps{}); !errors.Is(err, ErrNoSuchNode) {
 		t.Errorf("err = %v, want ErrNoSuchNode", err)
 	}
 }
@@ -354,7 +354,7 @@ func edgePreviewOf(t *testing.T, def string, k int, edit func(*workflow.Definiti
 	if edit != nil {
 		edit(&d)
 	}
-	pv, err := SimulateEdge(t.Context(), &d, k)
+	pv, err := SimulateEdge(t.Context(), &d, k, workflow.Deps{})
 	if err != nil {
 		t.Fatalf("SimulateEdge: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestSimulateEdge_WhenItCantTell(t *testing.T) {
 	if err := json.Unmarshal([]byte(branched), &d); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SimulateEdge(t.Context(), &d, 4); !errors.Is(err, ErrNoSuchEdge) {
+	if _, err := SimulateEdge(t.Context(), &d, 4, workflow.Deps{}); !errors.Is(err, ErrNoSuchEdge) {
 		t.Errorf("err = %v, want ErrNoSuchEdge", err)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Beasr1/conduit/server/internal/engine"
 	"github.com/Beasr1/conduit/server/internal/store"
 	"github.com/Beasr1/conduit/server/internal/store/storetest"
 	"github.com/Beasr1/conduit/server/internal/trace"
@@ -531,6 +532,77 @@ func TestServe_AStepsUnhandledTakesItsFailure(t *testing.T) {
 	}
 }
 
+// A step that uses a workflow runs it as a run of its own, recorded with
+// the run and step it was called from, in the same trace, and answers with
+// what it answered (plan 07). One whose run gives no answer fails the
+// step, into its Unhandled here, in the step's words.
+func TestServe_AStepThatUsesAWorkflow(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	r := newRunner(t, Options{})
+	greet := saveWorkflow(t, "", `{"nodes": [{"id": "hi", "kind": "transform", "expr": "{ 'hello': input.name }", "unhandled": {"fail": true}}],
+	  "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}},
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "hi"}]}]}}`)
+	broken := saveWorkflow(t, "", `{"nodes": [{"id": "no", "kind": "transform", "expr": "$number('one')", "unhandled": {"fail": true}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "no"}]}]}}`)
+	caller := saveWorkflow(t, "", `{"nodes": [
+	    {"id": "greet", "kind": "http", "uses": {"workflow": "`+greet.ID+`", "revision": 1}, "with": {"name": "input.who"}, "unhandled": {"fail": true}},
+	    {"id": "broken", "kind": "http", "uses": {"workflow": "`+broken.ID+`", "revision": 1}, "unhandled": {"body": "{ 'why': nodes.broken.error.code }"}},
+	    {"id": "both", "kind": "transform", "expr": "{ 'greeting': nodes.greet.body.hello, 'broken': nodes.broken.body.why }", "unhandled": {"fail": true}}],
+	  "edges": [{"from": "greet", "to": "both"}, {"from": "broken", "to": "both", "unhandled": true}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "both"}]}]}}`)
+	out, err := r.Serve(ctx, caller.Slug, json.RawMessage(`{"who": "Ada"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Answer != 200 || string(out.Output) != `{"greeting":"Ada","broken":"upstream_failed"}` {
+		t.Errorf("answered %d %s, failure %+v", out.Answer, out.Output, out.Failure)
+	}
+	runs, err := db.Runs(ctx, greet.ID, 10, "")
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("greet's runs = %+v, %v", runs, err)
+	}
+	if g := runs[0]; g.Trigger != "workflow" || g.ParentRun != out.Run.ID || g.ParentNode != "greet" || g.TraceID != out.Run.TraceID || g.Answered != 200 {
+		t.Errorf("greet's run = %+v; caller's %+v", g, out.Run)
+	}
+	if full, err := db.Run(ctx, runs[0].ID); err != nil || string(full.Input) != `{"name": "Ada"}` {
+		t.Errorf("greet's run input = %s, %v", full.Input, err)
+	}
+	if runs, err := db.Runs(ctx, broken.ID, 10, ""); err != nil || len(runs) != 1 || runs[0].Status != "failed" || runs[0].ParentNode != "broken" {
+		t.Errorf("broken's runs = %+v, %v", runs, err)
+	}
+}
+
+// A run of a workflow a step uses goes one hop further in the step's trace,
+// so one past the limit is refused, as a call is; and input the workflow's
+// schema refuses is the step's workflow's fault.
+func TestCall_Refusals(t *testing.T) {
+	t.Parallel()
+	r := newRunner(t, Options{})
+	w := saveWorkflow(t, "", `{"nodes": [{"id": "hi", "kind": "transform", "expr": "1", "unhandled": {"fail": true}}],
+	  "input_schema": {"type": "object", "required": ["name"]},
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "hi"}]}]}}`)
+	parent, err := db.StartRun(t.Context(), w.ID, 1, "editor", "4bf92f3577b34da6a3ce929d0e0e4736", store.Parent{}, json.RawMessage(`null`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := engine.Call{Workflow: w.ID, Revision: 1, Run: parent.ID, Node: "step"}
+	deep := trace.New()
+	deep.Hops = trace.MaxHops - 1
+	_, err = r.Call(trace.With(t.Context(), deep), call, json.RawMessage(`{"name": "Ada"}`))
+	var ce *engine.CallError
+	if !errors.As(err, &ce) || ce.Code != engine.CodeUpstream || !strings.Contains(ce.Detail, "too many times") {
+		t.Errorf("Call() %d hops in = %v", trace.MaxHops, err)
+	}
+	_, err = r.Call(t.Context(), call, json.RawMessage(`{}`))
+	if !errors.As(err, &ce) || ce.Code != engine.CodeWorkflow {
+		t.Errorf("Call() with input its schema refuses = %v", err)
+	}
+	if a, err := r.Call(t.Context(), call, json.RawMessage(`{"name": "Ada"}`)); err != nil || a.Status != 200 || string(a.Body) != "1" {
+		t.Errorf("Call() = %+v, %v", a, err)
+	}
+}
+
 func TestServe_Refusals(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -854,7 +926,7 @@ func TestWatch(t *testing.T) {
 	if _, err := r.Watch(ctx, "01890000-0000-7000-8000-000000000000", 0); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("an unknown run: %v", err)
 	}
-	other, err := db.StartRun(ctx, w.ID, 1, "editor", "4bf92f3577b34da6a3ce929d0e0e4736", json.RawMessage(`null`))
+	other, err := db.StartRun(ctx, w.ID, 1, "editor", "4bf92f3577b34da6a3ce929d0e0e4736", store.Parent{}, json.RawMessage(`null`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -900,7 +972,7 @@ func TestRecover(t *testing.T) {
 	ctx := t.Context()
 	r := newRunner(t, Options{})
 	w := saveWorkflow(t, "", `{"nodes": []}`)
-	left, err := db.StartRun(ctx, w.ID, 1, "served", "4bf92f3577b34da6a3ce929d0e0e4736", json.RawMessage(`null`))
+	left, err := db.StartRun(ctx, w.ID, 1, "served", "4bf92f3577b34da6a3ce929d0e0e4736", store.Parent{}, json.RawMessage(`null`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -910,5 +982,37 @@ func TestRecover(t *testing.T) {
 	stored, err := db.Run(ctx, left.ID)
 	if err != nil || stored.Status != "failed" || decode[Failure](t, stored.Error).Code != "interrupted" {
 		t.Errorf("a run left running = %+v (%s), %v", stored, stored.Error, err)
+	}
+}
+
+// What a run of a workflow a step uses gives the step (plan 07): its
+// answer, one that passes an error on said as that error; or, with none,
+// its failure in the step's words, a timeout, a cancellation and our bug
+// as they were, and anything else the workflow failing, as an upstream
+// does.
+func TestAnswered(t *testing.T) {
+	t.Parallel()
+	a, err := answered(Outcome{Answer: 201, Output: json.RawMessage(`{"id":"7"}`)})
+	if err != nil || a.Status != 201 || string(a.Body) != `{"id":"7"}` || a.Header.Get("Content-Type") != "application/json" {
+		t.Errorf("an answer = %+v, %v", a, err)
+	}
+	a, err = answered(Outcome{Answer: 404, Output: json.RawMessage(`{"type":"about:blank"}`), Problem: &Failure{Code: CodeUpstream, Detail: "user answered 404", Node: "user"}})
+	if err != nil || a.Status != 404 || string(a.Body) != `{"code":"upstream_failed","detail":"user answered 404","node":"user"}` {
+		t.Errorf("an answer passing an error on = %+v %s, %v", a, a.Body, err)
+	}
+	for code, want := range map[string]string{
+		CodeTimeout: CodeTimeout, CodeCancelled: CodeCancelled, CodeInternal: CodeInternal,
+		CodeWorkflow: CodeUpstream, CodeUpstream: CodeUpstream,
+	} {
+		_, err := answered(Outcome{Run: store.Run{ID: "r-1"}, Failure: &Failure{Code: code, Detail: "it went wrong"}})
+		var ce *engine.CallError
+		if !errors.As(err, &ce) || ce.Code != want || ce.Detail != "the workflow's run r-1 failed: it went wrong" {
+			t.Errorf("a run that failed with %s = %v, want %s", code, err, want)
+		}
+	}
+	_, err = answered(Outcome{Run: store.Run{ID: "r-1"}})
+	var ce *engine.CallError
+	if !errors.As(err, &ce) || ce.Code != CodeUpstream || ce.Detail != "the workflow's run r-1 gave no answer" {
+		t.Errorf("a run that gave no answer = %v", err)
 	}
 }

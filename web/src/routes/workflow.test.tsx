@@ -433,3 +433,49 @@ test("a session that ends with unsaved changes can be left for sign-in", async (
   expect(await screen.findByText("at /sign-in")).toBeTruthy();
   expect(router.state.location.search).toBe("?from=%2Fworkflows%2Fwf-1");
 });
+
+// A step that uses a workflow (plan 07) opens drawn from the revision it
+// pins, fetched with the workflow's name: its answers besides 2xx are its
+// blocks.
+test("a step that uses a workflow opens drawn from the revision it pins", async () => {
+  serveWorkflow({
+    nodes: [
+      {
+        id: "greet",
+        kind: "http",
+        uses: { workflow: "w-greeter", revision: 1 },
+        with: { user_id: "input.id" },
+        unhandled: { fail: true },
+      },
+    ],
+  });
+  const greeter: Definition = {
+    nodes: [],
+    response: {
+      answers: [
+        { status: 200, lines: [{ from: "user" }] },
+        { status: 404, lines: [{ from: "user", on: 404 }] },
+      ],
+    },
+  };
+  const { workflow, revision } = workflowRevision(
+    "w-greeter",
+    "Greeter",
+    greeter,
+  );
+  server.use(
+    http.get("/api/v1/workflows/w-greeter", () =>
+      HttpResponse.json<WorkflowRevision>({
+        workflow: { ...workflow, published_revision: 1 },
+        revision,
+      }),
+    ),
+    http.get("/api/v1/workflows/w-greeter/revisions/1", () =>
+      HttpResponse.json<Revision>(revision),
+    ),
+  );
+  open();
+  const card = await screen.findByTestId("rf__node-greet");
+  expect(within(card).getByText("Greeter · r1")).toBeTruthy();
+  expect(within(card).getByText("404")).toBeTruthy();
+});

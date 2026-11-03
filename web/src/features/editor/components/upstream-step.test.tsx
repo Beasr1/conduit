@@ -17,6 +17,8 @@ type CreateUpstream = components["schemas"]["CreateUpstream"];
 type Preview = components["schemas"]["Preview"];
 type PreviewRequest = components["schemas"]["PreviewRequest"];
 type Validation = components["schemas"]["Validation"];
+type WorkflowList = components["schemas"]["WorkflowList"];
+type WorkflowRevision = components["schemas"]["WorkflowRevision"];
 
 shimReactFlow();
 
@@ -256,10 +258,13 @@ test("an upstream edited in place is saved as its next version, which the step t
   expect(
     await screen.findByText(/Save or discard the upstream first/),
   ).toBeTruthy();
+  // A save that changes nothing makes no version, so it waits for a change.
+  const save = within(panel).getByRole("button", { name: "Save upstream" });
+  expect(save.matches(":disabled")).toBe(true);
   fireEvent.change(url(), {
     target: { value: "https://users.example.com/v2/users/{{ user_id }}" },
   });
-  fireEvent.click(within(panel).getByRole("button", { name: "Save upstream" }));
+  fireEvent.click(save);
   await waitFor(() => expect(within(panel).getByText("· v3")).toBeTruthy());
   expect(sent?.ifMatch).toBe('"2"');
   expect(sent?.body.request.url).toBe(
@@ -352,6 +357,10 @@ test("Save upstream says when another version was saved first", async () => {
   fireEvent.click(
     await within(panel).findByRole("button", { name: "Edit upstream" }),
   );
+  await waitFor(() => expect(url().matches(":disabled")).toBe(false));
+  fireEvent.change(url(), {
+    target: { value: "https://elsewhere.example.com" },
+  });
   fireEvent.click(within(panel).getByRole("button", { name: "Save upstream" }));
   expect(
     await within(panel).findByText(/Another version was saved first/),
@@ -428,19 +437,34 @@ test("Add HTTP step makes a new upstream from a call, each placeholder a paramet
   fireEvent.change(within(dialog).getByLabelText("URL"), {
     target: { value: "https://users.example.com/v1/users/{{ input.user_id }}" },
   });
+  // Its samples: the parameter's, and a 409 besides its 2xx.
+  fireEvent.change(within(dialog).getByLabelText("Sample input"), {
+    target: { value: '{ "user_id": "7" }' },
+  });
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Add a response" }),
+  );
+  fireEvent.change(within(dialog).getByLabelText("Response 2 status"), {
+    target: { value: "409" },
+  });
   fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
   const panel = await openStep("user");
   expect(await within(panel).findByText("Users API")).toBeTruthy();
   expect(made).toEqual({
     name: "Users API",
     definition: {
-      parameters: [{ name: "user_id" }],
+      parameters: [{ name: "user_id", sample: "7" }],
       request: {
         method: "POST",
         url: "https://users.example.com/v1/users/{{ user_id }}",
       },
+      outputs: [{ status: 409 }],
     },
   });
+  // Its 409 is the upstream's, so the step has the block.
+  expect(
+    within(screen.getByTestId("rf__node-user")).getByText("409"),
+  ).toBeTruthy();
   fireEvent.click(within(panel).getByRole("tab", { name: "Parameters" }));
   expect(
     screen.getByLabelText("user_id", { selector: "textarea" }),
@@ -480,10 +504,21 @@ test("New upstream says what's missing, and what the server refuses, under its f
     target: { value: "user" },
   });
   await choose("Upstream", "New upstream");
+  fireEvent.change(within(dialog).getByLabelText("Sample input"), {
+    target: { value: "[]" },
+  });
   fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
   expect(await within(dialog).findByText("Give it a name.")).toBeTruthy();
   expect(within(dialog).getByText("Add a URL.")).toBeTruthy();
+  expect(
+    within(dialog).getByText(
+      'A JSON object, with a value for each parameter, such as { "user_id": "7" }.',
+    ),
+  ).toBeTruthy();
   expect(posts).toBe(0);
+  fireEvent.change(within(dialog).getByLabelText("Sample input"), {
+    target: { value: "" },
+  });
 
   fireEvent.change(within(dialog).getByLabelText("Name"), {
     target: { value: "Users API" },
@@ -666,4 +701,276 @@ test("Save as upstream asks for a name, and says when it's taken", async () => {
   expect(
     within(dialog).getByLabelText("Name").getAttribute("aria-invalid"),
   ).toBe("true");
+});
+
+// greeter is revision 1 of a workflow: it takes a user_id, required, and
+// fields, with a sample of each, and answers 200, or 404.
+const greeter: Definition = {
+  nodes: [],
+  input_schema: {
+    type: "object",
+    properties: { user_id: { type: "string" }, fields: { type: "string" } },
+    required: ["user_id"],
+  },
+  sample_input: { user_id: "1", fields: "all" },
+  response: {
+    answers: [
+      { status: 200, lines: [{ from: "user" }] },
+      { status: 404, lines: [{ from: "user", on: 404 }] },
+    ],
+  },
+};
+
+// calling has greet use greeter, pinned to revision 1.
+const calling: Definition = {
+  nodes: [
+    {
+      id: "greet",
+      kind: "http",
+      uses: { workflow: "w-greeter", revision: 1 },
+      with: { user_id: "input.id" },
+      unhandled: { fail: true },
+    },
+  ],
+};
+
+const calledGreeter = {
+  "wf:w-greeter@1": { name: "Greeter", published: 1, definition: greeter },
+};
+
+// served has the server answer for Greeter, serving revision published, and
+// each of its revisions, in order.
+function served(published: number, ...revisions: Definition[]) {
+  server.use(
+    http.get("/api/v1/workflows/w-greeter", () => {
+      const { workflow, revision } = workflowRevision(
+        "w-greeter",
+        "Greeter",
+        revisions.at(-1),
+      );
+      return HttpResponse.json<WorkflowRevision>({
+        workflow: {
+          ...workflow,
+          latest_revision: revisions.length,
+          published_revision: published,
+        },
+        revision: { ...revision, revision: revisions.length },
+      });
+    }),
+    http.get(
+      "/api/v1/workflows/w-greeter/revisions/:revision",
+      ({ params }) => {
+        const n = Number(params.revision);
+        const d = revisions[n - 1];
+        if (!d)
+          return HttpResponse.json({ code: "not_found" }, { status: 404 });
+        const { revision } = workflowRevision("w-greeter", "Greeter", d);
+        return HttpResponse.json<Revision>({ ...revision, revision: n });
+      },
+    ),
+  );
+}
+
+// A step that uses a workflow is drawn by its name and revision, and its
+// panel says which, opens it, and gives the fields of its input values, in
+// place of a request; its responses are the workflow's answers, with no
+// samples of its own (plan 07).
+test("a step that uses a workflow is drawn by its name, and gives its input's fields values", async () => {
+  served(1, greeter);
+  const saved = saves();
+  renderEditor(calling, [], {}, calledGreeter);
+  const card = await screen.findByTestId("rf__node-greet");
+  expect(within(card).getByText("Greeter · r1")).toBeTruthy();
+  expect(within(card).getByText("404")).toBeTruthy();
+  expect(within(card).queryByText("+ Add")).toBeNull();
+  const panel = await openStep("greet");
+  expect(await within(panel).findByText("Greeter")).toBeTruthy();
+  expect(within(panel).getByText("· r1")).toBeTruthy();
+  expect(
+    within(panel)
+      .getByRole("link", { name: "Open workflow" })
+      .getAttribute("href"),
+  ).toBe("/workflows/w-greeter");
+  expect(
+    within(panel).queryByRole("button", { name: "Edit upstream" }),
+  ).toBeNull();
+  // It serves the revision pinned, so none newer is offered.
+  expect(within(panel).queryByRole("button", { name: /^Use r/ })).toBeNull();
+  // It sends no request, so its request block opens its Input.
+  expect(within(panel).queryByRole("tab", { name: "Request" })).toBeNull();
+  expect(
+    within(panel)
+      .getByRole("tab", { name: "Input" })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(
+    screen.getByLabelText("user_id", { selector: "textarea" }),
+  ).toHaveProperty("value", "input.id");
+  const fields = screen.getByLabelText("fields", { selector: "textarea" });
+  expect(fields).toHaveProperty("value", "");
+  fireEvent.change(fields, { target: { value: "'name'" } });
+  fireEvent.click(within(panel).getByRole("tab", { name: "2xx" }));
+  expect(screen.queryByLabelText("2xx body")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(saved).toHaveLength(1));
+  // Saved, it names the revision and its values; its responses are the
+  // workflow's.
+  expect(saved[0]?.nodes[0]).toEqual({
+    id: "greet",
+    kind: "http",
+    uses: { workflow: "w-greeter", revision: 1 },
+    with: { user_id: "input.id", fields: "'name'" },
+    unhandled: { fail: true },
+  });
+});
+
+// Its preview runs the workflow's own: what the step gives it, and the
+// answer it gets back.
+test("a step that uses a workflow previews what it gives it and gets back", async () => {
+  served(1, greeter);
+  renderEditor(calling, [], {}, calledGreeter);
+  server.use(
+    http.post("/api/v1/preview", () =>
+      HttpResponse.json<Preview>({
+        reads: { input: { id: "7" }, nodes: {} },
+        parameters: { user_id: "7" },
+        gives: { status: 200, body: { hello: "Ada" } },
+        skipped: false,
+        problems: [],
+      }),
+    ),
+  );
+  const panel = await openStep("greet");
+  const gives = await within(panel).findAllByRole("heading", { name: "Gives" });
+  const result = gives[0]!.closest("section")!;
+  expect(within(result).getByText(/"user_id": "7"/)).toBeTruthy();
+  expect(within(result).getByRole("heading", { name: "Gets" })).toBeTruthy();
+  expect(within(result).getByText("200")).toBeTruthy();
+  expect(within(result).getByText(/"hello": "Ada"/)).toBeTruthy();
+});
+
+test("a newer revision is offered, and taking it keeps the values of the fields it still takes", async () => {
+  const r2: Definition = {
+    nodes: [],
+    input_schema: { properties: { user_id: {} } },
+    response: {
+      answers: [
+        { status: 200, lines: [{ from: "user" }] },
+        { status: 410, lines: [{ from: "user", on: 410 }] },
+      ],
+    },
+  };
+  served(2, greeter, r2);
+  const saved = saves();
+  renderEditor(
+    {
+      nodes: [
+        { ...calling.nodes[0]!, with: { user_id: "input.id", fields: "'x'" } },
+      ],
+    },
+    [],
+    {},
+    calledGreeter,
+  );
+  const panel = await openStep("greet");
+  fireEvent.click(await within(panel).findByRole("button", { name: "Use r2" }));
+  expect(await within(panel).findByText("· r2")).toBeTruthy();
+  const card = screen.getByTestId("rf__node-greet");
+  expect(await within(card).findByText("410")).toBeTruthy();
+  expect(within(card).getByText("Greeter · r2")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(saved[0]?.nodes[0]).toEqual({
+    id: "greet",
+    kind: "http",
+    uses: { workflow: "w-greeter", revision: 2 },
+    with: { user_id: "input.id" },
+    unhandled: { fail: true },
+  });
+});
+
+// Add HTTP step offers the workflows that serve a revision, but not the one
+// being edited, which can't use itself; a step made from one uses the
+// revision it serves.
+test("Add HTTP step offers published workflows but this one, and the step uses the revision served", async () => {
+  served(1, greeter);
+  renderEditor({ nodes: [] });
+  const at = "2026-11-03T00:00:00Z";
+  server.use(
+    http.get("/api/v1/workflows", () =>
+      HttpResponse.json<WorkflowList>({
+        workflows: [
+          {
+            id: "w-greeter",
+            slug: "greeter",
+            name: "Greeter",
+            latest_revision: 1,
+            published_revision: 1,
+            created_at: at,
+          },
+          {
+            id: "w-draft",
+            slug: "draft",
+            name: "Not served",
+            latest_revision: 1,
+            created_at: at,
+          },
+          {
+            id: "wf-1",
+            slug: "spec",
+            name: "This one",
+            latest_revision: 3,
+            published_revision: 3,
+            created_at: at,
+          },
+        ],
+      }),
+    ),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Add HTTP step" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.change(within(dialog).getByLabelText("Id"), {
+    target: { value: "greet" },
+  });
+  // Checked while the list is open: once it's open, all of it is there.
+  const select = screen.getByRole("combobox", { name: "Upstream" });
+  select.focus();
+  fireEvent.keyDown(select, { key: "ArrowDown" });
+  const item = await screen.findByRole("option", { name: "Greeter" });
+  expect(screen.queryByRole("option", { name: "Not served" })).toBeNull();
+  expect(screen.queryByRole("option", { name: "This one" })).toBeNull();
+  fireEvent.pointerDown(item);
+  fireEvent.click(item);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  const card = await screen.findByTestId("rf__node-greet");
+  expect(within(card).getByText("Greeter · r1")).toBeTruthy();
+  expect(within(card).getByText("404")).toBeTruthy();
+});
+
+test("an input field's problem opens the Input tab, at the field", async () => {
+  served(1, greeter);
+  renderEditor(
+    { nodes: [{ ...calling.nodes[0]!, with: {} }] },
+    [
+      {
+        pointer: "/nodes/0/with/user_id",
+        code: "required",
+        detail: "give the input field user_id a value",
+      },
+    ],
+    {},
+    calledGreeter,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "1 problem" }));
+  const list = await screen.findByRole("complementary", { name: "Problems" });
+  fireEvent.click(
+    within(list).getByRole("button", { name: /^greet · Input “user_id”/ }),
+  );
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByLabelText("user_id", { selector: "textarea" }),
+    ),
+  );
 });

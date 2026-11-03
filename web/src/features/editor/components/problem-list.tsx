@@ -269,19 +269,24 @@ export function Where({ place, draft }: { place: Place; draft: Definition }) {
     case "step": {
       const id = draft.nodes[place.index]?.id || "(no id)";
       const status = statusOf(place, draft);
+      // A step that uses a workflow gives values to its input (plan 07).
+      const names =
+        draft.nodes[place.index]?.uses?.workflow === undefined
+          ? fieldNames
+          : { ...fieldNames, uses: "Workflow", with: "Input" };
       const part =
         place.field === undefined
           ? undefined
           : status !== undefined
             ? `${status} response`
             : place.case !== undefined
-              ? `Case ${place.case + 1} · ${fieldNames[place.field]}`
+              ? `Case ${place.case + 1} · ${names[place.field]}`
               : place.name === undefined
-                ? fieldNames[place.field]
+                ? names[place.field]
                 : place.field === "headers"
                   ? `Request header “${place.name}”`
                   : place.field === "with"
-                    ? `Parameter “${place.name}”`
+                    ? `${names.with} “${place.name}”`
                     : `Query parameter “${place.name}”`;
       return (
         <>

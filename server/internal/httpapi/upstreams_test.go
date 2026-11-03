@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -115,6 +116,11 @@ func TestUpstreams(t *testing.T) {
 	}
 	if v := strict[gen.UpstreamVersion](t, r.body); v.Version != 2 || v.Upstream.LatestVersion != 2 || v.Definition.Request.Query["fields"] != "all" {
 		t.Errorf("saved %+v", v)
+	}
+	// A save that changes nothing makes no version: 2 is the answer.
+	if r = call(t, http.MethodPut, "/v1/upstreams/"+id, saved, "If-Match", `"2"`); r.status != http.StatusOK || r.header.Get("ETag") != `"2"` ||
+		strict[gen.UpstreamVersion](t, r.body).Upstream.LatestVersion != 2 {
+		t.Errorf("a save on 2 that changes nothing = %d, ETag %q; %s", r.status, r.header.Get("ETag"), r.body)
 	}
 	if r = call(t, http.MethodGet, "/v1/upstreams/"+id, ""); r.status != http.StatusOK || r.header.Get("ETag") != `"2"` ||
 		strict[gen.UpstreamVersion](t, r.body).Version != 2 {
@@ -320,6 +326,77 @@ func TestUpstreams_UsersAndUnsavedVersions(t *testing.T) {
 			t.Errorf("preview of %s beside an unsaved version = %d %s", node, r.status, r.body)
 		}
 	}
+}
+
+// A published workflow is an upstream too (plan 07): a step uses one of
+// its revisions, giving its input's fields values. Saved, the step's
+// problems are how it uses it; previewed, it gets what the workflow's own
+// preview answers over what the step gives; served, the workflow runs as a
+// run of its own, called from the step, and its answer is the step's
+// response. A workflow can't use itself, directly or through another.
+func TestWorkflowsAsSteps(t *testing.T) {
+	t.Parallel()
+	lookup := published(t, "", `{"nodes": [{"id": "hi", "kind": "transform", "expr": "{ 'hello': input.name }", "unhandled": {"fail": true}}],
+	  "input_schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},
+	  "sample_input": {"name": "Sam"},
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "hi"}]}]}}`)
+	id := lookup.Workflow.ID
+	def := func(with string) string {
+		return `{"nodes": [{"id": "greet", "kind": "http", "unhandled": {"fail": true},
+		    "uses": {"workflow": "` + id + `", "revision": 1}, "with": ` + with + `}],
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "greet"}]}]},
+		  "sample_input": {"who": "Ada"}}`
+	}
+	if got := problemPointers(create(t, def(`{}`)).Revision.Problems); got != "/nodes/0/with/name required" {
+		t.Errorf("problems with no name = %s", got)
+	}
+	wr := create(t, def(`{"name": "input.who"}`))
+	if len(wr.Revision.Problems) > 0 {
+		t.Fatalf("problems = %+v", wr.Revision.Problems)
+	}
+
+	r := call(t, http.MethodPost, "/v1/preview", `{"definition": `+def(`{"name": "input.who"}`)+`, "node": "greet"}`)
+	if pv := strict[gen.Preview](t, r.body); r.status != http.StatusOK || string(pv.Parameters) != `{"name":"Ada"}` ||
+		string(pv.Gives) != `{"status":200,"body":{"hello":"Ada"}}` {
+		t.Errorf("preview = %d %s", r.status, r.body)
+	}
+
+	if r = call(t, http.MethodPost, "/v1/workflows/"+wr.Workflow.ID+"/publish", `{"revision": 1}`); r.status != http.StatusOK {
+		t.Fatalf("publish = %d %s", r.status, r.body)
+	}
+	r = call(t, http.MethodPost, "/serve/"+wr.Workflow.Slug, `{"who": "Ada"}`)
+	if r.status != http.StatusOK || string(r.body) != `{"hello":"Ada"}` {
+		t.Errorf("serve = %d %s", r.status, r.body)
+	}
+	r = call(t, http.MethodGet, "/v1/runs?workflow_id="+id, "")
+	if runs := strict[gen.RunList](t, r.body).Runs; r.status != http.StatusOK || len(runs) != 1 || runs[0].Trigger != "workflow" ||
+		runs[0].Parent == nil || runs[0].Parent.Node != "greet" {
+		t.Errorf("lookup's runs = %d %s", r.status, r.body)
+	}
+
+	// Itself, and through the workflow that uses it.
+	for _, uses := range []string{
+		`{"workflow": "` + id + `", "revision": 1}, "with": {"name": "input.name"}`,
+		`{"workflow": "` + wr.Workflow.ID + `", "revision": 1}`,
+	} {
+		draft := `{"nodes": [{"id": "back", "kind": "http", "unhandled": {"fail": true}, "uses": ` + uses + `}],
+		  "response": {"answers": [{"status": 200, "lines": [{"from": "back"}]}]}}`
+		r = call(t, http.MethodPut, "/v1/workflows/"+id+"/draft", draft, "If-Match", `"`+strconv.Itoa(lastRevision(t, id))+`"`)
+		saved := strict[gen.Revision](t, r.body)
+		if got := problemPointers(saved.Problems); r.status != http.StatusOK || got != "/nodes/0/uses uses_itself" {
+			t.Errorf("a draft that uses %s = %d, problems %s", uses, r.status, got)
+		}
+		if r = call(t, http.MethodPost, "/v1/workflows/"+id+"/publish", `{"revision": `+strconv.Itoa(saved.Revision)+`}`); r.status != http.StatusUnprocessableEntity {
+			t.Errorf("publish what uses itself = %d %s", r.status, r.body)
+		}
+	}
+}
+
+// lastRevision is workflow id's latest revision.
+func lastRevision(t *testing.T, id string) int {
+	t.Helper()
+	r := call(t, http.MethodGet, "/v1/workflows/"+id, "")
+	return strict[gen.WorkflowRevision](t, r.body).Workflow.LatestRevision
 }
 
 // problemPointers is problems as "pointer code", one per line.

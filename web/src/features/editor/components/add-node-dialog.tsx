@@ -45,9 +45,15 @@ const labels = { http: "HTTP step", transform: "transform step" };
 // AddNodeDialog asks for the new node's id, which expressions use to read
 // its result, and puts the node in the middle of what the canvas shows, or
 // below that, clear of the nodes already there. An HTTP step uses an
-// upstream (plan 07): one from the library, at its latest version, or one
-// made here from a call.
-export function AddNodeDialog({ kind }: { kind: keyof typeof labels }) {
+// upstream (plan 07): one from the library, at its latest version, a
+// published workflow, but not this one, or one made here from a call.
+export function AddNodeDialog({
+  kind,
+  workflow,
+}: {
+  kind: keyof typeof labels;
+  workflow: string;
+}) {
   const [open, setOpen] = useState(false);
   const editor = useEditorStore();
   const edit = useEditor((s) => s.edit);
@@ -117,7 +123,13 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof labels }) {
       </DialogTrigger>
       {/* nokey: Delete or Backspace on its buttons would otherwise reach
           the canvas and delete what's selected behind the dialog. */}
-      <DialogContent className="nokey">
+      <DialogContent
+        className={
+          kind === "http"
+            ? "nokey max-h-screen overflow-y-auto sm:max-w-lg"
+            : "nokey"
+        }
+      >
         <DialogHeader>
           <DialogTitle>Add {label}</DialogTitle>
           <DialogDescription>
@@ -141,6 +153,7 @@ export function AddNodeDialog({ kind }: { kind: keyof typeof labels }) {
             </Field>
             {kind === "http" && (
               <UpstreamChoice
+                self={workflow}
                 choice={choice}
                 onChange={(next) => {
                   setChoice(next);

@@ -14,11 +14,36 @@ const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
 
 func startRun(t *testing.T, w store.Workflow) store.Run {
 	t.Helper()
-	r, err := db.StartRun(t.Context(), w.ID, 1, "editor", traceID, json.RawMessage(`{"user_id":"7"}`))
+	r, err := db.StartRun(t.Context(), w.ID, 1, "editor", traceID, store.Parent{}, json.RawMessage(`{"user_id":"7"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return r
+}
+
+// A run of a workflow a step uses names the run, and the node in it, it
+// was called from (plan 07); only such a run does.
+func TestRun_CalledFromAStep(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	w := create(t)
+	caller := startRun(t, w)
+	r, err := db.StartRun(ctx, w.ID, 1, "workflow", traceID, store.Parent{Run: caller.ID, Node: "find"}, json.RawMessage(`{}`))
+	if err != nil || r.Trigger != "workflow" || r.ParentRun != caller.ID || r.ParentNode != "find" {
+		t.Fatalf("StartRun() = %+v, %v", r, err)
+	}
+	if got, err := db.Run(ctx, r.ID); err != nil || got.ParentRun != caller.ID || got.ParentNode != "find" {
+		t.Errorf("Run() = %+v, %v", got, err)
+	}
+	if caller.ParentRun != "" || caller.ParentNode != "" {
+		t.Errorf("a run of the editor's names a parent: %+v", caller)
+	}
+	if _, err := db.StartRun(ctx, w.ID, 1, "workflow", traceID, store.Parent{}, json.RawMessage(`{}`)); err == nil {
+		t.Error("StartRun() of a workflow run with no parent: no error")
+	}
+	if _, err := db.StartRun(ctx, w.ID, 1, "served", traceID, store.Parent{Run: caller.ID, Node: "find"}, json.RawMessage(`{}`)); err == nil {
+		t.Error("StartRun() of a served run with a parent: no error")
+	}
 }
 
 func TestRun_StartRecordFinish(t *testing.T) {

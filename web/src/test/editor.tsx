@@ -1,7 +1,7 @@
 import { http, HttpResponse } from "msw";
 
 import { Editor } from "@/features/editor/components/editor";
-import { fill } from "@/features/editor/upstreams";
+import { type Called, fill } from "@/features/editor/upstreams";
 import type { components } from "@/gen/schema";
 import { workflowRevision } from "@/test/fixtures";
 import { renderAt } from "@/test/render";
@@ -13,6 +13,7 @@ type Preview = components["schemas"]["Preview"];
 type ProblemError = components["schemas"]["ProblemError"];
 type Validation = components["schemas"]["Validation"];
 type UpstreamList = components["schemas"]["UpstreamList"];
+type WorkflowList = components["schemas"]["WorkflowList"];
 
 // answerEditor has the server answer what the editor asks as it's used:
 // unless a test says otherwise, it finds nothing wrong with a draft, and a
@@ -26,6 +27,10 @@ export function answerEditor() {
     http.get("/api/v1/upstreams", () =>
       HttpResponse.json<UpstreamList>({ upstreams: [] }),
     ),
+    // So are the workflows a step can use.
+    http.get("/api/v1/workflows", () =>
+      HttpResponse.json<WorkflowList>({ workflows: [] }),
+    ),
     http.post("/api/v1/preview", () =>
       HttpResponse.json<Preview>({
         reads: { input: null, nodes: {} },
@@ -38,12 +43,13 @@ export function answerEditor() {
 
 // renderEditor opens the editor on definition, as revision 1 of an
 // unpublished workflow, the way the workflow's page does, with the problems
-// the server found in it, its steps that use upstreams filled from versions
-// (plan 07).
+// the server found in it, its steps that use upstreams filled from versions,
+// and those that use workflows from called (plan 07).
 export function renderEditor(
   definition: Definition,
   problems: ProblemError[] = [],
   versions: Record<string, Upstream> = {},
+  called: Record<string, Called> = {},
 ) {
   answerEditor();
   const { workflow, revision } = workflowRevision(
@@ -56,10 +62,11 @@ export function renderEditor(
       workflow={workflow}
       revision={{
         ...revision,
-        definition: fill(revision.definition, versions),
+        definition: fill(revision.definition, versions, called),
         problems,
       }}
       versions={versions}
+      called={called}
       onReload={() => {}}
     />,
   );

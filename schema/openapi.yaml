@@ -168,7 +168,7 @@ paths:
     put:
       operationId: saveDraft
       summary: Save the next revision
-      description: If-Match must name the latest revision, so a save can't silently undo someone else's. The definition is saved even if it has problems.
+      description: If-Match must name the latest revision, so a save can't silently undo someone else's. The definition is saved even if it has problems. A definition that's the latest revision's, by value, makes no revision; the answer is that revision, as it was.
       parameters:
         - name: If-Match
           in: header
@@ -453,7 +453,7 @@ paths:
     put:
       operationId: saveUpstream
       summary: Save the next version
-      description: If-Match must name the latest version, so a save can't silently undo someone else's. Versions never change, so a definition with problems isn't saved; they're listed in the 422.
+      description: If-Match must name the latest version, so a save can't silently undo someone else's. Versions never change, so a definition with problems isn't saved; they're listed in the 422. A definition that's the latest version's, by value, makes no version; the answer is that version, as it was.
       parameters:
         - name: If-Match
           in: header
@@ -860,10 +860,10 @@ components:
         sends:
           $ref: "#/components/schemas/RenderedRequest"
         parameters:
-          description: An http step that uses an upstream, the values its parameters take, by name, which its request reads. One whose value fails is left out, as the problems say.
+          description: An http step that uses an upstream, the values its parameters take, by name, which its request reads; one that uses a workflow, the input it gives it, by field. One whose value fails is left out, as the problems say.
           x-go-type: json.RawMessage
         gives:
-          description: A transform step's value, or the workflow's output. Absent when it gave none, and for a transform with ways, as each way gives its own.
+          description: A transform step's value, the workflow's output, or, for an http step that uses a workflow, the answer it gets back, {"status", "body"}, from the workflow's own preview. Absent when it gave none, and for a transform with ways, as each way gives its own.
           x-go-type: json.RawMessage
         unhandled:
           $ref: "#/components/schemas/UnhandledPreview"
@@ -1109,6 +1109,16 @@ components:
           description: The run's input, checked against the definition's input_schema. Absent means null.
           x-go-type: json.RawMessage
 
+    RunParent:
+      type: object
+      required: [run, node]
+      description: The run, and the step in it, a run of a workflow a step uses was called from (plan 07).
+      properties:
+        run:
+          type: string
+        node:
+          type: string
+
     RunSummary:
       type: object
       required: [id, workflow_id, revision, trigger, status, started_at]
@@ -1121,8 +1131,12 @@ components:
           type: integer
         trigger:
           type: string
-          enum: [editor, served]
-          description: editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+          enum: [editor, served, workflow]
+          description: editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}; workflow, from a step of another run that uses the workflow (plan 07), which parent names.
+        parent:
+          $ref: "#/components/schemas/RunParent"
+          description: A run of a workflow a step uses, the run and the step it was called from. Absent for any other run.
+          x-go-type-skip-optional-pointer: false
         trace_id:
           type: string
           description: The W3C trace the run belongs to, 32 lowercase hex digits; the caller's, when the call that started it carried one. Runs that call each other through /serve share it. Absent for runs from before traces were kept.

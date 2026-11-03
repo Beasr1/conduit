@@ -117,7 +117,7 @@ export interface paths {
         get?: never;
         /**
          * Save the next revision
-         * @description If-Match must name the latest revision, so a save can't silently undo someone else's. The definition is saved even if it has problems.
+         * @description If-Match must name the latest revision, so a save can't silently undo someone else's. The definition is saved even if it has problems. A definition that's the latest revision's, by value, makes no revision; the answer is that revision, as it was.
          */
         put: operations["saveDraft"];
         post?: never;
@@ -301,7 +301,7 @@ export interface paths {
         get: operations["getUpstream"];
         /**
          * Save the next version
-         * @description If-Match must name the latest version, so a save can't silently undo someone else's. Versions never change, so a definition with problems isn't saved; they're listed in the 422.
+         * @description If-Match must name the latest version, so a save can't silently undo someone else's. Versions never change, so a definition with problems isn't saved; they're listed in the 422. A definition that's the latest version's, by value, makes no version; the answer is that version, as it was.
          */
         put: operations["saveUpstream"];
         post?: never;
@@ -504,9 +504,9 @@ export interface components {
             /** @description A connection's preview only, whether a run would take it with these samples. */
             taken?: boolean;
             sends?: components["schemas"]["RenderedRequest"];
-            /** @description An http step that uses an upstream, the values its parameters take, by name, which its request reads. One whose value fails is left out, as the problems say. */
+            /** @description An http step that uses an upstream, the values its parameters take, by name, which its request reads; one that uses a workflow, the input it gives it, by field. One whose value fails is left out, as the problems say. */
             parameters?: unknown;
-            /** @description A transform step's value, or the workflow's output. Absent when it gave none, and for a transform with ways, as each way gives its own. */
+            /** @description A transform step's value, the workflow's output, or, for an http step that uses a workflow, the answer it gets back, {"status", "body"}, from the workflow's own preview. Absent when it gave none, and for a transform with ways, as each way gives its own. */
             gives?: unknown;
             unhandled?: components["schemas"]["UnhandledPreview"];
             /** @description A run would skip the step, or a connection's source, with these samples, as a connection into an http step isn't taken, or none into a transform is. */
@@ -628,15 +628,22 @@ export interface components {
             /** @description The run's input, checked against the definition's input_schema. Absent means null. */
             input?: unknown;
         };
+        /** @description The run, and the step in it, a run of a workflow a step uses was called from (plan 07). */
+        RunParent: {
+            run: string;
+            node: string;
+        };
         RunSummary: {
             id: string;
             workflow_id: string;
             revision: number;
             /**
-             * @description editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}.
+             * @description editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}; workflow, from a step of another run that uses the workflow (plan 07), which parent names.
              * @enum {string}
              */
-            trigger: "editor" | "served";
+            trigger: "editor" | "served" | "workflow";
+            /** @description A run of a workflow a step uses, the run and the step it was called from. Absent for any other run. */
+            parent?: components["schemas"]["RunParent"];
             /** @description The W3C trace the run belongs to, 32 lowercase hex digits; the caller's, when the call that started it carried one. Runs that call each other through /serve share it. Absent for runs from before traces were kept. */
             trace_id?: string;
             /** @enum {string} */
@@ -784,11 +791,14 @@ export interface components {
             timeout_ms?: number;
             retry?: components["schemas"]["Retry"];
         };
-        /** @description An upstream, pinned to a version, which never changes (plan 07). */
+        /** @description What a node calls, pinned, so it never changes under it (plan 07). It names one of the two, an upstream at a version, or a workflow at a revision published when the step took it. */
         Uses: {
-            /** @description The upstream's id. */
-            upstream: string;
-            version: number;
+            /** @description An upstream's id, with its version. */
+            upstream?: string;
+            version?: number;
+            /** @description A workflow's id, with its revision. */
+            workflow?: string;
+            revision?: number;
         };
         Case: {
             /** @description What the editor calls the case, on its exit and its tab. Absent, it's Case and its place. */
@@ -832,9 +842,9 @@ export interface components {
             kind: components["schemas"]["NodeKind"];
             /** @description The call an http node makes, unless it uses an upstream. */
             request?: components["schemas"]["HTTPRequest"];
-            /** @description The upstream an http node calls, at a version, in place of a request of its own (plan 07). Its request, responses and samples are the version's, and the node has none of its own. */
+            /** @description What an http node calls in place of a request of its own (plan 07), an upstream at a version or a published workflow at a revision. An upstream's request, responses and samples are the version's; a workflow's responses are its answers, and it runs as a run of its own. The node has none of its own. */
             uses?: components["schemas"]["Uses"];
-            /** @description For a node that uses an upstream, a JSONata expression over the run for each of the upstream's parameters, which its request reads. */
+            /** @description For a node that uses an upstream or a workflow, a JSONata expression over the run for each of its parameters, which the upstream's request reads, or the workflow takes as its input's fields. */
             with?: {
                 [key: string]: string;
             };

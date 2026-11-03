@@ -14,8 +14,10 @@ import {
 import { StepUnhandled } from "@/features/editor/components/step-unhandled";
 import { TransformStepForm } from "@/features/editor/components/transform-step-form";
 import {
+  StepInput,
   StepParameters,
   UpstreamLine,
+  WorkflowLine,
 } from "@/features/editor/components/upstream-step";
 import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
 import {
@@ -24,6 +26,7 @@ import {
   type StepField,
 } from "@/features/editor/problems";
 import { isLocked, useEditor } from "@/features/editor/store";
+import { versionKey } from "@/features/editor/upstreams";
 
 // Where each kind of step shows its problems: under its fields, or, for a
 // kind the editor doesn't know, in the words that say so. A problem
@@ -49,7 +52,9 @@ const unknownKind = new Set<StepField | undefined>(["id", "kind"]);
 // StepSettings edits one step: its id, then what its kind has. An HTTP step
 // has a tab per block it's drawn as: Request, the call and its body; 2xx and
 // each response it lists, with its sample and what follows it; one to add
-// a response; then Unhandled, what takes its failures. The tab open is the
+// a response; then Unhandled, what takes its failures. One that uses a
+// workflow (plan 07) has its Input in place of its Request, and its
+// responses are the workflow's answers. The tab open is the
 // editor's part, so a click on a block opens its tab. Its fields are keyed
 // by the step's place in the draft rather than its id, so renaming the step
 // doesn't remount them under the cursor.
@@ -65,13 +70,16 @@ export function StepSettings({ index }: { index: number }) {
   // A step that uses an upstream (plan 07) has its request and responses
   // from it: locked, unless the upstream is being edited in place.
   const uses = useEditor((s) => s.draft.nodes[index]?.uses !== undefined);
+  const calls = useEditor(
+    (s) => s.draft.nodes[index]?.uses?.workflow !== undefined,
+  );
   const locked = useEditor((s) => isLocked(s, index));
   // The forms keep what's typed, so a step moved to another version, or an
   // upstream opened or put away, draws them afresh from the draft.
   const formKey = useEditor((s) => {
     const n = s.draft.nodes[index];
     return n?.uses
-      ? `${n.uses.upstream}@${n.uses.version}:${s.upstreamEdit?.node === n.id}`
+      ? `${versionKey(n.uses)}:${s.upstreamEdit?.node === n.id}`
       : "own";
   });
   const shown = fieldsOf[kind] ?? unknownKind;
@@ -84,11 +92,18 @@ export function StepSettings({ index }: { index: number }) {
     <>
       <FieldError errors={asErrors(elsewhere)} />
       <StepIdField key={`id-${index}`} index={index} />
-      {kind === "http" && uses && <UpstreamLine index={index} />}
+      {kind === "http" &&
+        uses &&
+        (calls ? (
+          <WorkflowLine index={index} />
+        ) : (
+          <UpstreamLine index={index} />
+        ))}
       {kind === "http" && (
         <Tabs
           key={`http-${index}`}
-          value={part}
+          // Its request block, on the canvas, opens its Input.
+          value={calls && part === "request" ? "with" : part}
           onValueChange={(value: string) => setPart(value)}
         >
           {/* The list grows as its tabs wrap, and each tab is as tall as
@@ -101,7 +116,7 @@ export function StepSettings({ index }: { index: number }) {
           >
             {uses && (
               <TabsTrigger value="with">
-                Parameters
+                {calls ? "Input" : "Parameters"}
                 <Marked
                   where={(p) =>
                     mine(p) && (p.field === "with" || p.field === "uses")
@@ -109,15 +124,17 @@ export function StepSettings({ index }: { index: number }) {
                 />
               </TabsTrigger>
             )}
-            <TabsTrigger value="request">
-              Request
-              <Marked
-                where={(p) =>
-                  mine(p) &&
-                  (REQUEST_FIELDS.has(p.field) || p.field === "request")
-                }
-              />
-            </TabsTrigger>
+            {!calls && (
+              <TabsTrigger value="request">
+                Request
+                <Marked
+                  where={(p) =>
+                    mine(p) &&
+                    (REQUEST_FIELDS.has(p.field) || p.field === "request")
+                  }
+                />
+              </TabsTrigger>
+            )}
             <TabsTrigger value="2xx">
               2xx
               <Marked
@@ -151,16 +168,27 @@ export function StepSettings({ index }: { index: number }) {
               switch. */}
           {uses && (
             <TabsContent value="with" keepMounted>
-              <StepParameters key={formKey} index={index} />
+              {calls ? (
+                <StepInput key={formKey} index={index} />
+              ) : (
+                <StepParameters key={formKey} index={index} />
+              )}
             </TabsContent>
           )}
-          <TabsContent value="request" keepMounted>
-            <RunSent index={index} />
-            <HttpStepForm key={formKey} index={index} locked={locked} />
-            {!uses && <SaveAsUpstream index={index} />}
-          </TabsContent>
+          {!calls && (
+            <TabsContent value="request" keepMounted>
+              <RunSent index={index} />
+              <HttpStepForm key={formKey} index={index} locked={locked} />
+              {!uses && <SaveAsUpstream index={index} />}
+            </TabsContent>
+          )}
           <TabsContent value="2xx" keepMounted>
-            <StepOutput key={formKey} index={index} locked={locked} />
+            <StepOutput
+              key={formKey}
+              index={index}
+              locked={locked}
+              calls={calls}
+            />
           </TabsContent>
           {statuses.map((status) => (
             <TabsContent key={status} value={String(status)} keepMounted>
@@ -169,6 +197,7 @@ export function StepSettings({ index }: { index: number }) {
                 index={index}
                 status={status}
                 locked={locked}
+                calls={calls}
               />
             </TabsContent>
           ))}

@@ -70,10 +70,13 @@ type node struct {
 	attempts   int
 	idempotent bool
 	outputs    []int // the statuses besides 2xx it answers with
-	// bound says it uses an upstream (plan 07): its request reads the values
-	// with gives its parameters, not the run.
+	// bound says it uses an upstream or a workflow (plan 07): its request
+	// reads the values with gives its parameters, not the run, or the
+	// workflow takes them as its input. calls is the workflow, at its
+	// revision; nil for an upstream's or a request of its own.
 	bound bool
 	with  []binding // sorted by name
+	calls *workflow.Uses
 
 	// catches says a line leaves its Unhandled block, which then takes its
 	// failures. unhandled is the block's body; nil: it gives what it got.
@@ -117,6 +120,15 @@ type edge struct {
 	required bool                 // into a transform, it has to be taken for the transform to run
 }
 
+// bindings compiles the expressions node ptr gives its parameters, by name.
+func (c *compiler) bindings(ptr string, with map[string]string) []binding {
+	var out []binding
+	for _, name := range slices.Sorted(maps.Keys(with)) {
+		out = append(out, binding{name: name, value: c.expr(ptr+"/with/"+workflow.PointerToken(name), with[name])})
+	}
+	return out
+}
+
 // Compile checks d and compiles every expression in it. The error, when
 // there is one, is a workflow.Problems listing everything wrong.
 func Compile(d *workflow.Definition) (*Program, error) {
@@ -140,6 +152,14 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 		pn := &p.nodes[i]
 		pn.id, pn.kind = n.ID, n.Kind
 		switch {
+		case n.Kind == workflow.NodeKindHTTP && n.Uses != nil && n.Uses.Workflow != "":
+			// It runs the workflow, which its answers besides 2xx are the
+			// outputs of, as Resolve has them.
+			pn.calls = &workflow.Uses{Workflow: n.Uses.Workflow, Revision: n.Uses.Revision}
+			for _, o := range n.Outputs {
+				pn.outputs = append(pn.outputs, o.Status)
+			}
+			pn.bound, pn.with = true, c.bindings(ptr, n.With)
 		case n.Kind == workflow.NodeKindHTTP && n.Request != nil:
 			r := n.Request
 			pn.method = string(r.Method)
@@ -157,10 +177,7 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 				pn.outputs = append(pn.outputs, o.Status)
 			}
 			if n.Uses != nil {
-				pn.bound = true
-				for _, name := range slices.Sorted(maps.Keys(n.With)) {
-					pn.with = append(pn.with, binding{name: name, value: c.expr(ptr+"/with/"+workflow.PointerToken(name), n.With[name])})
-				}
+				pn.bound, pn.with = true, c.bindings(ptr, n.With)
 			}
 		case n.Kind == workflow.NodeKindTransform && n.Switch != nil:
 			pn.cases, pn.whole = c.cases(ptr+"/switch", n.Switch)

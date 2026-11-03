@@ -244,12 +244,24 @@ the API is `/api` on the page's own origin.
   panels, never round a tab list, as HTML disables every button in one,
   tabs too (sources.md). Its body reads its parameters, the preview's
   `parameters`, not the run's input.
+- A step that uses a workflow (plan 07) is filled from the revision it
+  pins, kept in the store's `called` by `versionKey` (`wf:` and the id):
+  its responses are the workflow's answers besides 2xx (`answersOf`), and
+  its Input tab, in place of Request, the fields of the workflow's input
+  (`inputOf`), as the server has both. Its request block opens its Input,
+  and its previews are the workflow's own, so it has no samples.
 - Add HTTP step always makes a step that uses an upstream
-  (`upstream-choice.tsx`): one from the library, or a new one made from a
+  (`upstream-choice.tsx`): one from the library, a published workflow but
+  the one being edited, at the revision served, or a new one made from a
   call whose URL reads the run, each placeholder a parameter the step gives
   what it read (`asUpstream`, as Save as upstream does). A step with a
   request of its own, saved before, shows Publish's `own_request` by Save
   as upstream.
+- An upstream is made with its samples (`components/upstream-samples.tsx`,
+  as the library and the editor both make one): one input object, its keys
+  the parameters the URL reads, and each response, the 2xx first. What
+  doesn't fit is said when it's made, and the next change clears it; the
+  upstream's page applies its sample input as it's typed, once it fits.
 - A field is labelled, not explained. What it's for is a `Hint`
   (`components/hint.tsx`) beside its label: a Base UI Popover with
   `openOnHover`, which opens on hover or a press. Not a Tooltip, which
@@ -310,7 +322,8 @@ the API is `/api` on the page's own origin.
   and it decides each step's failures before it publishes (plan 12). A
   second test covers plan 07's library (`web/e2e/upstreams.spec.ts`): it
   makes an upstream, uses it from a step, runs and publishes it, edits it
-  in place, and saves a step's request as one. Their steps, such as
+  in place, and saves a step's request as one; and a published workflow
+  is picked as a step, reopened, run and served. Their steps, such as
   opening a panel or joining a block, are in `web/e2e/editor.ts`. A
   button is named exactly where another's name holds it, Save beside Save
   as upstream, as Playwright otherwise matches a name as a substring

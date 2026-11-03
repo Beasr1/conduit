@@ -4,6 +4,9 @@ export const workflowKeys = {
   all: ["workflows"] as const,
   list: () => [...workflowKeys.all, "list"] as const,
   detail: (id: string) => [...workflowKeys.all, "detail", id] as const,
+  // A revision never changes, so it's cached for good.
+  revision: (id: string, revision: number) =>
+    [...workflowKeys.all, "revision", id, revision] as const,
 };
 
 // The upstream library (plan 07). A version never changes, so it's cached

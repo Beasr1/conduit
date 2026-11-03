@@ -819,3 +819,30 @@ test("problems are placed in the draft as it is now, steps first", () => {
   // The same check and draft give the same list, so a selector can keep it.
   expect(problemsIn(check, draft)).toBe(found);
 });
+
+// A step that uses a workflow gives values to its input (plan 07).
+test.each([
+  [
+    "/nodes/0/uses",
+    "unknown_workflow",
+    "There's no such workflow at that revision: pick another, or delete the step.",
+  ],
+  [
+    "/nodes/0/uses",
+    "uses_itself",
+    "A workflow can't use itself, or a workflow that uses it: pick another, or delete the step.",
+  ],
+  ["/nodes/0/with/user_id", "required", "Give the input field a value."],
+  [
+    "/nodes/0/with/page",
+    "unknown_parameter",
+    "The workflow takes no input field page: remove this value.",
+  ],
+])("a step that uses a workflow, %s, %s: says %j", (pointer, code, said) => {
+  const of: Definition = {
+    nodes: [
+      { id: "greet", kind: "http", uses: { workflow: "w-1", revision: 1 } },
+    ],
+  };
+  expect(say({ pointer, code, detail: "the server's words" }, of)).toBe(said);
+});

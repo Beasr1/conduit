@@ -117,6 +117,9 @@ func (r *run) exec(i int, parts []docPart) {
 
 func (r *run) call(i int, doc []byte) outcome {
 	n := &r.p.nodes[i]
+	if n.calls != nil {
+		return r.callWorkflow(i, doc)
+	}
 	var o outcome
 	req, errs := n.request(r.ctx, doc, r.id+":"+n.id)
 	if len(errs) > 0 {
@@ -142,6 +145,39 @@ func (r *run) call(i int, doc []byte) outcome {
 		return o
 	}
 	if o.entry, err = httpEntry(res); err != nil {
+		o.err = fmt.Errorf("response: %w", err)
+	}
+	return o
+}
+
+// callWorkflow runs the workflow node i uses, as a run of its own (plan
+// 07): the values it gives its parameters, over doc, are the input, and the
+// workflow's answer is the node's response, which it answers through as an
+// http node does. A run that gives no answer fails the node, beside what
+// it answered with, if anything.
+func (r *run) callWorkflow(i int, doc []byte) outcome {
+	n := &r.p.nodes[i]
+	var o outcome
+	input, errs := n.params(r.ctx, doc)
+	if len(errs) > 0 {
+		o.err = fmt.Errorf("%s: %w", errs[0].part, errs[0].err)
+		return o
+	}
+	o.result.Attempts = 1
+	if r.e.workflows == nil {
+		o.err = &CallError{Code: CodeInternal, Detail: "this server runs no workflows as steps"}
+		return o
+	}
+	a, err := r.e.workflows.Call(r.ctx, Call{Workflow: n.calls.Workflow, Revision: n.calls.Revision, Run: r.id, Node: n.id}, input)
+	o.result.HTTPStatus, o.result.Header, o.result.Body = a.Status, a.Header, a.Body
+	if out := outputOf(a.Status); err == nil && out != 0 && !slices.Contains(n.outputs, out) {
+		err = &CallError{Code: CodeUpstream, Detail: fmt.Sprintf("the workflow answered %d, which isn't one of its answers", a.Status)}
+	}
+	if err != nil {
+		o.err = err
+		return o
+	}
+	if o.entry, err = responseEntry(a.Status, a.Header, a.Body); err != nil {
 		o.err = fmt.Errorf("response: %w", err)
 	}
 	return o

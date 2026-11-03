@@ -23,12 +23,15 @@ export function StepOutput({
   index,
   status,
   locked = false,
+  calls = false,
 }: {
   index: number;
   status?: number;
   // Its sample is an upstream's, unless the upstream is being edited
   // (plan 07); what follows it stays the workflow's.
   locked?: boolean;
+  // It uses a workflow, whose own preview stands in for a sample.
+  calls?: boolean;
 }) {
   const [kept, setKept] = useState(0);
   return (
@@ -37,13 +40,21 @@ export function StepOutput({
         index={index}
         status={status}
         locked={locked}
+        calls={calls}
         kept={() => setKept((n) => n + 1)}
       />
-      {/* Keyed by the times a run's answer was kept, so its fields show
-          the sample they were given rather than what was typed before. */}
-      <fieldset disabled={locked} className="contents">
-        <StepSample key={kept} index={index} status={status} />
-      </fieldset>
+      {calls ? (
+        <p className="text-sm text-muted-foreground">
+          Previews take it from the workflow&apos;s own preview, over the input
+          this step gives it.
+        </p>
+      ) : (
+        // Keyed by the times a run's answer was kept, so its fields show
+        // the sample they were given rather than what was typed before.
+        <fieldset disabled={locked} className="contents">
+          <StepSample key={kept} index={index} status={status} />
+        </fieldset>
+      )}
       <StepConnections index={index} on={status} />
     </div>
   );

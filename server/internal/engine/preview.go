@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"runtime/debug"
 	"slices"
 	"strconv"
+	"strings"
 
+	"github.com/Beasr1/conduit/server/internal/trace"
 	"github.com/Beasr1/conduit/server/internal/upstream"
 	"github.com/Beasr1/conduit/server/internal/workflow"
 )
@@ -88,7 +91,11 @@ type WayPreview struct {
 // ones coming first.
 // It works on a definition with problems, compiling what it can and
 // reporting what's in the way.
-func Simulate(ctx context.Context, d *workflow.Definition, id string) (pv *Preview, err error) {
+//
+// A node that uses a workflow answers as the workflow's own preview has it
+// answer (plan 07): deps holds the revisions nodes use, as saved, and their
+// own, and d is resolved from them.
+func Simulate(ctx context.Context, d *workflow.Definition, id string, deps workflow.Deps) (pv *Preview, err error) {
 	defer catch(&pv, &err)
 	target := -1
 	if id != "" {
@@ -98,9 +105,9 @@ func Simulate(ctx context.Context, d *workflow.Definition, id string) (pv *Previ
 	}
 	p, problems := build(d)
 	if ways := p.ways(target); len(ways) > 1 {
-		pv = simulateWays(ctx, p, d, target, problems, ways)
+		pv = simulateWays(ctx, p, d, target, problems, ways, deps)
 	} else {
-		s := simOf(ctx, p, d)
+		s := simOf(ctx, p, d, deps)
 		var runs bool
 		pv, runs = s.simulate(target, problems)
 		if runs && target >= 0 && p.nodes[target].unhandled != nil {
@@ -132,12 +139,12 @@ func outcomesOf(d *workflow.Definition, i int) map[string]workflow.Outcome {
 // reads is what those runs read, merged, a step read differently by two as
 // the first read it, and its Unhandled body reads that. A problem two runs
 // have is listed once.
-func simulateWays(ctx context.Context, p *Program, d *workflow.Definition, t int, problems workflow.Problems, ways []int) *Preview {
+func simulateWays(ctx context.Context, p *Program, d *workflow.Definition, t int, problems workflow.Problems, ways []int, deps workflow.Deps) *Preview {
 	pv := &Preview{Skipped: true}
-	merged := simOf(ctx, p, d)
+	merged := simOf(ctx, p, d, deps)
 	ran := false
 	for _, k := range ways {
-		s := simOf(ctx, p, d)
+		s := simOf(ctx, p, d, deps)
 		way, runs := s.simulate(t, problems, k)
 		if way.Skipped || !s.might(k) {
 			pv.Ways = append(pv.Ways, WayPreview{Edge: k, Skipped: true})
@@ -200,12 +207,12 @@ func (s *sim) simulate(target int, problems workflow.Problems, by ...int) (pv *P
 // condition reads, with its source answering through the connection's
 // output, and whether a run would take it. The steps before the source are
 // simulated as for a preview of the source.
-func SimulateEdge(ctx context.Context, d *workflow.Definition, k int) (pv *Preview, err error) {
+func SimulateEdge(ctx context.Context, d *workflow.Definition, k int, deps workflow.Deps) (pv *Preview, err error) {
 	defer catch(&pv, &err)
 	if k < 0 || k >= len(d.Edges) {
 		return nil, ErrNoSuchEdge
 	}
-	s, problems := newSim(ctx, d)
+	s, problems := newSim(ctx, d, deps)
 	s.edge = k
 	e := s.p.edges[k]
 	pv = &Preview{}
@@ -289,17 +296,21 @@ type sim struct {
 	skipped  []bool
 	taken    []bool // by edge, once its source ran
 	problems workflow.Problems
+	// deps is the revisions the workflows nodes use, and depth how many
+	// workflows deep this preview is (plan 07).
+	deps  workflow.Deps
+	depth int
 }
 
 // newSim compiles what it can of d for a preview, and lists everything wrong
 // with it.
-func newSim(ctx context.Context, d *workflow.Definition) (*sim, workflow.Problems) {
+func newSim(ctx context.Context, d *workflow.Definition, deps workflow.Deps) (*sim, workflow.Problems) {
 	p, problems := build(d)
-	return simOf(ctx, p, d), problems
+	return simOf(ctx, p, d, deps), problems
 }
 
 // simOf is a preview's state at its start, over p, compiled from d.
-func simOf(ctx context.Context, p *Program, d *workflow.Definition) *sim {
+func simOf(ctx context.Context, p *Program, d *workflow.Definition, deps workflow.Deps) *sim {
 	input := d.SampleInput
 	if len(input) == 0 {
 		input = json.RawMessage("null")
@@ -316,6 +327,7 @@ func simOf(ctx context.Context, p *Program, d *workflow.Definition) *sim {
 		via:     make([]int, len(p.nodes)),
 		skipped: make([]bool, len(p.nodes)),
 		taken:   make([]bool, len(p.edges)),
+		deps:    deps,
 	}
 }
 
@@ -563,6 +575,12 @@ func (s *sim) run(i int) {
 			return
 		}
 		s.entry[i] = entry
+	case n.calls != nil:
+		entry, ok := s.called(i)
+		if !ok {
+			return
+		}
+		s.entry[i] = entry
 	case n.kind == workflow.NodeKindHTTP:
 		sample, ptr, status := s.sample(i)
 		switch {
@@ -669,6 +687,17 @@ func (s *sim) step(pv *Preview, t int) bool {
 		return false
 	}
 	switch {
+	case n.calls != nil:
+		// What it gives the workflow, and what the workflow answers when it
+		// succeeds (plan 07).
+		given, errs := n.params(s.ctx, doc)
+		pv.Parameters = given
+		for _, e := range errs {
+			s.problem(ptr+e.pointer, "evaluation_failed", "%v", e.err)
+		}
+		if status, body, ok := s.answered(t, given, 0); ok {
+			pv.Gives = answerJSON(status, body)
+		}
 	case n.kind == workflow.NodeKindHTTP && s.d.Nodes[t].Request != nil:
 		if n.bound {
 			// What the request reads; those that fail are its problems,
@@ -698,6 +727,222 @@ func (s *sim) step(pv *Preview, t int) bool {
 		}
 	}
 	return true
+}
+
+// called is node i's part of the data document, a node that uses a
+// workflow (plan 07): what the workflow answers through the output i
+// answers through, by the workflow's own preview, over the values i gives
+// its parameters.
+func (s *sim) called(i int) (json.RawMessage, bool) {
+	n := &s.p.nodes[i]
+	ptr := "/nodes/" + strconv.Itoa(i)
+	doc, err := document(s.input, s.parts(i))
+	if err != nil {
+		s.problem(ptr, "evaluation_failed", "%v", err)
+		return nil, false
+	}
+	given, errs := n.params(s.ctx, doc)
+	for _, e := range errs {
+		s.problem(ptr+e.pointer, "evaluation_failed", "%v", e.err)
+	}
+	status, body, ok := s.answered(i, given, s.via[i])
+	if !ok {
+		return nil, false
+	}
+	entry, err := responseEntry(status, nil, body)
+	if err != nil {
+		s.problem(ptr, "evaluation_failed", "%v", err)
+		return nil, false
+	}
+	return entry, true
+}
+
+// answered previews what the workflow node i uses answers through output
+// on, a status, or 0 for its first 2xx: its own preview over given, the
+// values i gives its parameters, its sample input standing in for any i
+// doesn't give. When it can't tell, a problem of i's says why. It goes as
+// deep as a run of the draft, which starts at no hops: a run as many hops
+// in as trace.MaxHops is refused (plan 06).
+func (s *sim) answered(i int, given json.RawMessage, on int) (int, json.RawMessage, bool) {
+	n := &s.p.nodes[i]
+	ptr := "/nodes/" + strconv.Itoa(i) + "/uses"
+	w := s.deps.Revisions[*n.calls]
+	if w == nil {
+		return 0, nil, false // Resolve's problem says why
+	}
+	what := "its 2xx answer"
+	if on != 0 {
+		what = fmt.Sprintf("its %d answer", on)
+	}
+	if s.depth+1 >= trace.MaxHops {
+		s.problem(ptr, "missing_sample", "%s's workflow has no preview of %s: a run refuses it, as the call would pass through Conduit %d times", n.id, what, trace.MaxHops)
+		return 0, nil, false
+	}
+	rd, _ := workflow.Resolve(w, s.deps, "")
+	inner, problems := newSim(s.ctx, rd, s.deps)
+	inner.depth, inner.input = s.depth+1, over(w.SampleInput, given)
+	status, body, why := inner.answer(problems, on)
+	if why != nil {
+		// One a workflow deeper in says of its own is said once.
+		detail := why.Detail
+		if why.Code != "missing_sample" || !strings.HasSuffix(why.Pointer, "/uses") {
+			detail = fmt.Sprintf("%s's workflow has no preview of %s: %s", n.id, what, why.Detail)
+		}
+		s.problem(ptr, "missing_sample", "%s", detail)
+		return 0, nil, false
+	}
+	return status, body, true
+}
+
+// over is given, an object, over sample, so a field given has its value
+// and the rest their sample's. sample that isn't an object gives nothing.
+func over(sample, given json.RawMessage) json.RawMessage {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(sample, &fields) != nil || fields == nil {
+		fields = map[string]json.RawMessage{}
+	}
+	var g map[string]json.RawMessage
+	if json.Unmarshal(given, &g) == nil {
+		maps.Copy(fields, g)
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return out
+}
+
+// answer previews what this workflow answers through output on: its
+// answer with that status, or its first 2xx for 0, as the answer's first
+// line gives it, that line's node answering through it and the steps before
+// that node as a preview of it has them. why is what's in the way.
+func (s *sim) answer(problems workflow.Problems, on int) (status int, body json.RawMessage, why *workflow.Problem) {
+	says := func(detail string) (int, json.RawMessage, *workflow.Problem) {
+		return 0, nil, &workflow.Problem{Detail: detail}
+	}
+	resp := s.d.Response
+	if resp == nil {
+		return says("it has no response")
+	}
+	k := slices.IndexFunc(resp.Answers, func(a workflow.Answer) bool {
+		if on == 0 {
+			return a.Status >= 200 && a.Status <= 299
+		}
+		return a.Status == on
+	})
+	if k < 0 || len(resp.Answers[k].Lines) == 0 {
+		return says("no line joins that answer")
+	}
+	a := resp.Answers[k]
+	l := a.Lines[0]
+	from := slices.IndexFunc(s.d.Nodes, func(n workflow.Node) bool { return n.ID == l.From })
+	if from < 0 {
+		return says("its line comes from no step")
+	}
+	s.aim(from, problems)
+	s.via[from] = l.Output()
+	if !s.runs(from) {
+		return says("its line's step is on or after a loop of connections, so it never runs")
+	}
+	s.run(from)
+	if s.entry[from] == nil {
+		if len(s.problems) > 0 {
+			return 0, nil, &s.problems[0]
+		}
+		return says("with these samples, a run skips its line's step")
+	}
+	status, body, err := s.lineBody(from, l.Output(), a.Status)
+	switch {
+	case err != nil:
+		return says(err.Error())
+	case on == 0 && (status < 200 || status > 299), on != 0 && status != on:
+		return says(fmt.Sprintf("with these samples, %s picks %d", l.From, status))
+	}
+	return status, body, nil
+}
+
+// lineBody is what the answer with status gives through a line from node
+// i's output on, as a run's answer has it: what i's Unhandled body gave; the
+// error it passes on, from an Unhandled with no body or an http node's
+// status of 400 or more; what a transform that picks among answers picked,
+// at the status it picked; or its body.
+func (s *sim) lineBody(i, on, status int) (int, json.RawMessage, error) {
+	var e struct {
+		Body json.RawMessage `json:"body"`
+	}
+	if err := json.Unmarshal(s.entry[i], &e); err != nil {
+		return 0, nil, err
+	}
+	n := &s.p.nodes[i]
+	switch statuses := s.p.response.picks[i]; {
+	case on == workflow.OnUnhandled && n.unhandled != nil:
+		return status, e.Body, nil
+	case on == workflow.OnUnhandled, n.kind == workflow.NodeKindHTTP && on >= 400:
+		body, err := s.passedOn(i, on, e.Body)
+		return status, body, err
+	case len(statuses) >= 2:
+		return pick(n.id, e.Body, statuses)
+	default:
+		return status, e.Body, nil
+	}
+}
+
+// passedOn is the body an answer passing node i's error on gives in a
+// preview, through output on, with body what i got: the response's error
+// body over the error, made up as a preview calls nothing; or, with none,
+// the error as a node that uses the workflow gets it, its code, detail and
+// node (plan 07).
+func (s *sim) passedOn(i, on int, body json.RawMessage) (json.RawMessage, error) {
+	n := &s.p.nodes[i]
+	res := NodeResult{ID: n.id, HTTPStatus: on, Body: body}
+	code, detail := CodeUpstream, fmt.Sprintf("%s answered %d: made up, as a preview calls nothing", n.id, on)
+	if on == workflow.OnUnhandled {
+		res = NodeResult{ID: n.id}
+		detail = n.id + " failed: made up, as a preview calls nothing"
+		if n.kind != workflow.NodeKindHTTP {
+			code = CodeWorkflow
+		}
+	}
+	if s.p.response.errors == nil {
+		return json.Marshal(ErrorAnswer{Code: code, Detail: detail, Node: n.id})
+	}
+	failure, err := ErrorOf(res, code, detail)
+	if err != nil {
+		return nil, err
+	}
+	var parts []docPart
+	for k, e := range s.entry {
+		if e != nil {
+			parts = append(parts, docPart{id: s.p.nodes[k].id, entry: e})
+		}
+	}
+	doc, err := document(s.input, parts)
+	if err != nil {
+		return nil, err
+	}
+	doc = append(append(append(doc[:len(doc)-1], `,"error":`...), failure...), '}')
+	out, err := s.p.response.errors.Eval(s.ctx, doc)
+	if err != nil {
+		return nil, fmt.Errorf("its error body failed: %w", err)
+	}
+	return out, nil
+}
+
+// ErrorAnswer is the body a node that uses a workflow gets when the
+// workflow's answer passes an error on with no error body to say it, where
+// /serve answers with problem details (plan 07).
+type ErrorAnswer struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
+	Node   string `json:"node"`
+}
+
+// answerJSON is an answer as a preview gives it: its status and body.
+func answerJSON(status int, body json.RawMessage) json.RawMessage {
+	if body == nil {
+		body = json.RawMessage("null")
+	}
+	return fmt.Appendf(nil, `{"status":%d,"body":%s}`, status, body)
 }
 
 // output previews the workflow's output, over every node that ran, as a

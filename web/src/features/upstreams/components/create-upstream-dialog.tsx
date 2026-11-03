@@ -1,10 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { useNavigate } from "react-router";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
+import {
+  checkSamples,
+  NO_SAMPLES,
+  type SamplesSaid,
+  says,
+  UpstreamSamples,
+  withSamples,
+} from "@/components/upstream-samples";
 import {
   Dialog,
   DialogContent,
@@ -49,6 +57,13 @@ type Values = z.infer<typeof schema>;
 // A placeholder that's a plain name, {{ user_id }}, is a parameter.
 const PARAMETER = /\{\{\s*([a-z][a-z0-9_]{0,63})\s*\}\}/g;
 
+// namesIn is the parameters a URL reads, each once, in order.
+const namesIn = (url: string) => [
+  ...new Set([...url.matchAll(PARAMETER)].map((m) => m[1]!)),
+];
+
+const NO_SAID: SamplesSaid = { responses: [] };
+
 // Where the server's problems with a new upstream go, by pointer.
 const fieldOf: Record<string, keyof Values> = {
   "/name": "name",
@@ -56,12 +71,15 @@ const fieldOf: Record<string, keyof Values> = {
   "/definition/request/url": "url",
 };
 
-// CreateUpstreamDialog makes an upstream from a name and the call it makes
-// (plan 07), each name its URL reads in a placeholder a parameter; its page
-// adds the rest: samples, responses, headers and a body.
+// CreateUpstreamDialog makes an upstream from a name, the call it makes and
+// its samples (plan 07): each name its URL reads in a placeholder a
+// parameter, a sample input for them, and a sample of each response the API
+// can give. Its page adds the rest: headers, a body, retries.
 export function CreateUpstreamDialog() {
   const [open, setOpen] = useState(false);
   const [formError, setFormError] = useState<string>();
+  const [samples, setSamples] = useState(NO_SAMPLES);
+  const [samplesSaid, setSamplesSaid] = useState(NO_SAID);
   const navigate = useNavigate();
   const create = useCreateUpstream();
   const form = useForm<Values>({
@@ -69,21 +87,28 @@ export function CreateUpstreamDialog() {
     defaultValues: { name: "", method: "GET", url: "" },
   });
   const { errors, isSubmitting } = form.formState;
+  const names = namesIn(useWatch({ control: form.control, name: "url" }));
 
   async function onSubmit({ name, method, url }: Values) {
     setFormError(undefined);
+    const said = checkSamples(samples, namesIn(url));
+    if (says(said)) {
+      setSamplesSaid(said);
+      return;
+    }
     try {
-      const names = [
-        ...new Set([...url.matchAll(PARAMETER)].map((m) => m[1]!)),
-      ];
+      const found = namesIn(url);
       const made = await create.mutateAsync({
         name,
-        definition: {
-          ...(names.length > 0 && {
-            parameters: names.map((n) => ({ name: n })),
-          }),
-          request: { method, url },
-        },
+        definition: withSamples(
+          {
+            ...(found.length > 0 && {
+              parameters: found.map((n) => ({ name: n })),
+            }),
+            request: { method, url },
+          },
+          samples,
+        ),
       });
       setOpen(false);
       void navigate(routes.upstream(made.upstream.id));
@@ -118,17 +143,19 @@ export function CreateUpstreamDialog() {
         if (!next) {
           form.reset();
           setFormError(undefined);
+          setSamples(NO_SAMPLES);
+          setSamplesSaid(NO_SAID);
         }
       }}
     >
       <DialogTrigger render={<Button />}>New upstream</DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-screen overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>New upstream</DialogTitle>
           <DialogDescription>
-            An API steps call, saved once. Each name its URL reads, as{" "}
-            <span className="font-mono">{"{{ user_id }}"}</span>, is a parameter
-            a step gives it.
+            An API steps call, saved once with its samples. Each name its URL
+            reads, as <span className="font-mono">{"{{ user_id }}"}</span>, is a
+            parameter a step gives it.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
@@ -179,6 +206,16 @@ export function CreateUpstreamDialog() {
               </div>
               <FieldError errors={[errors.url, errors.method]} />
             </Field>
+            <UpstreamSamples
+              id="upstream"
+              value={samples}
+              onChange={(next) => {
+                setSamples(next);
+                setSamplesSaid(NO_SAID);
+              }}
+              parameters={names}
+              said={samplesSaid}
+            />
             {formError && (
               <p role="alert" className="text-sm text-destructive">
                 {formError}
