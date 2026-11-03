@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { JsonBlock } from "@/features/editor/components/mapping-field";
 import { removeOutput, updateNode } from "@/features/editor/edits";
 import {
   readHeaders,
@@ -200,6 +201,63 @@ export function StepSample({
         <FieldError errors={said.headers} />
       </Field>
     </FieldSet>
+  );
+}
+
+// UpstreamSample is one of the responses of a step that uses an upstream,
+// with the upstream's sample, read here and changed on the upstream's page
+// (plan 07).
+export function UpstreamSample({
+  index,
+  status,
+}: {
+  index: number;
+  status?: number;
+}) {
+  const title = status === undefined ? "2xx" : String(status);
+  const sample = useEditor((s) => sampleOf(s.draft.nodes[index], status));
+  return (
+    <section
+      aria-label={`When it answers ${title}`}
+      className="flex flex-col gap-3 text-sm"
+    >
+      <div className="flex items-center gap-1">
+        <h3 className="font-medium">When it answers {title}</h3>
+        <Hint about={`the ${title} sample`}>
+          The upstream&apos;s sample of what the API answers
+          {status === undefined ? " when it succeeds" : ` with ${status}`}:
+          previews read it, runs don&apos;t.
+        </Hint>
+      </div>
+      {sample === undefined ? (
+        <p className="text-muted-foreground">
+          No sample. Add one on the upstream&apos;s page.
+        </p>
+      ) : (
+        <dl className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <dt className="font-medium">Body</dt>
+            <dd>
+              <JsonBlock value={sample.body} />
+            </dd>
+          </div>
+          {sample.status !== undefined && (
+            <div className="flex flex-col gap-1">
+              <dt className="font-medium">Status</dt>
+              <dd className="font-mono">{sample.status}</dd>
+            </div>
+          )}
+          {sample.headers !== undefined && (
+            <div className="flex flex-col gap-1">
+              <dt className="font-medium">Headers</dt>
+              <dd>
+                <JsonBlock value={sample.headers} />
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </section>
   );
 }
 

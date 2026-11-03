@@ -25,8 +25,8 @@ export function usePreview(of?: { step: number } | { edge: number }) {
   const draft = useEditor((s) => s.draft);
   const editing = useEditor((s) => s.upstreamEdit);
   const still = useStill(draft, PAUSE_MS);
-  // An upstream being edited in place goes with the draft, so the preview
-  // shows what the edit would do (plan 07).
+  // An upstream being edited, on its page, goes with the draft, so the
+  // preview shows what the edit would do (plan 07).
   const node = editing && still.nodes.find((n) => n.id === editing.node);
   const upstreams = node
     ? { [node.id]: upstreamOf(node, editing.parameters) }

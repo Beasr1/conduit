@@ -10,11 +10,12 @@ every step's failures are decided, every error is answered in one shape,
 the response picks its answer top to bottom, and the editor says only what
 a field is, with a short tour and one-line hints. Plan 06's loop guard is
 built too: a workflow calling itself is refused after 8 hops. Plan 07's
-upstreams are built (2026-11-03): a library of them, each save that
+upstreams are built (2026-11-04): a library of them, each save that
 changes something a version that never changes, which a step uses at a
-pinned version, edited in place from the step or on the upstream's own
-page; Publish takes only steps that use one, a published workflow is one
-too, and an upstream no saved revision pins can be deleted.**
+pinned version, showing only what it keeps and opening the upstream, which
+is changed on its own page; Publish takes only steps that use one, a
+published workflow is one too, and an upstream no saved revision pins can
+be deleted.**
 The web app signs in with a session cookie, which sign-out or 30 minutes
 unused ends, lists workflows and creates them, and edits, checks, saves
 and publishes one in graph mode, previewing what each step reads and sends
@@ -44,8 +45,9 @@ more than one way. A run records the lines each step's answer took. An
 Upstreams page beside Workflows is the library: an upstream is one API
 call and how it's handled, with parameters its request reads. A step that
 uses one gives the parameters values, its request and responses the
-upstream's version's, is offered a newer version, and can edit the
-upstream in place, saving its next version. Add HTTP step makes a new
+upstream's version's, read but not changed there, is offered a newer
+version, and opens the upstream in a new tab, where its next version is
+saved. Add HTTP step makes a new
 upstream from a call and its samples, one input object and each response
 it can give; a step with a request of its own, from before,
 still runs, Publish refuses it, and Save as upstream moves it to the

@@ -19,9 +19,13 @@ import {
 } from "@/features/editor/flow";
 import { atStep, useProblemCount } from "@/features/editor/hooks/use-problems";
 import { useRun, useStepRun } from "@/features/editor/hooks/use-runs";
+import { useVersion } from "@/features/editor/hooks/use-upstreams";
 import { runSaid, wayOf } from "@/features/editor/runs";
-import { isLocked, type Refused, useEditor } from "@/features/editor/store";
+import { type Refused, useEditor } from "@/features/editor/store";
 import { versionKey } from "@/features/editor/upstreams";
+import type { components } from "@/gen/schema";
+
+type Uses = components["schemas"]["Uses"];
 
 // Frame is a step's request block, and the inside of a step that has no
 // others: its id, a line saying what it does, and the handle connections
@@ -144,13 +148,11 @@ function UnhandledStrip({ step }: { step: string }) {
 // and on the right a block per response, with the handle its connections
 // leave from, then + Add, and its Unhandled strip along the bottom. Each
 // block says which part of the step it is, and the canvas opens that part
-// when it's clicked. A step that uses an upstream has its responses from it,
-// so no + Add, unless the upstream is being edited in place. One that uses a
-// workflow is drawn by the workflow's name and revision, its responses the
-// workflow's answers.
+// when it's clicked. A step that uses an upstream or a workflow is drawn by
+// its name and version, or revision, and its responses are what it uses,
+// so it has no + Add (plan 07).
 const HttpNode = memo(function HttpNode({ id, data }: NodeProps<FlowNode>) {
   const node = useEditor((s) => s.draft.nodes[data.index]);
-  const locked = useEditor((s) => isLocked(s, data.index));
   const called = useEditor((s) => {
     const uses = s.draft.nodes[data.index]?.uses;
     if (uses?.workflow === undefined) return undefined;
@@ -181,6 +183,8 @@ const HttpNode = memo(function HttpNode({ id, data }: NodeProps<FlowNode>) {
           <RunMark run={run} />
         ) : called !== undefined ? (
           called
+        ) : node.uses ? (
+          <UsedUpstream uses={node.uses} />
         ) : node.request ? (
           `${node.request.method} ${node.request.url || "(no URL yet)"}`
         ) : (
@@ -204,7 +208,7 @@ const HttpNode = memo(function HttpNode({ id, data }: NodeProps<FlowNode>) {
             <Handle type="source" position={Position.Right} id={o} />
           </div>
         ))}
-        {!locked && (
+        {!node.uses && (
           <div
             data-part="add"
             className="flex flex-1 items-center px-2.5 text-muted-foreground"
@@ -216,6 +220,13 @@ const HttpNode = memo(function HttpNode({ id, data }: NodeProps<FlowNode>) {
     </Card>
   );
 });
+
+// UsedUpstream is the upstream a step uses, by its name and the version
+// pinned, as a step that uses a workflow is drawn by the workflow's.
+function UsedUpstream({ uses }: { uses: Uses }) {
+  const name = useVersion(uses).data?.upstream.name;
+  return name === undefined ? `v${uses.version}` : `${name} · v${uses.version}`;
+}
 
 // A transform step with an expression gives its value from its one point on
 // the right. One with cases is blocks, as an HTTP step is: its id on the

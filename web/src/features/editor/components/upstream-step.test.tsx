@@ -15,7 +15,6 @@ type UpstreamVersion = components["schemas"]["UpstreamVersion"];
 type UpstreamList = components["schemas"]["UpstreamList"];
 type CreateUpstream = components["schemas"]["CreateUpstream"];
 type Preview = components["schemas"]["Preview"];
-type PreviewRequest = components["schemas"]["PreviewRequest"];
 type Validation = components["schemas"]["Validation"];
 type WorkflowList = components["schemas"]["WorkflowList"];
 type WorkflowRevision = components["schemas"]["WorkflowRevision"];
@@ -118,31 +117,76 @@ async function openStep(id: string) {
   return screen.findByRole("complementary", { name: "HTTP step" });
 }
 
-const url = () => screen.getByRole("textbox", { name: "URL" });
+// line is the part of a step's panel that says what the step uses.
+const line = (panel: HTMLElement, name = "Upstream") =>
+  within(panel).getByRole("region", { name });
 
-// A step that uses an upstream is drawn from its version, and its panel
-// says which, gives its parameters values, and keeps the upstream's request
-// and responses locked (plan 07).
-test("a step that uses an upstream is drawn from its version, its request locked", async () => {
+// A step that uses an upstream shows what it owns (plan 07): which upstream
+// at which version, with its call; the values it gives the parameters; and
+// each response's sample to read, with where it leads. The upstream itself
+// is changed on its page, which Open upstream opens in a new tab, so the
+// draft stays as it is.
+test("a step that uses an upstream shows what it owns, and opens the upstream in a new tab", async () => {
   library(version(users, 2));
-  renderEditor(using, [], { "u-1@2": users });
-  expect(
-    within(await screen.findByTestId("rf__node-user")).getByText("404"),
-  ).toBeTruthy();
+  const sampled: Upstream = {
+    ...users,
+    sample: {
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: { id: "7" },
+    },
+  };
+  renderEditor(using, [], { "u-1@2": sampled });
+  const card = await screen.findByTestId("rf__node-user");
+  expect(await within(card).findByText("Users API · v2")).toBeTruthy();
+  expect(within(card).getByText("404")).toBeTruthy();
+  expect(within(card).queryByText("+ Add")).toBeNull();
   const panel = await openStep("user");
-  expect(await within(panel).findByText("Users API")).toBeTruthy();
-  expect(within(panel).getByText("· v2")).toBeTruthy();
-  expect(url()).toHaveProperty("value", users.request.url);
-  expect(url().matches(":disabled")).toBe(true);
+  const upstream = line(panel);
+  expect(await within(upstream).findByText("Users API")).toBeTruthy();
+  expect(within(upstream).getByText("· v2")).toBeTruthy();
+  expect(within(upstream).getByText(`GET ${users.request.url}`)).toBeTruthy();
+  const open = within(upstream).getByRole("link", {
+    name: "Open upstream, opens in a new tab",
+  });
+  expect(open.getAttribute("href")).toBe("/upstreams/u-1");
+  expect(open.getAttribute("target")).toBe("_blank");
+  expect(
+    within(panel).queryByRole("button", { name: "Edit upstream" }),
+  ).toBeNull();
+  // One row of tabs, open on its Parameters: no Request, which they
+  // preview, and no + Response, as its responses are the upstream's.
+  expect(within(panel).queryByRole("tablist", { name: "Request" })).toBeNull();
+  expect(within(panel).queryByRole("tab", { name: "Request" })).toBeNull();
   expect(
     within(panel).queryByRole("tab", { name: "Add a response" }),
   ).toBeNull();
-  // It's in the library already, and its samples are the upstream's.
+  expect(
+    within(panel)
+      .getByRole("tab", { name: "Parameters" })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  // It's in the library already.
   expect(
     within(panel).queryByRole("button", { name: "Save as upstream" }),
   ).toBeNull();
+  // Its samples are the upstream's, to read, and one it lacks is added on
+  // its page.
   fireEvent.click(within(panel).getByRole("tab", { name: "2xx" }));
-  expect(screen.getByLabelText("2xx body").matches(":disabled")).toBe(true);
+  expect(screen.queryByLabelText("2xx body")).toBeNull();
+  const ok = screen.getByRole("tabpanel", { name: "2xx" });
+  expect(within(ok).getByText("When it answers 2xx")).toBeTruthy();
+  expect(within(ok).getByText(/"id": "7"/)).toBeTruthy();
+  expect(within(ok).getByText("200")).toBeTruthy();
+  expect(
+    within(ok).getByText(/"content-type": "application\/json"/),
+  ).toBeTruthy();
+  fireEvent.click(within(panel).getByRole("tab", { name: "404" }));
+  expect(
+    within(screen.getByRole("tabpanel", { name: "404" })).getByText(
+      "No sample. Add one on the upstream's page.",
+    ),
+  ).toBeTruthy();
 
   fireEvent.click(within(panel).getByRole("tab", { name: "Parameters" }));
   const value = screen.getByLabelText("user_id", { selector: "textarea" });
@@ -156,10 +200,9 @@ test("a step that uses an upstream is drawn from its version, its request locked
   ).toBe("true");
 });
 
-// Its responses are the upstream's, so its card adds none, unless the
-// upstream is being edited in place; and its body reads its parameters, with
-// the values the preview says they take.
-test("a step that uses an upstream adds no responses of its own, and its body reads its parameters", async () => {
+// Its parameters preview the request the step sends, with the values they
+// take, which is why the upstream's request isn't shown as well.
+test("a step that uses an upstream previews the request its parameters make", async () => {
   library(version(users, 2));
   renderEditor(using, [], { "u-1@2": users });
   server.use(
@@ -167,41 +210,23 @@ test("a step that uses an upstream adds no responses of its own, and its body re
       HttpResponse.json<Preview>({
         reads: { input: { user_id: "7" }, nodes: {} },
         parameters: { user_id: "7" },
+        sends: {
+          method: "GET",
+          url: "https://users.example.com/v1/users/7",
+          headers: {},
+        },
         skipped: false,
         problems: [],
       }),
     ),
   );
-  const card = await screen.findByTestId("rf__node-user");
-  expect(within(card).queryByText("+ Add")).toBeNull();
   const panel = await openStep("user");
-  fireEvent.click(within(panel).getByRole("tab", { name: "Request" }));
-  // Its fields are locked, but not the tabs that open them.
-  const body = within(panel).getByRole("tab", { name: "Body" });
-  expect(body.matches(":disabled")).toBe(false);
-  fireEvent.click(body);
-  const box = (
-    await within(panel).findByRole("heading", { name: "Parameters" })
-  ).closest("section");
+  const sends = await within(panel).findByRole("heading", { name: "Sends" });
   expect(
-    await within(box!).findByRole("button", { name: "Insert user_id" }),
+    within(sends.closest("section")!).getByText(
+      "GET https://users.example.com/v1/users/7",
+    ),
   ).toBeTruthy();
-  expect(within(box!).queryByRole("button", { name: /input/ })).toBeNull();
-
-  fireEvent.click(
-    await within(panel).findByRole("button", { name: "Edit upstream" }),
-  );
-  expect(await within(card).findByText("+ Add")).toBeTruthy();
-  // + Response goes with the edit, and the panel opens on the request.
-  fireEvent.click(within(panel).getByRole("tab", { name: "Add a response" }));
-  fireEvent.click(within(panel).getByRole("button", { name: "Discard" }));
-  await waitFor(() =>
-    expect(
-      within(panel)
-        .getByRole("tab", { name: "Request" })
-        .getAttribute("aria-selected"),
-    ).toBe("true"),
-  );
 });
 
 test("a newer version is offered, and taking it keeps the values of the parameters it still has", async () => {
@@ -218,7 +243,9 @@ test("a newer version is offered, and taking it keeps the values of the paramete
   const panel = await openStep("user");
   fireEvent.click(await within(panel).findByRole("button", { name: "Use v3" }));
   expect(await within(panel).findByText("· v3")).toBeTruthy();
-  await waitFor(() => expect(url()).toHaveProperty("value", v3.request.url));
+  expect(within(line(panel)).getByText(`GET ${v3.request.url}`)).toBeTruthy();
+  const card = screen.getByTestId("rf__node-user");
+  expect(await within(card).findByText("Users API · v3")).toBeTruthy();
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(saved).toHaveLength(1));
@@ -233,81 +260,49 @@ test("a newer version is offered, and taking it keeps the values of the paramete
   });
 });
 
-test("an upstream edited in place is saved as its next version, which the step then uses", async () => {
-  library(version(users, 2));
-  let sent: { body: Upstream; ifMatch: string | null } | undefined;
+test("Use vN says when the version doesn't come", async () => {
+  library(version(users, 3), version(users, 2, 3));
   server.use(
-    http.put<PathParams, Upstream, UpstreamVersion>(
-      "/api/v1/upstreams/u-1",
-      async ({ request }) => {
-        sent = {
-          body: await request.json(),
-          ifMatch: request.headers.get("If-Match"),
-        };
-        return HttpResponse.json(version(sent.body, 3));
-      },
+    http.get("/api/v1/upstreams/u-1/versions/3", () =>
+      HttpResponse.json(
+        { status: 404, code: "not_found", detail: "no such version" },
+        {
+          status: 404,
+          headers: { "Content-Type": "application/problem+json" },
+        },
+      ),
     ),
   );
   renderEditor(using, [], { "u-1@2": users });
   const panel = await openStep("user");
-  fireEvent.click(
-    await within(panel).findByRole("button", { name: "Edit upstream" }),
-  );
-  await waitFor(() => expect(url().matches(":disabled")).toBe(false));
-  // While it's open, the workflow waits.
+  fireEvent.click(await within(panel).findByRole("button", { name: "Use v3" }));
   expect(
-    await screen.findByText(/Save or discard the upstream first/),
+    await within(line(panel)).findByText("Couldn't get v3. Try again."),
   ).toBeTruthy();
-  // A save that changes nothing makes no version, so it waits for a change.
-  const save = within(panel).getByRole("button", { name: "Save upstream" });
-  expect(save.matches(":disabled")).toBe(true);
-  fireEvent.change(url(), {
-    target: { value: "https://users.example.com/v2/users/{{ user_id }}" },
-  });
-  fireEvent.click(save);
-  await waitFor(() => expect(within(panel).getByText("· v3")).toBeTruthy());
-  expect(sent?.ifMatch).toBe('"2"');
-  expect(sent?.body.request.url).toBe(
-    "https://users.example.com/v2/users/{{ user_id }}",
-  );
-  expect(sent?.body.parameters).toEqual([{ name: "user_id" }]);
-  expect(url().matches(":disabled")).toBe(true);
+  expect(within(panel).getByText("· v2")).toBeTruthy();
+  // Tried again once it's there, it's taken, and the words go.
+  library(version(users, 3), version(users, 2, 3));
+  fireEvent.click(within(panel).getByRole("button", { name: "Use v3" }));
+  expect(await within(panel).findByText("· v3")).toBeTruthy();
+  expect(
+    within(line(panel)).queryByText("Couldn't get v3. Try again."),
+  ).toBeNull();
 });
 
-// While it's open, the preview goes with the upstream as it stands, by the
-// step's id, beside the draft, stripped as it's saved.
-test("an upstream edited in place is previewed as it stands", async () => {
+// The upstream is changed on its page, in a tab of its own. Back on this
+// one, the step offers the version saved there: the library is asked again
+// when the page is seen again.
+test("back on the workflow's tab, the step offers the version saved on the upstream's page", async () => {
   library(version(users, 2));
   renderEditor(using, [], { "u-1@2": users });
-  const asked: PreviewRequest[] = [];
-  server.use(
-    http.post<PathParams, PreviewRequest, Preview>(
-      "/api/v1/preview",
-      async ({ request }) => {
-        asked.push(await request.json());
-        return HttpResponse.json<Preview>({
-          reads: { input: null, nodes: {} },
-          skipped: false,
-          problems: [],
-        });
-      },
-    ),
-  );
   const panel = await openStep("user");
-  fireEvent.click(
-    await within(panel).findByRole("button", { name: "Edit upstream" }),
-  );
-  await waitFor(() => expect(url().matches(":disabled")).toBe(false));
-  const v2 = "https://users.example.com/v2/users/{{ user_id }}";
-  fireEvent.change(url(), { target: { value: v2 } });
-  await waitFor(
-    () =>
-      expect(asked.map((b) => b.upstreams?.user?.request.url)).toContain(v2),
-    { timeout: 3000 },
-  );
-  const sent = asked.find((b) => b.upstreams?.user?.request.url === v2);
-  expect(sent?.upstreams?.user?.parameters).toEqual([{ name: "user_id" }]);
-  expect(sent?.definition.nodes[0]).toEqual(using.nodes[0]);
+  expect(await within(line(panel)).findByText("Users API")).toBeTruthy();
+  expect(within(panel).queryByRole("button", { name: "Use v3" })).toBeNull();
+  library(version(users, 3), version(users, 2, 3));
+  document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+  expect(
+    await within(panel).findByRole("button", { name: "Use v3" }),
+  ).toBeTruthy();
 });
 
 // The check is sent the draft as it's saved: a step that uses an upstream
@@ -339,48 +334,69 @@ test("the check is sent a step that uses an upstream stripped", async () => {
   });
 });
 
-test("Save upstream says when another version was saved first", async () => {
+// A problem in the upstream's own fields, which only a version saved before
+// a newer check could have, shows on the line, by Open upstream, its fix;
+// the problem list takes the cursor there.
+test("a problem in the upstream's own fields shows on the line, where the problem list goes", async () => {
   library(version(users, 2));
-  server.use(
-    http.put("/api/v1/upstreams/u-1", () =>
-      HttpResponse.json(
-        { status: 412, code: "version_mismatch", detail: "moved on" },
-        {
-          status: 412,
-          headers: { "Content-Type": "application/problem+json" },
-        },
-      ),
-    ),
+  renderEditor(
+    using,
+    [
+      {
+        pointer: "/nodes/0/request/url",
+        code: "invalid_url",
+        detail: "use https",
+      },
+    ],
+    { "u-1@2": users },
   );
-  renderEditor(using, [], { "u-1@2": users });
-  const panel = await openStep("user");
-  fireEvent.click(
-    await within(panel).findByRole("button", { name: "Edit upstream" }),
-  );
-  await waitFor(() => expect(url().matches(":disabled")).toBe(false));
-  fireEvent.change(url(), {
-    target: { value: "https://elsewhere.example.com" },
+  fireEvent.click(await screen.findByRole("button", { name: "1 problem" }));
+  const list = await screen.findByRole("complementary", { name: "Problems" });
+  fireEvent.click(within(list).getByRole("button", { name: /^user · URL/ }));
+  const panel = await screen.findByRole("complementary", {
+    name: "HTTP step",
   });
-  fireEvent.click(within(panel).getByRole("button", { name: "Save upstream" }));
-  expect(
-    await within(panel).findByText(/Another version was saved first/),
-  ).toBeTruthy();
+  const upstream = line(panel);
+  expect(within(upstream).getByText("Use https.")).toBeTruthy();
+  expect(within(panel).getAllByText("Use https.")).toHaveLength(1);
+  await waitFor(() => expect(document.activeElement).toBe(upstream));
 });
 
-test("Discard puts the version the step pins back", async () => {
+// One in its responses opens its Parameters, as it has no + Response to
+// open, with the line above saying it; one about the step as a whole shows
+// once, above its id.
+test("a problem in what a step uses opens its Parameters, and one in no field shows once", async () => {
   library(version(users, 2));
-  renderEditor(using, [], { "u-1@2": users });
-  const panel = await openStep("user");
-  fireEvent.click(
-    await within(panel).findByRole("button", { name: "Edit upstream" }),
+  renderEditor(
+    using,
+    [
+      {
+        pointer: "/nodes/0/outputs",
+        code: "invalid_outputs",
+        detail: "the responses don't fit",
+      },
+      { pointer: "/nodes/0", code: "invalid_node", detail: "it can't run" },
+    ],
+    { "u-1@2": users },
   );
-  await waitFor(() => expect(url().matches(":disabled")).toBe(false));
-  fireEvent.change(url(), {
-    target: { value: "https://elsewhere.example.com" },
+  fireEvent.click(await screen.findByRole("button", { name: "2 problems" }));
+  const list = await screen.findByRole("complementary", { name: "Problems" });
+  fireEvent.click(
+    within(list).getByRole("button", { name: /^user · Responses/ }),
+  );
+  const panel = await screen.findByRole("complementary", {
+    name: "HTTP step",
   });
-  fireEvent.click(within(panel).getByRole("button", { name: "Discard" }));
-  await waitFor(() => expect(url().matches(":disabled")).toBe(true));
-  expect(url()).toHaveProperty("value", users.request.url);
+  expect(
+    within(panel)
+      .getByRole("tab", { name: /^Parameters/ })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(
+    within(line(panel)).getByText("The responses don't fit."),
+  ).toBeTruthy();
+  expect(within(panel).getAllByText("It can't run.")).toHaveLength(1);
+  expect(within(line(panel)).queryByText("It can't run.")).toBeNull();
 });
 
 test("Add HTTP step offers the library, and the step uses the upstream's latest version", async () => {
@@ -786,11 +802,11 @@ test("a step that uses a workflow is drawn by its name, and gives its input's fi
   const panel = await openStep("greet");
   expect(await within(panel).findByText("Greeter")).toBeTruthy();
   expect(within(panel).getByText("· r1")).toBeTruthy();
-  expect(
-    within(panel)
-      .getByRole("link", { name: "Open workflow" })
-      .getAttribute("href"),
-  ).toBe("/workflows/w-greeter");
+  const open = within(line(panel, "Workflow")).getByRole("link", {
+    name: "Open workflow, opens in a new tab",
+  });
+  expect(open.getAttribute("href")).toBe("/workflows/w-greeter");
+  expect(open.getAttribute("target")).toBe("_blank");
   expect(
     within(panel).queryByRole("button", { name: "Edit upstream" }),
   ).toBeNull();

@@ -1,10 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { ExternalLinkIcon } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import {
   JsonBlock,
   MappingField,
@@ -12,71 +12,48 @@ import {
 } from "@/features/editor/components/mapping-field";
 import { Sends } from "@/features/editor/components/step-body";
 import { parents, updateNode } from "@/features/editor/edits";
-import {
-  asErrors,
-  atStep,
-  useProblems,
-} from "@/features/editor/hooks/use-problems";
+import { asErrors, useProblems } from "@/features/editor/hooks/use-problems";
 import { usePreview } from "@/features/editor/hooks/use-preview";
+import { ofUsed, type Place } from "@/features/editor/problems";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 import {
   inputOf,
   pin,
   pinCalled,
-  sameUpstream,
-  upstreamOf,
   versionKey,
 } from "@/features/editor/upstreams";
 import {
   fetchCalled,
   fetchVersion,
-  useSaveUpstream,
   useUpstream,
   useUsedWorkflow,
 } from "@/features/editor/hooks/use-upstreams";
 import type { components } from "@/gen/schema";
-import { ApiError } from "@/lib/api";
 import { routes } from "@/router";
 
 type Preview = components["schemas"]["Preview"];
 
-// A parameter's name, as an upstream names it (plan 07).
-const NAME = /^[a-z][a-z0-9_]{0,63}$/;
+// onLine is a problem a step's line shows: in what the step uses.
+const onLine = (index: number) => (p: Place) =>
+  p.on === "step" && p.index === index && ofUsed(p.field);
 
-// UpstreamLine says which upstream a step uses, at which version, offers a
-// newer one, and edits the upstream in place (plan 07): Edit unlocks the
-// step's request and responses, previewed over this workflow, Save upstream
-// makes the next version, which the step moves to, once something's
-// changed, and Discard puts the pinned version back. A step pinned to an
-// older version takes the newest before it's edited, so an edit never
-// undoes another.
+// UpstreamLine says which upstream a step uses, at which version, with its
+// call, offers a newer version, and opens the upstream, which is changed
+// only on its page (plan 07). That opens in a new tab, so the draft stays as
+// it is here; back on this tab, the library is asked again, and a version
+// saved there is offered.
 export function UpstreamLine({ index }: { index: number }) {
   const uses = useEditor((s) => s.draft.nodes[index]?.uses);
   const upstream = uses?.upstream ?? "";
   const version = uses?.version ?? 0;
-  const id = useEditor((s) => s.draft.nodes[index]?.id ?? "");
   const pinned = useEditor((s) =>
     uses ? s.versions[versionKey(uses)] : undefined,
   );
-  const editing = useEditor((s) => s.upstreamEdit?.node === id);
-  const unchanged = useEditor((s) => {
-    const n = s.draft.nodes[index];
-    const parameters = s.upstreamEdit?.parameters;
-    return (
-      !n ||
-      !parameters ||
-      !pinned ||
-      sameUpstream(upstreamOf(n, parameters), pinned)
-    );
-  });
-  const editUpstream = useEditor((s) => s.editUpstream);
   const addVersion = useEditor((s) => s.addVersion);
   const edit = useEditor((s) => s.edit);
-  const editor = useEditorStore();
   const client = useQueryClient();
   const library = useUpstream(upstream);
-  const save = useSaveUpstream();
-  const problems = useProblems(atStep(index, "uses"));
+  const problems = useProblems(onLine(index));
   const [failed, setFailed] = useState<string[]>([]);
   if (!uses) return null;
   const name = library.data?.upstream.name ?? upstream;
@@ -85,51 +62,22 @@ export function UpstreamLine({ index }: { index: number }) {
 
   async function take(next: number) {
     const to = { upstream, version: next };
-    const v = await fetchVersion(client, to);
-    addVersion(versionKey(to), v.definition);
-    edit((d) => updateNode(d, index, (n) => pin(n, to, v.definition)));
-  }
-
-  async function saveUpstream() {
-    const state = editor.getState();
-    const node = state.draft.nodes[index];
-    const parameters = state.upstreamEdit?.parameters;
-    if (!uses || !node || !parameters) return;
     try {
-      const saved = await save.mutateAsync({
-        id: upstream,
-        base: version,
-        upstream: upstreamOf(node, parameters),
-      });
-      const to = { upstream, version: saved.version };
-      addVersion(versionKey(to), saved.definition);
-      edit((d) => updateNode(d, index, (n) => pin(n, to, saved.definition)));
-      editUpstream(undefined);
+      const v = await fetchVersion(client, to);
+      addVersion(versionKey(to), v.definition);
+      edit((d) => updateNode(d, index, (n) => pin(n, to, v.definition)));
       setFailed([]);
-    } catch (err) {
-      setFailed(
-        err instanceof ApiError && err.status === 412
-          ? [
-              "Another version was saved first. Discard, take it, and edit again.",
-            ]
-          : err instanceof ApiError && err.problem?.errors?.length
-            ? err.problem.errors.map((e) => `${e.pointer}: ${e.detail}`)
-            : ["Couldn't save the upstream. Try again."],
-      );
+    } catch {
+      setFailed([`Couldn't get v${next}. Try again.`]);
     }
-  }
-
-  function discard() {
-    if (uses && pinned)
-      edit((d) => updateNode(d, index, (n) => pin(n, uses, pinned)));
-    editUpstream(undefined);
-    setFailed([]);
   }
 
   return (
     <section
       id="step-upstream"
       aria-label="Upstream"
+      // The problem list takes the cursor here.
+      tabIndex={-1}
       className="flex flex-col gap-2 rounded-md border p-3 text-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -138,20 +86,7 @@ export function UpstreamLine({ index }: { index: number }) {
           <span className="text-muted-foreground">· v{version}</span>
         </p>
         <div className="flex gap-1">
-          {editing ? (
-            <>
-              <Button variant="ghost" size="sm" onClick={discard}>
-                Discard
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => void saveUpstream()}
-                disabled={save.isPending || unchanged}
-              >
-                Save upstream
-              </Button>
-            </>
-          ) : newer ? (
+          {newer && (
             <Button
               variant="outline"
               size="sm"
@@ -159,25 +94,21 @@ export function UpstreamLine({ index }: { index: number }) {
             >
               Use v{latest}
             </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!pinned}
-              onClick={() =>
-                pinned &&
-                editUpstream({ node: id, parameters: pinned.parameters ?? [] })
-              }
-            >
-              Edit upstream
-            </Button>
           )}
+          <Link
+            to={routes.upstream(upstream)}
+            target="_blank"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Open upstream
+            <ExternalLinkIcon aria-hidden />
+            <span className="sr-only">, opens in a new tab</span>
+          </Link>
         </div>
       </div>
-      {editing && (
-        <p className="text-muted-foreground">
-          Its request and responses are open. Save upstream makes v{version + 1}
-          , which this step then uses.
+      {pinned && (
+        <p className="font-mono text-xs break-all text-muted-foreground">
+          {pinned.request.method} {pinned.request.url}
         </p>
       )}
       <FieldError
@@ -191,8 +122,8 @@ export function UpstreamLine({ index }: { index: number }) {
 }
 
 // WorkflowLine says which workflow a step uses, at which revision, offers
-// the one it serves when that's newer, and opens it (plan 07). A workflow
-// is edited on its own page, so there's no editing in place.
+// the one it serves when that's newer, and opens it, in a new tab as an
+// upstream opens (plan 07). A workflow is changed on its own page.
 export function WorkflowLine({ index }: { index: number }) {
   const uses = useEditor((s) => s.draft.nodes[index]?.uses);
   const addCalled = useEditor((s) => s.addCalled);
@@ -201,7 +132,7 @@ export function WorkflowLine({ index }: { index: number }) {
   const workflow = uses?.workflow ?? "";
   const revision = uses?.revision ?? 0;
   const used = useUsedWorkflow(workflow);
-  const problems = useProblems(atStep(index, "uses"));
+  const problems = useProblems(onLine(index));
   const [failed, setFailed] = useState<string[]>([]);
   if (!uses) return null;
   const name = used.data?.workflow.name ?? workflow;
@@ -223,6 +154,8 @@ export function WorkflowLine({ index }: { index: number }) {
     <section
       id="step-upstream"
       aria-label="Workflow"
+      // The problem list takes the cursor here.
+      tabIndex={-1}
       className="flex flex-col gap-2 rounded-md border p-3 text-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -242,9 +175,12 @@ export function WorkflowLine({ index }: { index: number }) {
           )}
           <Link
             to={routes.workflow(workflow)}
+            target="_blank"
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             Open workflow
+            <ExternalLinkIcon aria-hidden />
+            <span className="sr-only">, opens in a new tab</span>
           </Link>
         </div>
       </div>
@@ -381,22 +317,13 @@ function Calls({ preview: p }: { preview: Preview }) {
 }
 
 // StepParameters gives each parameter of the upstream a step uses a value,
-// JSONata over the run, previewed as the request it makes. While the
-// upstream is edited, parameters can be added and removed.
+// JSONata over the run, previewed as the request it makes.
 export function StepParameters({ index }: { index: number }) {
-  const id = useEditor((s) => s.draft.nodes[index]?.id ?? "");
-  const edit = useEditor((s) => s.upstreamEdit);
-  const editUpstream = useEditor((s) => s.editUpstream);
   const pinned = useEditor((s) => {
     const uses = s.draft.nodes[index]?.uses;
     return uses ? s.versions[versionKey(uses)] : undefined;
   });
-  const editing = edit?.node === id;
-  const names = (editing ? edit.parameters : (pinned?.parameters ?? [])).map(
-    (p) => p.name,
-  );
-  const [added, setAdded] = useState("");
-  const taken = names.includes(added);
+  const names = (pinned?.parameters ?? []).map((p) => p.name);
 
   return (
     <div className="flex flex-col gap-5">
@@ -406,51 +333,8 @@ export function StepParameters({ index }: { index: number }) {
         </p>
       )}
       {names.map((name) => (
-        <div key={name} className="flex flex-col gap-1">
-          <ParameterField index={index} name={name} />
-          {editing && (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="self-end"
-              aria-label={`Remove the parameter ${name}`}
-              onClick={() =>
-                editUpstream({
-                  node: id,
-                  parameters: edit.parameters.filter((p) => p.name !== name),
-                })
-              }
-            >
-              Remove
-            </Button>
-          )}
-        </div>
+        <ParameterField key={name} index={index} name={name} />
       ))}
-      {editing && (
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!NAME.test(added) || taken) return;
-            editUpstream({
-              node: id,
-              parameters: [...edit.parameters, { name: added }],
-            });
-            setAdded("");
-          }}
-        >
-          <Input
-            aria-label="Add a parameter"
-            className="font-mono"
-            placeholder="user_id"
-            value={added}
-            onChange={(e) => setAdded(e.target.value)}
-          />
-          <Button type="submit" variant="outline" size="sm">
-            Add
-          </Button>
-        </form>
-      )}
     </div>
   );
 }

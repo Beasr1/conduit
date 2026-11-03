@@ -461,6 +461,94 @@ day, as you agreed, the editor and the library stopped reaching into each
 other's code: the queries both use moved to `lib/`, and the upstream's
 page, built from the editor's step parts, into the editor.
 
+**F. A step shows what it owns** (your call, 2026-11-04: "now whole
+workflow step ui can be simplified right. if its just upstream"; asked
+then, an upstream is no longer edited from a step, which reverses C's
+answer of 2026-11-02). Accepted as drafted the same day, a new tab your
+pick over this one.
+
+Every new HTTP step uses an upstream (C2), yet its panel still shows what
+is the upstream's: its request in five locked tabs, each response's sample
+locked, and Edit upstream, Save upstream and Discard to change it from the
+step. What a step keeps is 2 above: which upstream at which version, a
+value for each parameter, a line from each response, and its Unhandled.
+Its panel shows those and opens the upstream for the rest, as a step that
+uses a workflow opens the workflow (D). Figma's instances work so with a
+library's components: "It's not possible to push overrides to components
+in another file, including published libraries"; you "use the Go to main
+component action to open the library file" ✓. n8n's Execute Sub-workflow
+node picks a workflow and gives it inputs, and its docs describe no way to
+edit the workflow from the node ✓.
+
+- [x] The step's line: the upstream's name and version, its call in small
+      type, `GET https://users.example.com/v1/users/{{ user_id }}`, Use vN
+      when a newer version is out, and Open upstream. Edit upstream, Save
+      upstream and Discard go, and so does adding or removing a parameter
+      from the step.
+- [x] One row of tabs: Parameters, 2xx and each response, Unhandled. The
+      Request tab and its row go, as the parameters already preview the
+      request they make. The card's request block opens Parameters, as a
+      workflow step's opens Input, and what a run sent moves there.
+- [x] A response's tab: the sample the step gets, as JSON rather than a
+      locked form, and where its lines go.
+- [x] The card names the upstream and version under the step's id, as a
+      workflow step's names its workflow and revision: plan 11's brief has
+      a plain name first and what it calls in small type.
+- [x] A problem in the upstream's own fields, which only a version saved
+      before a newer check could have, shows on the line, by Open
+      upstream.
+- [x] The workflow's header stops waiting on an upstream open in place.
+- [x] Tests first. The browser tests edit an upstream on its page: the
+      Done flow gives crm's upstream its body there, and the library test
+      saves version 3 there.
+- [x] Mutation checks, CLAUDE.md and this plan, and a walk in Chromium
+      through nginx, light and dark, desktop and phone, the PNGs sent.
+
+Unchanged: the upstream's page keeps its editor, built from the same step
+parts, and the preview's `upstreams` field, which the page previews
+through; a step with a request of its own keeps its form, and Save as
+upstream moves it; nothing on the server changes. What goes with editing
+in place: keeping a run's answer as the upstream's sample, which a run's
+tab offered while the upstream was open. A sample is changed on the
+upstream's page, and fetching one there is already planned (Moved here
+from 04).
+
+Decided with it:
+- **Open upstream opens a new tab**, and so does Open workflow, which the
+  link says, as WCAG's G201 asks, since a new tab "can be disorienting"
+  ✓. The draft stays where it was. In the same tab, the leave dialog
+  offers only Stay or Leave, so a draft would be saved before each trip,
+  a revision each time. Back on the workflow's tab, the step offers the
+  new version: when a window has focus again and its data is stale,
+  TanStack Query "automatically requests fresh data for you in the
+  background" ✓.
+- The 42px overflow at phone width stays put off (05); the walk says
+  whether an upstream step still has it.
+
+As built: a step that uses an upstream or a workflow opens on its
+Parameters or Input, as its request block does, and so does a response
+part it can't add; what a run sent is at their top. The line's call is in
+the code font and wraps rather than widening the panel. The link says
+", opens in a new tab" in its name, beside its icon, as the card says
+", the response it got". The card takes the upstream's name from the
+version the editor fetched as it opened, so it's there at once. A
+response's tab reads its sample, body, status and headers, or says to add
+one on the upstream's page. A problem in what a step uses shows on the
+line (`ofUsed`), and the problem list takes the cursor there: the line can
+take focus now, which also fixed the cursor going nowhere for a problem
+in `uses`, before. Use vN said nothing when the version didn't come; it
+says so now. The upstream's page is the one place an upstream changes, so
+its 412 got the test the step's had. Gone with editing in place: Edit
+upstream, Save upstream and Discard, the locked Request and its disabled
+`fieldset`, + Response on a step that uses one, the header's "Save or
+discard the upstream first", and `isLocked`. Headless Chromium keeps
+every page visible and fires no `visibilitychange` when another tab
+closes, checked first-hand, so the browser tests fire it coming back
+(`backFrom`). Mutation checks: 25 in the web code, 21 caught at first;
+three tests for the four that survived (a step opened on a response it
+can't add, a problem with no field shown once, the line's words cleared
+once Use vN works) catch them all.
+
 ### Open questions
 
 - Taking a newer version in every workflow at once, as Zapier migrates:
@@ -523,3 +611,12 @@ page, built from the editor's step parts, into the editor.
     https://docs.n8n.io/flow-logic/subworkflows/
   - Logic Apps, nested workflows and the Response action ✓:
     https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-http-endpoint
+- A step shows what it owns (2026-11-04):
+  - Figma, editing main components ✓:
+    https://help.figma.com/hc/en-us/articles/360038665934
+  - n8n, the Execute Sub-workflow node ✓:
+    https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.executeworkflow/
+  - WCAG technique G201, warning before a new window ✓:
+    https://www.w3.org/WAI/WCAG22/Techniques/general/G201
+  - TanStack Query, refetching on window focus ✓:
+    https://tanstack.com/query/latest/docs/framework/react/guides/window-focus-refetching

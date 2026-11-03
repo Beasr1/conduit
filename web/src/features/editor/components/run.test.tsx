@@ -345,9 +345,10 @@ test("a step's tabs say what it sent and got, and what it got can be kept as the
   ).toHaveProperty("value", '{\n  "content-type": "application/json"\n}');
 });
 
-// A step that uses an upstream has the upstream's samples, so what it got
-// is kept as one by editing the upstream (plan 07).
-test("what a step that uses an upstream got is kept as a sample only by editing the upstream", async () => {
+// A step that uses an upstream says what a run sent under its Parameters,
+// as it has no Request; and its samples are the upstream's, changed on its
+// page, so what it got isn't kept as one here (plan 07).
+test("a step that uses an upstream says what a run sent under its Parameters, and keeps no sample", async () => {
   const [user, ...rest] = branched.nodes;
   const users = {
     parameters: [{ name: "user_id" }],
@@ -357,21 +358,21 @@ test("what a step that uses an upstream got is kept as a sample only by editing 
     },
     outputs: user?.outputs,
   };
+  const v1 = {
+    upstream: {
+      id: "u-1",
+      name: "Users API",
+      latest_version: 1,
+      created_at: at(0),
+    },
+    version: 1,
+    definition: users,
+    provenance: { actor: "token" },
+    created_at: at(0),
+  };
   server.use(
-    http.get("/api/v1/upstreams/u-1", () =>
-      HttpResponse.json({
-        upstream: {
-          id: "u-1",
-          name: "Users API",
-          latest_version: 1,
-          created_at: at(0),
-        },
-        version: 1,
-        definition: users,
-        provenance: { actor: "token" },
-        created_at: at(0),
-      }),
-    ),
+    http.get("/api/v1/upstreams/u-1", () => HttpResponse.json(v1)),
+    http.get("/api/v1/upstreams/u-1/versions/1", () => HttpResponse.json(v1)),
   );
   renderEditor(
     {
@@ -395,6 +396,11 @@ test("what a step that uses an upstream got is kept as a sample only by editing 
   fireEvent.click(
     within(screen.getByTestId("rf__node-user")).getByText("user"),
   );
+  expect(
+    within(
+      await screen.findByRole("tabpanel", { name: "Parameters" }),
+    ).getByText("In this run: 404, 82 ms"),
+  ).toBeTruthy();
   fireEvent.click(await screen.findByRole("tab", { name: "404" }));
   const got = screen.getByRole("tabpanel", { name: "404" });
   expect(
@@ -404,7 +410,9 @@ test("what a step that uses an upstream got is kept as a sample only by editing 
     within(got).queryByRole("button", { name: "Keep as the 404 sample" }),
   ).toBeNull();
   expect(
-    within(got).getByText(/edit the upstream to keep this as one/),
+    within(got).getByText(
+      "Its samples are the upstream's: change them on its page.",
+    ),
   ).toBeTruthy();
 });
 

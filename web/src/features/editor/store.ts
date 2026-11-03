@@ -22,9 +22,9 @@ type Definition = components["schemas"]["Definition"];
 type Upstream = components["schemas"]["Upstream"];
 type Parameter = components["schemas"]["Parameter"];
 
-// An upstream being edited in place, from a step that uses it (plan 07): its
-// request, responses and samples are the step's in the draft, and its
-// parameters these.
+// An upstream being edited on its page (plan 07): its request, responses
+// and samples are the page's one step's in the draft, and its parameters
+// these.
 export interface UpstreamEdit {
   node: string;
   parameters: Parameter[];
@@ -125,13 +125,7 @@ export function createEditorStore(
     called,
     addCalled: (key, c) => set((s) => ({ called: { ...s.called, [key]: c } })),
     upstreamEdit,
-    // + Response goes when the edit does: a step's responses are then its
-    // upstream's again.
-    editUpstream: (upstreamEdit) =>
-      set((s) => ({
-        upstreamEdit,
-        part: !upstreamEdit && s.part === "add" ? "request" : s.part,
-      })),
+    editUpstream: (upstreamEdit) => set({ upstreamEdit }),
     moved: step,
     moving: {},
     selected: { nodes: [], edges: [] },
@@ -262,12 +256,4 @@ export function useEditorStore(): EditorStore {
 // re-renders only when that slice changes.
 export function useEditor<T>(selector: (state: EditorState) => T): T {
   return useStore(useEditorStore(), selector);
-}
-
-// isLocked says whether step i's request and responses are its upstream's,
-// shown but not edited: it uses one, which isn't being edited in place
-// (plan 07).
-export function isLocked(s: EditorState, i: number): boolean {
-  const n = s.draft.nodes[i];
-  return n?.uses !== undefined && s.upstreamEdit?.node !== n.id;
 }

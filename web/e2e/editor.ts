@@ -39,6 +39,28 @@ export async function open(page: Page, id: string) {
   return panel;
 }
 
+// upstreamTab opens the upstream a step uses on its page, in the new tab
+// Open upstream opens, as an upstream is changed only there (plan 07).
+export async function upstreamTab(panel: Locator): Promise<Page> {
+  const opened = panel.page().context().waitForEvent("page");
+  await panel.getByRole("link", { name: "Open upstream" }).click();
+  const tab = await opened;
+  await tab.waitForLoadState();
+  return tab;
+}
+
+// backFrom closes the upstream's tab and goes back to the editor's. A
+// browser tells a page it's seen again, which asks the library again;
+// headless Chromium keeps every page visible and tells none, so it's told
+// here.
+export async function backFrom(tab: Page, page: Page) {
+  await tab.close();
+  await page.bringToFront();
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("visibilitychange", { bubbles: true })),
+  );
+}
+
 // Publish waits until every step's failures are decided (plan 12):
 // failsTheRun has them fail the run, and failsInto joins them to an answer,
 // which the step's Unhandled then names, as the line is drawn only while

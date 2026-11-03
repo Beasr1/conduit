@@ -25,7 +25,7 @@ import {
   REQUEST_FIELDS,
   type StepField,
 } from "@/features/editor/problems";
-import { isLocked, useEditor } from "@/features/editor/store";
+import { useEditor } from "@/features/editor/store";
 import { versionKey } from "@/features/editor/upstreams";
 
 // Where each kind of step shows its problems: under its fields, or, for a
@@ -42,8 +42,6 @@ const fieldsOf: Record<string, ReadonlySet<StepField | undefined>> = {
     "outputs",
     "unhandled",
     "unhandled_body",
-    "uses",
-    "with",
   ]),
   transform: new Set(["id", "expr", "unhandled", "unhandled_body"]),
 };
@@ -52,12 +50,14 @@ const unknownKind = new Set<StepField | undefined>(["id", "kind"]);
 // StepSettings edits one step: its id, then what its kind has. An HTTP step
 // has a tab per block it's drawn as: Request, the call and its body; 2xx and
 // each response it lists, with its sample and what follows it; one to add
-// a response; then Unhandled, what takes its failures. One that uses a
-// workflow (plan 07) has its Input in place of its Request, and its
-// responses are the workflow's answers. The tab open is the
-// editor's part, so a click on a block opens its tab. Its fields are keyed
-// by the step's place in the draft rather than its id, so renaming the step
-// doesn't remount them under the cursor.
+// a response; then Unhandled, what takes its failures. One that uses an
+// upstream or a workflow (plan 07) shows only what it keeps: its line says
+// which it uses and opens it, its Parameters, or a workflow's Input, take
+// the place of a Request, and its responses are what it uses, read but not
+// changed here. The tab open is the editor's part, so a click on a block
+// opens its tab. Its fields are keyed by the step's place in the draft
+// rather than its id, so renaming the step doesn't remount them under the
+// cursor.
 export function StepSettings({ index }: { index: number }) {
   const kind: string = useEditor((s) => s.draft.nodes[index]?.kind ?? "");
   const part = useEditor((s) => s.part);
@@ -67,24 +67,21 @@ export function StepSettings({ index }: { index: number }) {
       (s.draft.nodes[index]?.outputs ?? []).map((o) => o.status),
     ),
   );
-  // A step that uses an upstream (plan 07) has its request and responses
-  // from it: locked, unless the upstream is being edited in place.
   const uses = useEditor((s) => s.draft.nodes[index]?.uses !== undefined);
   const calls = useEditor(
     (s) => s.draft.nodes[index]?.uses?.workflow !== undefined,
   );
-  const locked = useEditor((s) => isLocked(s, index));
-  // The forms keep what's typed, so a step moved to another version, or an
-  // upstream opened or put away, draws them afresh from the draft.
+  // The forms keep what's typed, so a step moved to another version draws
+  // them afresh from the draft.
   const formKey = useEditor((s) => {
     const n = s.draft.nodes[index];
-    return n?.uses
-      ? `${versionKey(n.uses)}:${s.upstreamEdit?.node === n.id}`
-      : "own";
+    return n?.uses ? versionKey(n.uses) : "own";
   });
-  const shown = fieldsOf[kind] ?? unknownKind;
+  // A problem in what a step uses shows on its line, by what opens it.
+  const shown = (field: StepField | undefined) =>
+    uses ? field !== undefined : (fieldsOf[kind] ?? unknownKind).has(field);
   const elsewhere = useProblems(
-    (p) => p.on === "step" && p.index === index && !shown.has(p.field),
+    (p) => p.on === "step" && p.index === index && !shown(p.field),
   );
   const mine = (p: Place): p is Extract<Place, { on: "step" }> =>
     p.on === "step" && p.index === index;
@@ -102,8 +99,9 @@ export function StepSettings({ index }: { index: number }) {
       {kind === "http" && (
         <Tabs
           key={`http-${index}`}
-          // Its request block, on the canvas, opens its Input.
-          value={calls && part === "request" ? "with" : part}
+          // Its request block, on the canvas, opens its Parameters or Input,
+          // as it has no Request, and so does a response it can't add.
+          value={uses && (part === "request" || part === "add") ? "with" : part}
           onValueChange={(value: string) => setPart(value)}
         >
           {/* The list grows as its tabs wrap, and each tab is as tall as
@@ -114,7 +112,7 @@ export function StepSettings({ index }: { index: number }) {
             activateOnFocus
             className="flex-wrap group-data-horizontal/tabs:h-auto [&>[data-slot=tabs-trigger]]:h-auto"
           >
-            {uses && (
+            {uses ? (
               <TabsTrigger value="with">
                 {calls ? "Input" : "Parameters"}
                 <Marked
@@ -123,8 +121,7 @@ export function StepSettings({ index }: { index: number }) {
                   }
                 />
               </TabsTrigger>
-            )}
-            {!calls && (
+            ) : (
               <TabsTrigger value="request">
                 Request
                 <Marked
@@ -149,7 +146,7 @@ export function StepSettings({ index }: { index: number }) {
                 <Marked where={(p) => mine(p) && p.output === j} />
               </TabsTrigger>
             ))}
-            {!locked && (
+            {!uses && (
               <TabsTrigger value="add" aria-label="Add a response">
                 + Response
               </TabsTrigger>
@@ -166,27 +163,27 @@ export function StepSettings({ index }: { index: number }) {
           </TabsList>
           {/* Each stays mounted while hidden, so what's typed survives a
               switch. */}
-          {uses && (
+          {uses ? (
             <TabsContent value="with" keepMounted>
+              <RunSent index={index} />
               {calls ? (
                 <StepInput key={formKey} index={index} />
               ) : (
                 <StepParameters key={formKey} index={index} />
               )}
             </TabsContent>
-          )}
-          {!calls && (
+          ) : (
             <TabsContent value="request" keepMounted>
               <RunSent index={index} />
-              <HttpStepForm key={formKey} index={index} locked={locked} />
-              {!uses && <SaveAsUpstream index={index} />}
+              <HttpStepForm index={index} />
+              <SaveAsUpstream index={index} />
             </TabsContent>
           )}
           <TabsContent value="2xx" keepMounted>
             <StepOutput
               key={formKey}
               index={index}
-              locked={locked}
+              locked={uses}
               calls={calls}
             />
           </TabsContent>
@@ -196,12 +193,12 @@ export function StepSettings({ index }: { index: number }) {
                 key={formKey}
                 index={index}
                 status={status}
-                locked={locked}
+                locked={uses}
                 calls={calls}
               />
             </TabsContent>
           ))}
-          {!locked && (
+          {!uses && (
             <TabsContent value="add" keepMounted>
               <AddResponse index={index} taken={statuses} />
             </TabsContent>

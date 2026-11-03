@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  backFrom,
   connect,
   failsInto,
   failsTheRun,
@@ -9,6 +10,7 @@ import {
   said,
   signIn,
   step,
+  upstreamTab,
 } from "./editor";
 import { stack } from "./stack";
 
@@ -84,18 +86,20 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
       await failsTheRun(await open(page, id));
   }
 
-  // crm sends a body. Edited in place, its upstream takes a parameter, body,
-  // sent as its JSON body, and saves that as its version 2; the value the
-  // step gives body waits.
+  // crm sends a body. Its upstream is changed on its page, in a new tab,
+  // so the draft stays here: it takes a parameter, body, sent as its JSON
+  // body, and saves that as its version 2, which the step takes back here;
+  // the value it gives body waits.
   let panel = await open(page, "crm");
-  await panel.getByRole("button", { name: "Edit upstream" }).click();
-  await panel.getByRole("tab", { name: "Parameters" }).click();
-  await panel.getByRole("textbox", { name: "Add a parameter" }).fill("body");
-  await panel.getByRole("button", { name: "Add", exact: true }).click();
-  await panel.getByRole("tab", { name: "Request" }).click();
-  await panel.getByRole("tab", { name: "Body" }).click();
-  await panel.getByRole("textbox", { name: "Request body" }).fill("body");
-  await panel.getByRole("button", { name: "Save upstream" }).click();
+  const upstream = await upstreamTab(panel);
+  await upstream.getByRole("textbox", { name: "Add a parameter" }).fill("body");
+  await upstream.getByRole("button", { name: "Add", exact: true }).click();
+  await upstream.getByRole("tab", { name: "Body" }).click();
+  await upstream.getByRole("textbox", { name: "Request body" }).fill("body");
+  await upstream.getByRole("button", { name: "Save version 2" }).click();
+  await expect(upstream.getByText(/^Version 2/)).toBeVisible();
+  await backFrom(upstream, page);
+  await panel.getByRole("button", { name: "Use v2" }).click();
   await expect(panel.getByText("· v2")).toBeVisible();
 
   // Four connections, and crm joined to the 200 answer.

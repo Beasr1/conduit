@@ -115,7 +115,7 @@ export function RunSent({ index }: { index: number }) {
 // RunGot is what an HTTP step got back in the run shown, in the tab of the
 // response it was (status, none for 2xx), beside that response's sample,
 // with a way to keep it as the sample. kept is told once it's been kept.
-// Locked, the samples are an upstream's, kept by editing it, or a step
+// Locked, the samples are an upstream's, changed on its page, or a step
 // that uses a workflow has none (plan 07).
 export function RunGot({
   index,
@@ -153,8 +153,7 @@ export function RunGot({
         </p>
       ) : calls ? null : locked ? (
         <p className="text-muted-foreground">
-          Its samples are the upstream&apos;s: edit the upstream to keep this as
-          one.
+          Its samples are the upstream&apos;s: change them on its page.
         </p>
       ) : (
         <Button

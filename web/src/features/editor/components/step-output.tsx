@@ -6,7 +6,10 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { StepConnections } from "@/features/editor/components/step-connections";
 import { RunGot } from "@/features/editor/components/step-run";
-import { StepSample } from "@/features/editor/components/step-sample";
+import {
+  StepSample,
+  UpstreamSample,
+} from "@/features/editor/components/step-sample";
 import { addOutput } from "@/features/editor/edits";
 import { whole } from "@/features/editor/fields";
 import { useEditor } from "@/features/editor/store";
@@ -27,7 +30,7 @@ export function StepOutput({
 }: {
   index: number;
   status?: number;
-  // Its sample is an upstream's, unless the upstream is being edited
+  // Its sample is an upstream's, read here and changed on its page
   // (plan 07); what follows it stays the workflow's.
   locked?: boolean;
   // It uses a workflow, whose own preview stands in for a sample.
@@ -48,12 +51,12 @@ export function StepOutput({
           Previews take it from the workflow&apos;s own preview, over the input
           this step gives it.
         </p>
+      ) : locked ? (
+        <UpstreamSample index={index} status={status} />
       ) : (
         // Keyed by the times a run's answer was kept, so its fields show
         // the sample they were given rather than what was typed before.
-        <fieldset disabled={locked} className="contents">
-          <StepSample key={kept} index={index} status={status} />
-        </fieldset>
+        <StepSample key={kept} index={index} status={status} />
       )}
       <StepConnections index={index} on={status} />
     </div>

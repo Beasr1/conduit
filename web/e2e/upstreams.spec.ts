@@ -1,14 +1,23 @@
 import { expect, test } from "@playwright/test";
 
-import { connect, failsInto, open, said, signIn, step } from "./editor";
+import {
+  backFrom,
+  connect,
+  failsInto,
+  open,
+  said,
+  signIn,
+  step,
+  upstreamTab,
+} from "./editor";
 import { stack } from "./stack";
 
 // Plan 07's upstreams: one is made in the library from its call, and given
 // a 404 on its own page; a step uses it, giving its parameter a value, and
-// answers through its responses, run and served; it's edited in place, a
-// new version the step then pins; and the library says who uses which
-// version.
-test("the library: make an upstream, use it from a step, run and serve it, edit it in place", async ({
+// answers through its responses, run and served; it's changed on its page,
+// in a new tab, a new version the step then takes; and the library says who
+// uses which version.
+test("the library: make an upstream, use it from a step, run and serve it, change it on its page", async ({
   page,
 }) => {
   const tag = Date.now().toString(36);
@@ -75,15 +84,18 @@ test("the library: make an upstream, use it from a step, run and serve it, edit 
   await expect(step(page, "user").locator("[data-part='404']")).toBeVisible();
   await expect(step(page, "user").getByText("+ Add")).toHaveCount(0);
 
-  // It gives the parameter a value, and its request is locked.
+  // It's drawn by the upstream's name, and its line has the call: a step
+  // has no Request of its own to change. It gives the parameter a value.
+  await expect(step(page, "user").getByText(`${users} · v2`)).toBeVisible();
   let panel = await open(page, "user");
   await expect(panel.getByText("· v2")).toBeVisible();
-  await panel.getByRole("tab", { name: "Parameters" }).click();
-  await panel.getByLabel("user_id", { exact: true }).fill("input.user_id");
-  await panel.getByRole("tab", { name: "Request" }).click();
   await expect(
-    panel.getByRole("textbox", { name: "URL", exact: true }),
-  ).toBeDisabled();
+    panel.getByText(`GET ${stack.upstream}/users/{{ user_id }}`, {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(panel.getByRole("tab", { name: "Request" })).toHaveCount(0);
+  await panel.getByLabel("user_id", { exact: true }).fill("input.user_id");
   await failsInto(page, "user", 502);
   await connect(page, "user", "Response 404", "404");
   await connect(page, "user", "Response 200");
@@ -126,24 +138,24 @@ test("the library: make an upstream, use it from a step, run and serve it, edit 
   expect(served.status()).toBe(200);
   expect(await served.json()).toMatchObject({ id: "7", name: "User 7" });
 
-  // Edited in place, the upstream's next version is saved, and the step
-  // moves to it; while it's open, the workflow waits.
+  // Changed on its page, in a new tab, the upstream's next version is
+  // saved; back here, the step offers it, and takes it.
   await page.getByRole("button", { name: "Close run" }).click();
   panel = await open(page, "user");
-  await panel.getByRole("button", { name: "Edit upstream" }).click();
-  await expect(
-    page.getByText(/Save or discard the upstream first/),
-  ).toBeVisible();
-  await expect(step(page, "user").getByText("+ Add")).toBeVisible();
-  await panel.getByRole("tab", { name: "Request" }).click();
-  await panel
+  const upstream = await upstreamTab(panel);
+  await upstream
     .getByRole("textbox", { name: "URL", exact: true })
     .fill(`${stack.upstream}/users/{{ user_id }}?from=v3`);
-  await panel.getByRole("button", { name: "Save upstream" }).click();
+  await upstream.getByRole("button", { name: "Save version 3" }).click();
+  await expect(upstream.getByText(/^Version 3/)).toBeVisible();
+  await backFrom(upstream, page);
+  await panel.getByRole("button", { name: "Use v3" }).click();
   await expect(panel.getByText("· v3")).toBeVisible();
   await expect(
-    panel.getByRole("textbox", { name: "URL", exact: true }),
-  ).toBeDisabled();
+    panel.getByText(`GET ${stack.upstream}/users/{{ user_id }}?from=v3`, {
+      exact: true,
+    }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   // The header's revision, not the one served.

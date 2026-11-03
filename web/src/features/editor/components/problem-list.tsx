@@ -4,6 +4,7 @@ import { handlesOf, RESPONSE, toFlow } from "@/features/editor/flow";
 import { useProblems } from "@/features/editor/hooks/use-problems";
 import {
   type Found,
+  ofUsed,
   type Place,
   REQUEST_FIELDS,
   requestTabOf,
@@ -72,6 +73,9 @@ function fieldOf(
   switch (place.on) {
     case "step": {
       const { field, name } = place;
+      // What a step uses is changed where its line opens it (plan 07).
+      if (draft.nodes[place.index]?.uses && ofUsed(field))
+        return "step-upstream";
       if ((field === "headers" || field === "query") && name !== undefined) {
         const map = draft.nodes[place.index]?.request?.[field] ?? {};
         const row = Object.keys(map).indexOf(name);

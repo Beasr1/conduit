@@ -155,6 +155,37 @@ test("a problem the check finds shows under its field", async () => {
   expect(await screen.findByText("not a name")).toBeTruthy();
 });
 
+// Its page is the one place an upstream is changed (plan 07), so a version
+// saved there first, from another tab, is said rather than saved over.
+test("Save version says when a newer version was saved elsewhere", async () => {
+  answerPage();
+  server.use(
+    http.put("/api/v1/upstreams/u-1", () =>
+      HttpResponse.json(
+        { status: 412, code: "version_mismatch", detail: "moved on" },
+        {
+          status: 412,
+          headers: { "Content-Type": "application/problem+json" },
+        },
+      ),
+    ),
+  );
+  renderAt(<UpstreamPage version={version(users, 2)} />, {
+    path: "/upstreams/u-1",
+  });
+  fireEvent.change(await screen.findByRole("textbox", { name: "URL" }), {
+    target: { value: "https://users.example.com/v2/users/{{ user_id }}" },
+  });
+  const save = screen.getByRole("button", { name: "Save version 3" });
+  await waitFor(() => expect(save.matches(":disabled")).toBe(false));
+  fireEvent.click(save);
+  expect(
+    await screen.findByText(
+      "A newer version was saved elsewhere. Reload the page to edit it.",
+    ),
+  ).toBeTruthy();
+});
+
 // Delete asks again, deletes the upstream with every version, and goes
 // back to the library (plan 07).
 test("Delete asks again, then deletes it and goes back to the library", async () => {

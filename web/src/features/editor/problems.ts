@@ -55,6 +55,22 @@ export const REQUEST_FIELDS: ReadonlySet<StepField | undefined> = new Set([
   "idempotent",
 ]);
 
+// The fields a step that uses an upstream or a workflow keeps as its own
+// (plan 07).
+const OWN_FIELDS: ReadonlySet<StepField> = new Set([
+  "id",
+  "with",
+  "unhandled",
+  "unhandled_body",
+]);
+
+// ofUsed says whether a problem in a step that uses an upstream or a
+// workflow is about what it uses: which one, or a field of it, changed
+// where that's opened, so the step's line shows it.
+export function ofUsed(field: StepField | undefined): boolean {
+  return field !== undefined && !OWN_FIELDS.has(field);
+}
+
 // The parts of the response a problem can be about: its line (from, and on
 // for the block it leaves from, Unhandled's among them),
 // its answers as a whole, one answer's status or schema, its error body, and

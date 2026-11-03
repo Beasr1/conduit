@@ -61,6 +61,11 @@ export function fetchVersion(
   return client.fetchQuery(versionQuery(uses));
 }
 
+// useVersion is one version of an upstream, as fetchVersion gets it.
+export function useVersion(uses: Uses) {
+  return useQuery(versionQuery(uses));
+}
+
 // revisionQuery is a revision of a workflow a step uses (plan 07), which
 // never changes.
 function revisionQuery(uses: Uses) {

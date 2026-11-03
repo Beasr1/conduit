@@ -73,6 +73,12 @@ the API is `/api` on the page's own origin.
   pages' boundary, so the header stays when a page fails.
 - A route that renders nothing still names a `Component` (`Outlet`, or
   `() => null` behind a loader that redirects), or React Router warns.
+- A link from the editor to what a step uses, an upstream or a workflow,
+  opens a new tab, so the draft stays, and says so: an icon, and ", opens
+  in a new tab" in its name (sources.md). The editor's queries ask again
+  when its tab is seen again, as TanStack Query refetches on
+  `visibilitychange`; headless Chromium never fires it, so a browser test
+  does (`backFrom`).
 
 ## TypeScript
 
@@ -242,11 +248,13 @@ the API is `/api` on the page's own origin.
   chosen for its failures (plan 12), and `unhandled_body`, its body.
 - A step that uses an upstream (plan 07) is filled from its version as the
   editor opens (`fill`) and stripped before anything is sent (`strip`), so
-  it's drawn and edited as any HTTP step while the server gets only `uses`
-  and `with`. Its request and responses are locked (`isLocked`) unless the
-  upstream is being edited in place: a disabled `fieldset` round the tab
-  panels, never round a tab list, as HTML disables every button in one,
-  tabs too (sources.md). Its body reads its parameters, the preview's
+  it's drawn and previewed as any HTTP step while the server gets only
+  `uses` and `with`. Its panel shows only what it keeps: its line names
+  the upstream and version, with its call, and opens it; its Parameters
+  take the place of a Request; and its responses' samples are read, not
+  a disabled form (`UpstreamSample`). A problem in the upstream's own
+  fields shows on the line (`ofUsed`). The upstream's page edits it in a
+  step's tabs, where its body reads its parameters, the preview's
   `parameters`, not the run's input.
 - A step that uses a workflow (plan 07) is filled from the revision it
   pins, kept in the store's `called` by `versionKey` (`wf:` and the id):
@@ -325,8 +333,9 @@ the API is `/api` on the page's own origin.
   the tour, checking a stop sits beside its part, which jsdom can't show,
   and it decides each step's failures before it publishes (plan 12). A
   second test covers plan 07's library (`web/e2e/upstreams.spec.ts`): it
-  makes an upstream, uses it from a step, runs and publishes it, edits it
-  in place, and saves a step's request as one; and a published workflow
+  makes an upstream, uses it from a step, runs and publishes it, changes
+  it on its page in a new tab (`upstreamTab`, `backFrom`), and saves a
+  step's request as one; and a published workflow
   is picked as a step, reopened, run and served. Their steps, such as
   opening a panel or joining a block, are in `web/e2e/editor.ts`. A
   button is named exactly where another's name holds it, Save beside Save
