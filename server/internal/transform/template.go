@@ -64,7 +64,7 @@ func (t *Template) Reads() (paths [][]string, complete bool) {
 	complete = true
 	for _, p := range t.parts {
 		if p.raw != nil {
-			some, all := p.raw.ReferencedPaths()
+			some, all := analysed(p.raw, p.text).ReferencedPaths()
 			paths, complete = append(paths, some...), complete && all
 		}
 	}
@@ -81,7 +81,7 @@ func (t *Template) Render(ctx context.Context, doc []byte, escape func(prefix, v
 			b.WriteString(p.text)
 			continue
 		}
-		v, err := p.e.EvalBytes(ctx, doc)
+		v, err := p.e.EvalBytesWithVars(ctx, doc, varsOf(ctx))
 		if err != nil {
 			return "", fmt.Errorf("{{ %s }}: %w", p.text, err)
 		}

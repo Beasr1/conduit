@@ -193,6 +193,66 @@ func (e RunSummaryTrigger) Valid() bool {
 	}
 }
 
+// Constant defines model for Constant.
+type Constant struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// HasPrevious Whether undo has a value to put back.
+	HasPrevious bool `json:"has_previous"`
+
+	// Name How expressions read it, $const.name.
+	Name       string     `json:"name"`
+	Provenance Provenance `json:"provenance"`
+
+	// Secret Its value is never sent back, and runs mask it wherever they're kept or shown.
+	Secret bool `json:"secret"`
+
+	// UpdatedAt When its value was last set.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Value A plain constant's value. Absent for a secret one.
+	Value string `json:"value,omitempty,omitzero"`
+}
+
+// ConstantList defines model for ConstantList.
+type ConstantList struct {
+	Constants []Constant `json:"constants"`
+}
+
+// ConstantUpstreamUse defines model for ConstantUpstreamUse.
+type ConstantUpstreamUse struct {
+	Name       string `json:"name"`
+	UpstreamID string `json:"upstream_id"`
+
+	// Version The upstream's latest version, which reads the constant.
+	Version int `json:"version"`
+}
+
+// ConstantUsers defines model for ConstantUsers.
+type ConstantUsers struct {
+	Upstreams []ConstantUpstreamUse `json:"upstreams"`
+	Workflows []ConstantWorkflowUse `json:"workflows"`
+}
+
+// ConstantWorkflowUse defines model for ConstantWorkflowUse.
+type ConstantWorkflowUse struct {
+	Name string `json:"name"`
+
+	// Revision The workflow's latest revision, which reads the constant.
+	Revision   int    `json:"revision"`
+	WorkflowID string `json:"workflow_id"`
+}
+
+// CreateConstant defines model for CreateConstant.
+type CreateConstant struct {
+	// Name A lower-case letter, then up to 63 lower-case letters, digits and underscores.
+	Name   string `json:"name"`
+	Secret bool   `json:"secret,omitempty,omitzero"`
+
+	// Value 1 to 4096 characters.
+	Value string `json:"value"`
+}
+
 // CreateUpstream defines model for CreateUpstream.
 type CreateUpstream struct {
 	// Definition A saved API endpoint and how it's handled, one version of it (plan 07). Every save makes a new version, which never changes, and a step that uses the upstream pins one. Its templates and body read its parameters by name, {{ user_id }}, and each step that uses it gives them values.
@@ -540,6 +600,15 @@ type RunSummaryStatus string
 // RunSummaryTrigger editor, from POST /v1/workflows/{id}/runs; served, from POST /serve/{slug}; workflow, from a step of another run that uses the workflow (plan 07), which parent names.
 type RunSummaryTrigger string
 
+// SetConstant defines model for SetConstant.
+type SetConstant struct {
+	// Secret True makes a plain constant secret, for good. False or absent leaves it as it is.
+	Secret bool `json:"secret,omitempty,omitzero"`
+
+	// Value 1 to 4096 characters.
+	Value string `json:"value"`
+}
+
 // SignIn defines model for SignIn.
 type SignIn struct {
 	// Token The API token.
@@ -666,6 +735,9 @@ type WorkflowRevision struct {
 	Workflow Workflow `json:"workflow"`
 }
 
+// ConstantName defines model for ConstantName.
+type ConstantName = string
+
 // RunID defines model for RunID.
 type RunID = string
 
@@ -734,6 +806,12 @@ type SaveDraftParams struct {
 // ServeWorkflowJSONRequestBody defines body for ServeWorkflow for application/json ContentType.
 type ServeWorkflowJSONRequestBody = ServeWorkflowJSONBody
 
+// CreateConstantJSONRequestBody defines body for CreateConstant for application/json ContentType.
+type CreateConstantJSONRequestBody = CreateConstant
+
+// SetConstantJSONRequestBody defines body for SetConstant for application/json ContentType.
+type SetConstantJSONRequestBody = SetConstant
+
 // PreviewDefinitionJSONRequestBody defines body for PreviewDefinition for application/json ContentType.
 type PreviewDefinitionJSONRequestBody = PreviewRequest
 
@@ -775,6 +853,24 @@ type ServerInterface interface {
 	// ServeWorkflow Run a workflow's published revision and answer with the answer it gives
 	// (POST /serve/{slug})
 	ServeWorkflow(w http.ResponseWriter, r *http.Request, slug string)
+	// ListConstants List the constants, by name
+	// (GET /v1/constants)
+	ListConstants(w http.ResponseWriter, r *http.Request)
+	// CreateConstant Make a constant
+	// (POST /v1/constants)
+	CreateConstant(w http.ResponseWriter, r *http.Request)
+	// DeleteConstant Delete a constant nothing reads
+	// (DELETE /v1/constants/{name})
+	DeleteConstant(w http.ResponseWriter, r *http.Request, name ConstantName)
+	// SetConstant Change a constant's value, keeping the one before
+	// (PUT /v1/constants/{name})
+	SetConstant(w http.ResponseWriter, r *http.Request, name ConstantName)
+	// UndoConstant Put a constant's previous value back
+	// (POST /v1/constants/{name}/undo)
+	UndoConstant(w http.ResponseWriter, r *http.Request, name ConstantName)
+	// ListConstantUsers List the workflows and upstreams whose latest revision or version reads a constant
+	// (GET /v1/constants/{name}/users)
+	ListConstantUsers(w http.ResponseWriter, r *http.Request, name ConstantName)
 	// PreviewDefinition Preview what a step would read and send, or whether a connection is taken, over the samples
 	// (POST /v1/preview)
 	PreviewDefinition(w http.ResponseWriter, r *http.Request)
@@ -900,6 +996,138 @@ func (siw *ServerInterfaceWrapper) ServeWorkflow(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ServeWorkflow(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListConstants operation middleware
+func (siw *ServerInterfaceWrapper) ListConstants(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConstants(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateConstant operation middleware
+func (siw *ServerInterfaceWrapper) CreateConstant(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateConstant(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteConstant operation middleware
+func (siw *ServerInterfaceWrapper) DeleteConstant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ConstantName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteConstant(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetConstant operation middleware
+func (siw *ServerInterfaceWrapper) SetConstant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ConstantName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetConstant(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UndoConstant operation middleware
+func (siw *ServerInterfaceWrapper) UndoConstant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ConstantName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UndoConstant(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListConstantUsers operation middleware
+func (siw *ServerInterfaceWrapper) ListConstantUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ConstantName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConstantUsers(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1749,6 +1977,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/upstreams/{id}", wrapper.SaveUpstream)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}/users", wrapper.ListUpstreamUsers)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}/versions/{version}", wrapper.GetUpstreamVersion)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/constants", wrapper.ListConstants)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/constants", wrapper.CreateConstant)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/constants/{name}", wrapper.DeleteConstant)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/constants/{name}", wrapper.SetConstant)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/constants/{name}/undo", wrapper.UndoConstant)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/constants/{name}/users", wrapper.ListConstantUsers)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs", wrapper.ListRuns)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}", wrapper.GetRun)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}/events", wrapper.StreamRunEvents)
@@ -1962,6 +2196,362 @@ func (response ServeWorkflow508ApplicationProblemPlusJSONResponse) VisitServeWor
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(508)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConstantsRequestObject struct {
+}
+
+type ListConstantsResponseObject interface {
+	VisitListConstantsResponse(w http.ResponseWriter) error
+}
+
+type ListConstants200JSONResponse ConstantList
+
+func (response ListConstants200JSONResponse) VisitListConstantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConstants401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListConstants401ApplicationProblemPlusJSONResponse) VisitListConstantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateConstantRequestObject struct {
+	Body *CreateConstantJSONRequestBody
+}
+
+type CreateConstantResponseObject interface {
+	VisitCreateConstantResponse(w http.ResponseWriter) error
+}
+
+type CreateConstant201ResponseHeaders struct {
+	Location string
+}
+
+type CreateConstant201JSONResponse struct {
+	Body    Constant
+	Headers CreateConstant201ResponseHeaders
+}
+
+func (response CreateConstant201JSONResponse) VisitCreateConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Location", fmt.Sprint(response.Headers.Location))
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateConstant401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CreateConstant401ApplicationProblemPlusJSONResponse) VisitCreateConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateConstant409ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateConstant409ApplicationProblemPlusJSONResponse) VisitCreateConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateConstant422ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateConstant422ApplicationProblemPlusJSONResponse) VisitCreateConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteConstantRequestObject struct {
+	Name ConstantName `json:"name"`
+}
+
+type DeleteConstantResponseObject interface {
+	VisitDeleteConstantResponse(w http.ResponseWriter) error
+}
+
+type DeleteConstant204Response struct {
+}
+
+func (response DeleteConstant204Response) VisitDeleteConstantResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteConstant401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteConstant401ApplicationProblemPlusJSONResponse) VisitDeleteConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteConstant404ApplicationProblemPlusJSONResponse Problem
+
+func (response DeleteConstant404ApplicationProblemPlusJSONResponse) VisitDeleteConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteConstant409ApplicationProblemPlusJSONResponse Problem
+
+func (response DeleteConstant409ApplicationProblemPlusJSONResponse) VisitDeleteConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetConstantRequestObject struct {
+	Name ConstantName `json:"name"`
+	Body *SetConstantJSONRequestBody
+}
+
+type SetConstantResponseObject interface {
+	VisitSetConstantResponse(w http.ResponseWriter) error
+}
+
+type SetConstant200JSONResponse Constant
+
+func (response SetConstant200JSONResponse) VisitSetConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetConstant401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response SetConstant401ApplicationProblemPlusJSONResponse) VisitSetConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetConstant404ApplicationProblemPlusJSONResponse Problem
+
+func (response SetConstant404ApplicationProblemPlusJSONResponse) VisitSetConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetConstant422ApplicationProblemPlusJSONResponse Problem
+
+func (response SetConstant422ApplicationProblemPlusJSONResponse) VisitSetConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UndoConstantRequestObject struct {
+	Name ConstantName `json:"name"`
+}
+
+type UndoConstantResponseObject interface {
+	VisitUndoConstantResponse(w http.ResponseWriter) error
+}
+
+type UndoConstant200JSONResponse Constant
+
+func (response UndoConstant200JSONResponse) VisitUndoConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UndoConstant401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response UndoConstant401ApplicationProblemPlusJSONResponse) VisitUndoConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UndoConstant404ApplicationProblemPlusJSONResponse Problem
+
+func (response UndoConstant404ApplicationProblemPlusJSONResponse) VisitUndoConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UndoConstant409ApplicationProblemPlusJSONResponse Problem
+
+func (response UndoConstant409ApplicationProblemPlusJSONResponse) VisitUndoConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConstantUsersRequestObject struct {
+	Name ConstantName `json:"name"`
+}
+
+type ListConstantUsersResponseObject interface {
+	VisitListConstantUsersResponse(w http.ResponseWriter) error
+}
+
+type ListConstantUsers200JSONResponse ConstantUsers
+
+func (response ListConstantUsers200JSONResponse) VisitListConstantUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConstantUsers401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListConstantUsers401ApplicationProblemPlusJSONResponse) VisitListConstantUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConstantUsers404ApplicationProblemPlusJSONResponse Problem
+
+func (response ListConstantUsers404ApplicationProblemPlusJSONResponse) VisitListConstantUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3417,6 +4007,24 @@ type StrictServerInterface interface {
 	// ServeWorkflow Run a workflow's published revision and answer with the answer it gives
 	// (POST /serve/{slug})
 	ServeWorkflow(ctx context.Context, request ServeWorkflowRequestObject) (ServeWorkflowResponseObject, error)
+	// ListConstants List the constants, by name
+	// (GET /v1/constants)
+	ListConstants(ctx context.Context, request ListConstantsRequestObject) (ListConstantsResponseObject, error)
+	// CreateConstant Make a constant
+	// (POST /v1/constants)
+	CreateConstant(ctx context.Context, request CreateConstantRequestObject) (CreateConstantResponseObject, error)
+	// DeleteConstant Delete a constant nothing reads
+	// (DELETE /v1/constants/{name})
+	DeleteConstant(ctx context.Context, request DeleteConstantRequestObject) (DeleteConstantResponseObject, error)
+	// SetConstant Change a constant's value, keeping the one before
+	// (PUT /v1/constants/{name})
+	SetConstant(ctx context.Context, request SetConstantRequestObject) (SetConstantResponseObject, error)
+	// UndoConstant Put a constant's previous value back
+	// (POST /v1/constants/{name}/undo)
+	UndoConstant(ctx context.Context, request UndoConstantRequestObject) (UndoConstantResponseObject, error)
+	// ListConstantUsers List the workflows and upstreams whose latest revision or version reads a constant
+	// (GET /v1/constants/{name}/users)
+	ListConstantUsers(ctx context.Context, request ListConstantUsersRequestObject) (ListConstantUsersResponseObject, error)
 	// PreviewDefinition Preview what a step would read and send, or whether a connection is taken, over the samples
 	// (POST /v1/preview)
 	PreviewDefinition(ctx context.Context, request PreviewDefinitionRequestObject) (PreviewDefinitionResponseObject, error)
@@ -3604,6 +4212,172 @@ func (sh *strictHandler) ServeWorkflow(w http.ResponseWriter, r *http.Request, s
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ServeWorkflowResponseObject); ok {
 		if err := validResponse.VisitServeWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListConstants operation middleware
+func (sh *strictHandler) ListConstants(w http.ResponseWriter, r *http.Request) {
+	var request ListConstantsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConstants(ctx, request.(ListConstantsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConstants")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConstantsResponseObject); ok {
+		if err := validResponse.VisitListConstantsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateConstant operation middleware
+func (sh *strictHandler) CreateConstant(w http.ResponseWriter, r *http.Request) {
+	var request CreateConstantRequestObject
+
+	var body CreateConstantJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateConstant(ctx, request.(CreateConstantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateConstant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateConstantResponseObject); ok {
+		if err := validResponse.VisitCreateConstantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteConstant operation middleware
+func (sh *strictHandler) DeleteConstant(w http.ResponseWriter, r *http.Request, name ConstantName) {
+	var request DeleteConstantRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteConstant(ctx, request.(DeleteConstantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteConstant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteConstantResponseObject); ok {
+		if err := validResponse.VisitDeleteConstantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetConstant operation middleware
+func (sh *strictHandler) SetConstant(w http.ResponseWriter, r *http.Request, name ConstantName) {
+	var request SetConstantRequestObject
+
+	request.Name = name
+
+	var body SetConstantJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetConstant(ctx, request.(SetConstantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetConstant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetConstantResponseObject); ok {
+		if err := validResponse.VisitSetConstantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UndoConstant operation middleware
+func (sh *strictHandler) UndoConstant(w http.ResponseWriter, r *http.Request, name ConstantName) {
+	var request UndoConstantRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UndoConstant(ctx, request.(UndoConstantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UndoConstant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UndoConstantResponseObject); ok {
+		if err := validResponse.VisitUndoConstantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListConstantUsers operation middleware
+func (sh *strictHandler) ListConstantUsers(w http.ResponseWriter, r *http.Request, name ConstantName) {
+	var request ListConstantUsersRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConstantUsers(ctx, request.(ListConstantUsersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConstantUsers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConstantUsersResponseObject); ok {
+		if err := validResponse.VisitListConstantUsersResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -3,8 +3,9 @@
 Status: loops accepted 2026-11-02 as drafted (your call), the hop count in
 `tracestate` (your pick over baggage and a header of our own); built the
 same day (as built, below).
-The rest of 06 (credentials, other limits, observability) is planned when
-it starts.
+Constants, 06's credentials widened, accepted as drafted and built
+2026-11-04 (below). The rest of 06 (other limits, observability) is planned when it
+starts.
 ✓ means checked first-hand on the source, all on 2026-11-02.
 
 ## Goal
@@ -243,6 +244,243 @@ the server's cap kept its count against its workflow's share, and a test
 now catches that; clearing a count of zero from the map changed nothing, so
 it went. On the web, 2, both caught.
 
+## Constants (built 2026-11-04)
+
+Your call, 2026-11-04: constants, as some values "has PI data" and
+"can't be hardcoded in workflows", and a value used in many places should
+"rotate from one place only". Asked then, your answers: plain and secret
+constants, both kept encrypted; a secret readable by expressions too, not
+only by an upstream's request; and the previous value kept when one
+changes. This is 06's credentials, widened: D14 says credentials are by
+reference (06), and plan 08 counts on "the API never returns secret
+values".
+
+### Goal
+
+A value many workflows or upstreams use, an API key, an account number, a
+person's details, is saved once, by name, and every expression reads it by
+that name, `$const.crm_token`. Changing it changes what every run from then
+on uses, with no new version and no Publish. A secret one is never shown
+again once saved, and is masked wherever Conduit keeps or shows what a run
+did.
+
+### What's wrong today
+
+A key or a person's details typed into an upstream stay in that version
+for good: versions never change, and a pinned upstream can't be deleted
+(07, E). The value shows in the editor, in API responses and in previews,
+and plan 08's agents would read it in the definitions. Run records hide
+headers and query parameters whose names look secret, `Authorization` or a
+name holding "key" or "token" (`server/internal/runner/record.go:104`), but
+a value in a body, a path or a header named otherwise, a person's details
+among them, is stored as sent. Changing it means a new version, and every
+workflow republished.
+
+### What others do
+
+| Tool | Plain values | Secrets |
+|---|---|---|
+| GitHub Actions | "Variables provide a way to store and reuse non-sensitive configuration information" ✓ | "If you need greater security for sensitive information, such as passwords, use secrets instead" ✓; "automatically redacts the contents of all GitHub secrets that are printed to workflow logs" ✓ |
+| n8n | "read-only variables that you can use to store and reuse values in n8n workflows", read as `$vars.<variable-name>`; "All variables are strings" ✓ | kept apart, as credentials |
+| Windmill | every variable encrypted with a key per workspace ✓ | "Secrets are encrypted when stored on Windmill", not shown outside a script, and masked in job logs ✓ |
+| AWS Secrets Manager | | versions labelled current, previous and pending; "A secret always has a version labeled AWSCURRENT, and Secrets Manager returns that version by default" ✓ |
+
+OWASP's cheat sheet asks for all three: "regularly rotate secrets so that
+any stolen credentials will only work for a short time" ✓; a secret should
+"Never be logged (must implement either an encryption or masking approach
+in place to avoid logging plaintext secrets)" ✓; and "make sure that the
+storage backend of the orchestrator is encrypted and you manage the keys
+well" ✓.
+
+### Where I'd push back
+
+- **A constant follows its latest value, which pinning refused.** Plan 07
+  keeps "a published workflow never changes under its callers"; a constant
+  changes every published workflow that reads it at once, past Publish's
+  checks. For a value that must change everywhere together, a rotated key,
+  that's the point. The guards are Undo, the previous value kept, and Used
+  by, saying what reads it.
+- **A secret in expressions can be copied anywhere** (your call over an
+  upstream's request alone). Masking finds exact copies; a changed one, cut
+  or encoded, it can't, as GitHub warns: "Because there are multiple ways a
+  secret value can be transformed, this redaction is not guaranteed" ✓.
+
+### How it would work
+
+1. **A Constants page beside Upstreams**: each constant a name, a value,
+   secret or not, and Used by. Names are as parameters', `user_id`; values
+   are strings, as n8n's are.
+2. **Every expression reads one as `$const.name`**: a step's parameter
+   values, an upstream's request, a transform, a connection's condition,
+   an answer. It's bound when an expression is evaluated, gnata's
+   `EvalBytesWithVars` ✓, not put in the run's data, so `$` and `*` never
+   reach one, and the data a preview says a step reads doesn't hold one.
+3. **A run reads every constant once, as it starts**, so a run that's
+   going when one changes finishes on the values it started with.
+4. **A change keeps the value before it**, encrypted, and Undo puts that
+   back, so undoing a bad rotation needs nobody to remember the old secret.
+5. **Kept encrypted, plain ones too**, as Windmill does: AES-256-GCM under
+   a key in the server's settings, `CONDUIT_CONSTANTS_KEY`, never in the
+   database. `just setup` makes one.
+6. **A secret's value never leaves the server**: the API takes it but never
+   sends it back, and the page says only when it was set and by what.
+7. **Masked wherever a run is kept or shown**: before a run's records, a
+   log line, a problem or an answer is written, every exact copy of a
+   secret is replaced by `[secret crm_token]`, naming it without showing
+   it. The redaction by name records do now stays, as a value typed into a
+   header before constants still needs it. Previews never hold a secret: they bind each to that same stand-in,
+   so a preview shows the request a run would send, the stand-in in place.
+8. **Checked like the rest**: an expression naming a constant that isn't
+   there is a problem, `unknown_constant`, which Publish refuses. Deleting
+   one is refused while a saved revision or an upstream version reads it,
+   409 `constant_in_use`, as an upstream's is (07, E).
+
+### Drafted, yours to change
+
+- Both kinds read as `$const.name`: marking one secret changes how it's
+  kept and shown, not how it's read. Plain can become secret; secret can't
+  become plain, as that would show it: make a new one instead.
+- An answer masks a secret too, so a workflow can't hand one to its caller,
+  even on purpose; a value meant for callers is a plain constant.
+- A secret shorter than 8 characters is masked only where a whole string is
+  that value, as a short one would otherwise mask unrelated text; Windmill
+  masks only values of 8 or more ✓.
+- gnata's analysis counts a variable it doesn't bind as reading anything,
+  "a variable it doesn't bind" ✓, which would turn off the upstream check
+  that each expression reads only its parameters. Conduit finds `$const`
+  reads itself, outside strings and comments, which Used by and
+  `unknown_constant` need anyway, and checks the rest as now.
+
+### Steps
+
+Each phase ends with `just check` green, staged for you to commit. The
+store and the API came first, swapped with the engine as drafted: the
+runner's masking tests need real constants from the store, and nothing
+that runs locally is mocked.
+
+**A. The store and the API.**
+- [x] A table of constants, each value and the one before it encrypted;
+      the migration; `CONDUIT_CONSTANTS_KEY` in the settings and
+      `.env.example`, made by `just setup`.
+- [x] List, make, change, undo, delete (409 while one is read) and Used
+      by, in `openapi.yaml`; a secret's value never in a response.
+
+As built: each value and the one before it are sealed with AES-256-GCM, a
+random nonce before each, Go's `cipher.NewGCMWithRandomNonce` ✓, and the
+constant's name as associated data, so a value copied into another
+constant's row doesn't open there, tested. `store.Open` takes the key, and
+without one constants are refused (`ErrNoKey`); serving refuses to start
+without it. A change that changes nothing makes nothing, and making one
+secret alone keeps the value before as the one to go back to. Undo swaps
+the two, so undoing again redoes. `secret` in a change can only make a
+constant secret: JSON's absent and false read the same, so there's no
+asking for plain. What reads a constant is found by a pattern on each
+saved definition, `$const.name` with the name ending there: a read written
+another way, `$lookup($const, …)`, isn't found, and the same words inside a
+string are, which only keeps a constant longer. A delete holds back saves
+of revisions and versions (SHARE) while it checks, tested by a save held
+open. `just setup` adds a random key to `server/.env` when it has none,
+and the browser tests' server gets one of its own. Mutation checks: 22,
+20 caught at first; tests for the two that survived, a secret set to what
+it is and the words for a name taken, catch them both.
+
+**B. The engine.**
+- [x] `$const` bound in every evaluation, each run's values read once, as
+      it starts; previews bind each secret to its stand-in.
+- [x] Finding the constants an expression reads; `unknown_constant`; the
+      upstream check past `$const`.
+- [x] Masking every exact copy of a secret in what a run records, logs,
+      reports and answers, tested by a run whose records, logs and answer
+      are searched for the value afterwards.
+
+As built: the values travel in the run's context, as its trace does, and
+gnata binds them as `$const` where each expression is evaluated,
+`EvalBytesWithVars` ✓, so nothing else changed where expressions run. A
+run reads every constant once, as it's prepared. What an expression reads
+as `$const.name` is found in its source, outside strings, comments and
+backquoted names; gnata's own analysis then runs with `$const` bound in
+front of it, `($const := {}; …)`, so the upstream check still finds a
+parameter misnamed beside a constant. Reading `$const` whole,
+`$string($const)` or `$lookup($const, …)`, is a problem of its own,
+`whole_constants`: it would read every constant, and Used by couldn't say
+which. An upstream version reading a constant there isn't is refused, as a
+version with problems is. The runner masks each secret in the forms it's
+copied in: as text, as JSON writes it, escaping HTML or not, and as a
+query and a path escape it; longest first, so one inside another goes as
+the longer; and under 8 characters, only where a whole string is it. A
+failure's words are masked as it's made, so its events, records and answer
+agree. The run's input is kept masked, while the run reads it as it came.
+A constant can't be a URL's host, as a URL's placeholders sit in its path
+and query only (02). A constant that doesn't open, sealed under another
+key, fails the run, as it fails listing them, rather than the run going on
+without it. Found on the way: the test of concurrent saves of revisions
+passed a draft equal to its base, which since C4 changes nothing and
+succeeds, so it failed now and then; each draft is a change now. Mutation
+checks: 36, 35 caught at first; the test of masking longest first now
+lists secrets by name, as the store does, and catches the last.
+
+**C. The editor.**
+- [x] The Constants page beside Upstreams: make one, change it, Undo,
+      Delete, Used by; a secret's field write-only.
+- [x] The data a panel offers to insert lists `$const` names, a plain
+      one's value beside it; `unknown_constant` shown under its field.
+
+As built: the page is a table, a constant's name, its value or Secret,
+what reads it now, when it was set, and Change, Undo and Delete, each
+named for the constant it acts on. New constant takes a name, a value and
+Secret; Change starts from a plain value, empty for a secret, and can make
+a plain one secret, for good. Delete asks again, and when refused says what
+reads it. The list a screen reader is told is hidden while a dialog closes
+hid a test's mistake: a delete that left the row in place passed, until the
+row was looked for hidden too. Every field that takes JSONata offers the
+constants under the data it reads, `$const.name` beside a plain value or
+the word secret, inserted where the cursor is. The query is in
+`lib/constants.ts`, as the page and the editor both read it. An
+`unknown_constant` shows under its field, or, in a step that uses an
+upstream, on the step's line (07, F). Mutation checks: 18 in the web code,
+17 caught at first, and the last once the delete test looked past the
+hidden page.
+
+**D. The rest.**
+- [x] A browser test: a secret made, read in an upstream's header, run,
+      its record masked; changed, run again with no Publish; undone.
+- [x] Mutation checks, docs (CLAUDE.md, sources.md, web.md), and a walk
+      in Chromium through nginx, light and dark, desktop and phone.
+
+As built: the browser test (`web/e2e/constants.spec.ts`) makes a secret on
+the page and a plain constant through the API; an upstream reads the plain
+one in its path and the secret in a header. Served, the run answers User
+7, and its record has the header as `[secret token_…]`, the value nowhere.
+Changed on the page to 8, the next run answers User 8, with no Publish, and
+Undo puts 7 back. The walk in Chromium through nginx, light and dark,
+desktop and phone, found the header wider than a phone once it held a
+third list, on every page: on a narrow screen its lists now take a second
+row, under the name and the session, and the Constants page and the
+workflow list fit 320 px wide. The walk's constants were deleted after, as
+nothing read them.
+
+### Done means
+
+- A key two upstreams read is changed once, and the next run of each of
+  their workflows sends the new one, with no new version and no Publish.
+- No run record, log line, preview or answer holds an exact copy of a
+  secret, checked by searching everything a test run left behind.
+- The API never returns a secret's value; Undo puts the previous one back;
+  a constant something reads isn't deleted.
+- `just check` is green.
+
+### Open questions
+
+- Keys already typed into upstream versions stay there, as versions never
+  change. Moving off them takes a new version reading `$const`, then every
+  workflow taking it: 07's open question, moving every workflow to a newer
+  version at once. Next, or by hand?
+- Run records keep callers' inputs and APIs' answers too, which can carry
+  PI: a limit on how long they're kept, or redaction, is a task of its own.
+- Encrypting every value again under a new key, the key's own rotation:
+  later.
+- Who may see and change constants once there's more than one user (08).
+
 ## Sources
 
 - RFC 8586, `CDN-Loop`: https://www.rfc-editor.org/rfc/rfc8586 ✓
@@ -264,3 +502,17 @@ it went. On the web, 2, both caught.
 - The SRE book: https://sre.google/sre-book/addressing-cascading-failures/ ✓,
   https://sre.google/sre-book/handling-overload/ ✓
 - Go's spec on import cycles: https://go.dev/ref/spec#Import_declarations ✓
+- Constants (2026-11-04):
+  - GitHub Actions, variables ✓:
+    https://docs.github.com/en/actions/concepts/workflows-and-actions/variables
+  - GitHub Actions, secrets ✓:
+    https://docs.github.com/en/actions/concepts/security/secrets
+  - n8n, custom variables ✓: https://docs.n8n.io/code/variables/
+  - Windmill, variables and secrets ✓:
+    https://www.windmill.dev/docs/core_concepts/variables_and_secrets
+  - AWS Secrets Manager, versions and labels ✓:
+    https://docs.aws.amazon.com/secretsmanager/latest/userguide/whats-in-a-secret.html
+  - OWASP Secrets Management Cheat Sheet ✓:
+    https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+  - gnata v0.6.2, `EvalBytesWithVars` and `ReferencedPaths`, read in its
+    source ✓

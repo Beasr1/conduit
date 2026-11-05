@@ -19,3 +19,11 @@ export const upstreamKeys = {
     [...upstreamKeys.all, "version", id, version] as const,
   users: (id: string) => [...upstreamKeys.all, "users", id] as const,
 };
+
+// Constants (plan 06): the page lists and changes them, and the editor
+// offers them to expressions.
+export const constantKeys = {
+  all: ["constants"] as const,
+  list: () => [...constantKeys.all, "list"] as const,
+  users: (name: string) => [...constantKeys.all, "users", name] as const,
+};

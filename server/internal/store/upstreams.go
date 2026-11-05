@@ -234,7 +234,11 @@ func (s *Store) UpstreamUsers(ctx context.Context, id string) ([]UpstreamUse, er
 // store doesn't have is left out, and Resolve says so of the node that
 // uses it.
 func (s *Store) Deps(ctx context.Context, d *workflow.Definition) (workflow.Deps, error) {
-	deps := workflow.Deps{Versions: workflow.Versions{}, Revisions: workflow.Revisions{}}
+	known, err := s.ConstantNames(ctx)
+	if err != nil {
+		return workflow.Deps{}, err
+	}
+	deps := workflow.Deps{Versions: workflow.Versions{}, Revisions: workflow.Revisions{}, Constants: known}
 	asked := map[workflow.Uses]bool{}
 	for todo := []*workflow.Definition{d}; len(todo) > 0; {
 		var ups, wfs []workflow.Uses

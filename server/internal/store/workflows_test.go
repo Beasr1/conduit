@@ -125,7 +125,9 @@ func TestSaveRevision_ConcurrentSavesOnOneBase(t *testing.T) {
 	errs := make([]error, 8)
 	for i := range errs {
 		wg.Go(func() {
-			_, errs[i] = db.SaveRevision(context.Background(), w.ID, 1, def(i), person)
+			// Each a change: one equal to revision 1, def(1), would change
+			// nothing and succeed too, when it went first (plan 07, C4).
+			_, errs[i] = db.SaveRevision(context.Background(), w.ID, 1, def(i+2), person)
 		})
 	}
 	wg.Wait()

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"log/slog"
 	"maps"
 	"reflect"
@@ -10,6 +11,9 @@ import (
 )
 
 const dbURL = "postgres://conduit:pw@127.0.0.1:5432/conduit" //nolint:gosec // G101: a test URL; pw is a placeholder
+
+// key is a constants key, 32 bytes, as base64.
+var key = base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
 
 // env is the smallest valid environment plus extra.
 func env(extra map[string]string) func(string) (string, bool) {
@@ -49,6 +53,7 @@ func TestLoad_ReadsEveryVariable(t *testing.T) {
 		"CONDUIT_LOG_LEVEL":        "debug",
 		"CONDUIT_SHUTDOWN_TIMEOUT": "5s",
 		"CONDUIT_API_TOKEN":        token,
+		"CONDUIT_CONSTANTS_KEY":    key,
 
 		"CONDUIT_ALLOW_PRIVATE_NETWORKS": "true",
 		"CONDUIT_UPSTREAM_PORTS":         "443, 8443",
@@ -65,6 +70,7 @@ func TestLoad_ReadsEveryVariable(t *testing.T) {
 		ShutdownTimeout: 5 * time.Second,
 		DatabaseURL:     dbURL,
 		APIToken:        token,
+		ConstantsKey:    []byte(strings.Repeat("k", 32)),
 
 		AllowPrivateNetworks: true,
 		UpstreamPorts:        []uint16{443, 8443},
@@ -98,6 +104,7 @@ func TestLoad_RejectsInvalidValues(t *testing.T) {
 		{"zero run cap", map[string]string{"CONDUIT_MAX_RUNS": "0"}, "at least 1"},
 		{"unparsable stream cap", map[string]string{"CONDUIT_MAX_STREAMS": "lots"}, "CONDUIT_MAX_STREAMS"},
 		{"zero stream cap", map[string]string{"CONDUIT_MAX_STREAMS": "0"}, "CONDUIT_MAX_STREAMS: 0 must be at least 1"},
+		{"a key that isn't base64", map[string]string{"CONDUIT_CONSTANTS_KEY": "not base64!"}, "CONDUIT_CONSTANTS_KEY"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -117,6 +124,13 @@ func TestLoad_KeepsTheDatabasePasswordOutOfErrors(t *testing.T) {
 	}
 }
 
+func TestLoad_KeepsTheConstantsKeyOutOfErrors(t *testing.T) {
+	_, err := Load(env(map[string]string{"CONDUIT_CONSTANTS_KEY": "s3cret-key!"}))
+	if err == nil || strings.Contains(err.Error(), "s3cret") {
+		t.Errorf("Load() error = %v; want one without the key", err)
+	}
+}
+
 func TestLoad_ReportsEveryProblemAtOnce(t *testing.T) {
 	_, err := Load(env(map[string]string{
 		"CONDUIT_HTTP_ADDR":  "",
@@ -131,12 +145,30 @@ func TestLoad_ReportsEveryProblemAtOnce(t *testing.T) {
 
 func TestCheckServe_WantsALongToken(t *testing.T) {
 	for token, ok := range map[string]bool{"": false, "short": false, strings.Repeat("x", 32): true} {
-		cfg, err := Load(env(map[string]string{"CONDUIT_API_TOKEN": token}))
+		cfg, err := Load(env(map[string]string{"CONDUIT_API_TOKEN": token, "CONDUIT_CONSTANTS_KEY": key}))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := cfg.CheckServe(); (err == nil) != ok {
 			t.Errorf("CheckServe() with a %d-character token = %v, want ok=%v", len(token), err, ok)
+		}
+	}
+}
+
+func TestCheckServe_WantsAConstantsKey(t *testing.T) {
+	token := strings.Repeat("x", 32)
+	short := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 16)))
+	for k, ok := range map[string]bool{"": false, short: false, key: true} {
+		vars := map[string]string{"CONDUIT_API_TOKEN": token}
+		if k != "" {
+			vars["CONDUIT_CONSTANTS_KEY"] = k
+		}
+		cfg, err := Load(env(vars))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cfg.CheckServe(); (err == nil) != ok || err != nil && !strings.Contains(err.Error(), "CONDUIT_CONSTANTS_KEY") {
+			t.Errorf("CheckServe() with a %d-byte key = %v, want ok=%v", len(cfg.ConstantsKey), err, ok)
 		}
 	}
 }

@@ -50,6 +50,8 @@ function serveWorkflow(
     http.post("/api/v1/validate", () =>
       HttpResponse.json<Validation>({ problems: [] }),
     ),
+    // A step's fields offer the constants (plan 06): none here.
+    http.get("/api/v1/constants", () => HttpResponse.json({ constants: [] })),
     // A step's Preview tab asks as soon as the step is picked.
     http.post("/api/v1/preview", () =>
       HttpResponse.json<Preview>({

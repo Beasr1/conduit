@@ -25,6 +25,7 @@ import (
 	"github.com/Beasr1/conduit/server/internal/engine"
 	"github.com/Beasr1/conduit/server/internal/store"
 	"github.com/Beasr1/conduit/server/internal/trace"
+	"github.com/Beasr1/conduit/server/internal/transform"
 	"github.com/Beasr1/conduit/server/internal/upstream"
 	"github.com/Beasr1/conduit/server/internal/workflow"
 )
@@ -141,21 +142,21 @@ func (r *Runner) Start(ctx context.Context, workflowID string, revision int, inp
 		revision = w.LatestRevision
 	}
 	input = orNull(input)
-	p, err := r.prepare(ctx, w.ID, revision, input)
+	pr, err := r.prepare(ctx, w.ID, revision, input)
 	if err != nil {
 		return store.Run{}, err
 	}
-	run, err := r.begin(ctx, w.ID, revision, "editor", store.Parent{}, input)
+	run, err := r.begin(ctx, w.ID, revision, "editor", store.Parent{}, input, pr.mask)
 	if err != nil {
 		return store.Run{}, err
 	}
 	// Request values (the log's, say) stay; its cancellation doesn't.
-	runCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	runCtx, cancel := context.WithCancelCause(pr.bind(context.WithoutCancel(ctx)))
 	stopped := context.AfterFunc(r.stopping, func() { cancel(ErrStopped) })
 	go func() {
 		defer cancel(nil)
 		defer stopped()
-		r.execute(runCtx, r.editor, p, run)
+		r.execute(runCtx, r.editor, pr, run)
 	}()
 	return run, nil
 }
@@ -173,20 +174,20 @@ func (r *Runner) Serve(ctx context.Context, slug string, input json.RawMessage) 
 		return Outcome{}, fmt.Errorf("workflow %q: %w", slug, ErrNotPublished)
 	}
 	input = orNull(input)
-	p, err := r.prepare(ctx, w.ID, *w.PublishedRevision, input)
+	pr, err := r.prepare(ctx, w.ID, *w.PublishedRevision, input)
 	if err != nil {
 		return Outcome{}, err
 	}
-	run, err := r.begin(ctx, w.ID, *w.PublishedRevision, "served", store.Parent{}, input)
+	run, err := r.begin(ctx, w.ID, *w.PublishedRevision, "served", store.Parent{}, input, pr.mask)
 	if err != nil {
 		return Outcome{}, err
 	}
 	// Cancelled with a cause that says why, rather than context.Canceled.
-	runCtx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	runCtx, cancel := context.WithCancelCause(pr.bind(context.WithoutCancel(ctx)))
 	defer cancel(nil)
 	gone := context.AfterFunc(ctx, func() { cancel(ErrCallerGone) })
 	defer gone()
-	return r.execute(runCtx, r.served, p, run), nil
+	return r.execute(runCtx, r.served, pr, run), nil
 }
 
 // Call runs revision c.Revision of workflow c.Workflow for a step of run
@@ -199,15 +200,15 @@ func (r *Runner) Call(ctx context.Context, c engine.Call, input json.RawMessage)
 	t, _ := trace.From(traced(ctx))
 	ctx = trace.With(ctx, t.Next())
 	input = orNull(input)
-	p, err := r.prepare(ctx, c.Workflow, c.Revision, input)
+	pr, err := r.prepare(ctx, c.Workflow, c.Revision, input)
 	if err != nil {
 		return engine.Answer{}, refused(c, err)
 	}
-	run, err := r.begin(ctx, c.Workflow, c.Revision, "workflow", store.Parent{Run: c.Run, Node: c.Node}, input)
+	run, err := r.begin(ctx, c.Workflow, c.Revision, "workflow", store.Parent{Run: c.Run, Node: c.Node}, input, pr.mask)
 	if err != nil {
 		return engine.Answer{}, refused(c, err)
 	}
-	return answered(r.execute(ctx, r.editor, p, run))
+	return answered(r.execute(pr.bind(ctx), r.editor, pr, run))
 }
 
 // refused is the run of a workflow a step uses not starting, as the step's
@@ -358,7 +359,22 @@ func (r *Runner) ended(ctx context.Context, runID string) (store.Run, error) {
 }
 
 // prepare compiles a revision and checks input against its input_schema.
-func (r *Runner) prepare(ctx context.Context, workflowID string, revision int, input json.RawMessage) (*engine.Program, error) {
+// prepared is a run ready to begin: its program, and the constants it
+// reads, as they were when it was prepared (plan 06), with what masks the
+// secret ones.
+type prepared struct {
+	p      *engine.Program
+	values map[string]string
+	mask   masker
+}
+
+// bind is ctx with the run's constants, which every expression under it
+// reads as $const.
+func (pr *prepared) bind(ctx context.Context) context.Context {
+	return transform.WithConstants(ctx, pr.values)
+}
+
+func (r *Runner) prepare(ctx context.Context, workflowID string, revision int, input json.RawMessage) (*prepared, error) {
 	rev, err := r.store.Revision(ctx, workflowID, revision)
 	if err != nil {
 		return nil, err
@@ -374,7 +390,7 @@ func (r *Runner) prepare(ctx context.Context, workflowID string, revision int, i
 		return nil, err
 	}
 	rd, ps := workflow.Resolve(&d, deps, workflowID)
-	p, err := engine.Compile(rd)
+	p, err := engine.Compile(rd, deps.Constants)
 	var compiled workflow.Problems
 	if errors.As(err, &compiled) || len(ps) > 0 {
 		return nil, &InvalidError{Revision: revision, Problems: append(ps, compiled...)}
@@ -388,7 +404,15 @@ func (r *Runner) prepare(ctx context.Context, workflowID string, revision int, i
 	if ps := p.CheckInput(input); len(ps) > 0 {
 		return nil, &InputError{Problems: ps}
 	}
-	return p, nil
+	cs, err := r.store.Constants(ctx)
+	if err != nil {
+		return nil, err
+	}
+	values := make(map[string]string, len(cs))
+	for _, c := range cs {
+		values[c.Name] = c.Value
+	}
+	return &prepared{p: p, values: values, mask: newMasker(cs)}, nil
 }
 
 // traced is ctx with a trace: the caller's, or one the run starts.
@@ -402,7 +426,7 @@ func traced(ctx context.Context) context.Context {
 // begin takes a slot, one of the workflow's share, and records the run as
 // running, in its trace, called from parent if it's a step's; unless the
 // trace has gone round too often.
-func (r *Runner) begin(ctx context.Context, workflowID string, revision int, trigger string, parent store.Parent, input json.RawMessage) (store.Run, error) {
+func (r *Runner) begin(ctx context.Context, workflowID string, revision int, trigger string, parent store.Parent, input json.RawMessage, m masker) (store.Run, error) {
 	t, _ := trace.From(ctx)
 	if t.Hops >= trace.MaxHops {
 		return store.Run{}, ErrLoop
@@ -419,12 +443,14 @@ func (r *Runner) begin(ctx context.Context, workflowID string, revision int, tri
 		r.leave(workflowID)
 		return store.Run{}, ErrBusy
 	}
-	run, err := r.store.StartRun(ctx, workflowID, revision, trigger, t.ID, parent, input)
+	// Kept masked; the run itself reads the input as it came.
+	run, err := r.store.StartRun(ctx, workflowID, revision, trigger, t.ID, parent, m.json(input))
 	if err != nil {
 		<-r.slots
 		r.leave(workflowID)
 		return store.Run{}, err
 	}
+	run.Input = input
 	r.events.open(run.ID)
 	return run, nil
 }
@@ -457,7 +483,8 @@ const unhandledTimeout = 5 * time.Second
 
 // execute runs p and records it: each node as it ends, through the writer,
 // then the run. It frees the run's slot once the run is recorded.
-func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Program, run store.Run) Outcome {
+func (r *Runner) execute(ctx context.Context, e *engine.Engine, pr *prepared, run store.Run) Outcome {
+	p, m := pr.p, pr.mask
 	defer func() {
 		<-r.slots
 		r.leave(run.WorkflowID)
@@ -470,7 +497,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 	go func() {
 		defer close(written)
 		for n := range ends {
-			r.saveNode(rec, run.ID, n)
+			r.saveNode(rec, run.ID, n, m)
 		}
 	}()
 
@@ -485,7 +512,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 		if nr := ev.Result; nr != nil {
 			ne.HTTPStatus, ne.Took = nr.HTTPStatus, tookOf(nr.Took)
 			if nr.Status == engine.StatusFailed {
-				ne.Failure = r.failure(ctx, run.ID, ev.Node, nr.Err)
+				ne.Failure = r.failure(ctx, m, run.ID, ev.Node, nr.Err)
 				ne.Failure.Caught = nr.Caught
 				failures[ev.Node] = ne.Failure
 			}
@@ -509,7 +536,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 	var ne *engine.NodeError
 	switch {
 	case res.Status == engine.StatusSucceeded && res.ErrorFrom != "":
-		out.Output, out.Problem = r.passOn(rec, p, run, res, failures[res.ErrorFrom])
+		out.Output, out.Problem = r.passOn(rec, pr, run, res, failures[res.ErrorFrom])
 		output, truncated = capped(out.Output)
 	case res.Status == engine.StatusSucceeded:
 		output, truncated = capped(res.Output)
@@ -520,7 +547,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 		f.Node = ne.Node
 		out.Failure = &f
 	default: // the run's timeout, the output expression, or no answer
-		out.Failure = r.failure(ctx, run.ID, "", res.Err)
+		out.Failure = r.failure(ctx, m, run.ID, "", res.Err)
 	}
 	if out.Failure != nil {
 		errDoc, err = json.Marshal(out.Failure)
@@ -539,7 +566,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 		case err != nil:
 			// Its author sees why on the run; its caller gets the failure's
 			// own problem.
-			f.Detail += "; the error body failed too: " + err.Error()
+			f.Detail += "; the error body failed too: " + m.text(err.Error())
 			if errDoc, err = json.Marshal(f); err != nil {
 				r.log.ErrorContext(ctx, "encode a run's failure", "run", run.ID, "err", err)
 			}
@@ -548,6 +575,10 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 			output, truncated = capped(body)
 		}
 	}
+
+	// What it answers, and keeps, with no secret in it: a failure's words
+	// were masked as it was made.
+	output, out.Output = m.json(output), m.json(out.Output)
 
 	wctx, cancel := context.WithTimeout(rec, writeTimeout)
 	defer cancel()
@@ -569,7 +600,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, p *engine.Progra
 // body over that error, or, with none, the problem details to answer with
 // instead. The error is what the node's error block got, an upstream's
 // status, or the failure its Unhandled block took, caught.
-func (r *Runner) passOn(ctx context.Context, p *engine.Program, run store.Run, res *engine.Result, caught *Failure) (json.RawMessage, *Failure) {
+func (r *Runner) passOn(ctx context.Context, pr *prepared, run store.Run, res *engine.Result, caught *Failure) (json.RawMessage, *Failure) {
 	i := slices.IndexFunc(res.Nodes, func(n engine.NodeResult) bool { return n.ID == res.ErrorFrom })
 	n := res.Nodes[i]
 	f := Failure{Code: CodeUpstream, Detail: fmt.Sprintf("%s answered %d", n.ID, n.HTTPStatus), Node: n.ID}
@@ -582,14 +613,15 @@ func (r *Runner) passOn(ctx context.Context, p *engine.Program, run store.Run, r
 	}
 	ctx, cancel := context.WithTimeout(ctx, unhandledTimeout)
 	defer cancel()
-	body, ok, err := p.ErrorBody(ctx, run.Input, res.Nodes, doc)
+	body, ok, err := pr.p.ErrorBody(ctx, run.Input, res.Nodes, doc)
 	switch {
 	case !ok:
 		return nil, &f
 	case err != nil:
 		// Its author sees why on the run's record; its caller gets the problem.
-		r.log.InfoContext(ctx, "an error body failed", "run", run.ID, "err", err)
-		f.Detail += "; the error body failed too: " + err.Error()
+		said := pr.mask.text(err.Error())
+		r.log.InfoContext(ctx, "an error body failed", "run", run.ID, "err", said)
+		f.Detail += "; the error body failed too: " + said
 		return nil, &f
 	}
 	return body, nil
@@ -598,21 +630,23 @@ func (r *Runner) passOn(ctx context.Context, p *engine.Program, run store.Run, r
 // failure is err as a Failure. Our bug is logged with its stack, since the
 // client only learns that something went wrong. node is empty for the
 // output expression.
-func (r *Runner) failure(ctx context.Context, runID, node string, err error) *Failure {
-	f := &Failure{Code: engine.Classify(err), Detail: err.Error()}
+func (r *Runner) failure(ctx context.Context, m masker, runID, node string, err error) *Failure {
+	f := &Failure{Code: engine.Classify(err), Detail: m.text(err.Error())}
 	if f.Code == CodeInternal {
 		var pe *engine.PanicError
 		if errors.As(err, &pe) {
-			r.log.ErrorContext(ctx, "a run panicked", "run", runID, "node", node, "panic", pe.Value, "stack", string(pe.Stack))
+			r.log.ErrorContext(ctx, "a run panicked", "run", runID, "node", node, "panic", m.text(fmt.Sprint(pe.Value)), "stack", string(pe.Stack))
 		}
 		f.Detail = internalDetail
 	}
 	return f
 }
 
-// saveNode records a node that ended. A failure is logged: the run goes on.
-func (r *Runner) saveNode(ctx context.Context, runID string, n nodeEnd) {
+// saveNode records a node that ended, masked. A failure is logged: the run
+// goes on.
+func (r *Runner) saveNode(ctx context.Context, runID string, n nodeEnd, m masker) {
 	rec, err := nodeRecord(runID, n)
+	rec.Request, rec.Response, rec.Error = m.json(rec.Request), m.json(rec.Response), m.json(rec.Error)
 	if err == nil {
 		ctx, cancel := context.WithTimeout(ctx, writeTimeout)
 		defer cancel()

@@ -25,7 +25,7 @@ generated := "server/internal/httpapi/gen server/internal/workflow/definition.ge
 
 # Test coverage floors, in percent, for the packages that run workflows.
 # Raise one when its coverage rises; never lower one to make check pass.
-coverage_floors := "workflow=98 transform=86 upstream=91 engine=96 runner=92 trace=96"
+coverage_floors := "workflow=98 transform=89 upstream=91 engine=96 runner=93 trace=96"
 
 default:
     @just --list
@@ -33,6 +33,7 @@ default:
 # create .env and server/.env if missing; install the pinned golangci-lint and corepack, the web dependencies and the browser test's Chromium
 setup:
     @for f in .env server/.env; do [ -f "$f" ] || { cp "$f.example" "$f"; echo "created $f from $f.example"; }; done
+    @grep -q '^CONDUIT_CONSTANTS_KEY=' server/.env || { echo "CONDUIT_CONSTANTS_KEY=$(head -c 32 /dev/urandom | base64)" >> server/.env; echo "added a random constants key to server/.env"; }
     @if golangci-lint version 2>/dev/null | grep -q "version {{golangci_version}} "; then echo "golangci-lint {{golangci_version}} already installed"; else curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b .tools/bin v{{golangci_version}}; fi
     @if [ "$(corepack --version 2>/dev/null)" = "{{corepack_version}}" ]; then echo "corepack {{corepack_version}} already installed"; else npm install --global --prefix .tools corepack@{{corepack_version}}; fi
     cd web && corepack pnpm install --frozen-lockfile

@@ -29,7 +29,7 @@ func usesLookup(t *testing.T, n int) *Program {
 	if err := json.Unmarshal([]byte(def), &d); err != nil {
 		t.Fatal(err)
 	}
-	p, err := Compile(&d)
+	p, err := Compile(&d, nil)
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestRun_ANodeThatUsesAWorkflow(t *testing.T) {
 	  "with": {"user_id": "$error('bad')"}, "outputs": [{"status": 404}], "unhandled": {"fail": true}}]}`), &d); err != nil {
 		t.Fatal(err)
 	}
-	p, err := Compile(&d)
+	p, err := Compile(&d, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

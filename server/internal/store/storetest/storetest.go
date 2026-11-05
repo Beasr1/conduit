@@ -71,7 +71,13 @@ func Run(m *testing.M, use func(s *store.Store, databaseURL string)) int {
 		fmt.Fprintln(os.Stderr, "storetest:", err)
 		return 1
 	}
-	s, err := store.Open(ctx, u.String())
+	// A key of its own, as the database is.
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		fmt.Fprintln(os.Stderr, "storetest:", err)
+		return 1
+	}
+	s, err := store.Open(ctx, u.String(), key)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "storetest:", err)
 		return 1

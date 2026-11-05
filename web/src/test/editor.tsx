@@ -14,6 +14,7 @@ type ProblemError = components["schemas"]["ProblemError"];
 type Validation = components["schemas"]["Validation"];
 type UpstreamList = components["schemas"]["UpstreamList"];
 type WorkflowList = components["schemas"]["WorkflowList"];
+type ConstantList = components["schemas"]["ConstantList"];
 
 // answerEditor has the server answer what the editor asks as it's used:
 // unless a test says otherwise, it finds nothing wrong with a draft, and a
@@ -30,6 +31,10 @@ export function answerEditor() {
     // So are the workflows a step can use.
     http.get("/api/v1/workflows", () =>
       HttpResponse.json<WorkflowList>({ workflows: [] }),
+    ),
+    // And the constants (plan 06).
+    http.get("/api/v1/constants", () =>
+      HttpResponse.json<ConstantList>({ constants: [] }),
     ),
     http.post("/api/v1/preview", () =>
       HttpResponse.json<Preview>({

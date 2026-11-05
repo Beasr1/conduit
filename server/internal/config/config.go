@@ -5,6 +5,8 @@
 //
 //	CONDUIT_DATABASE_URL      required: postgres://user:password@host:port/database
 //	CONDUIT_API_TOKEN         required to serve: the one bearer token (D12), 32+ characters
+//	CONDUIT_CONSTANTS_KEY     required to serve: 32 bytes as base64, which seal
+//	                          constants' values (plan 06)
 //	CONDUIT_HTTP_ADDR         listen address, default 127.0.0.1:8080
 //	CONDUIT_LOG_FORMAT        json (default) or text
 //	CONDUIT_LOG_LEVEL         debug, info (default), warn or error
@@ -17,6 +19,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -34,6 +37,7 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	DatabaseURL     string
 	APIToken        string
+	ConstantsKey    []byte
 
 	AllowPrivateNetworks bool
 	UpstreamPorts        []uint16
@@ -59,6 +63,14 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	var errs []error
 	cfg.DatabaseURL, _ = lookup("CONDUIT_DATABASE_URL")
 	cfg.APIToken, _ = lookup("CONDUIT_API_TOKEN")
+	if v, ok := lookup("CONDUIT_CONSTANTS_KEY"); ok {
+		key, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			// The value isn't echoed: it's the key.
+			errs = append(errs, errors.New("CONDUIT_CONSTANTS_KEY: not base64"))
+		}
+		cfg.ConstantsKey = key
+	}
 	if v, ok := lookup("CONDUIT_HTTP_ADDR"); ok {
 		cfg.HTTPAddr = v
 	}
@@ -139,13 +151,18 @@ func (c Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-// CheckServe reports what serving needs beyond Validate: the API token. A
-// short token is refused, since it's the only thing guarding the server.
+// CheckServe reports what serving needs beyond Validate: the API token,
+// refused when short, since it's the only thing guarding the server; and
+// the key that seals constants' values.
 func (c Config) CheckServe() error {
+	var errs []error
 	if len(c.APIToken) < 32 {
-		return errors.New("CONDUIT_API_TOKEN: required, at least 32 characters (try: openssl rand -hex 32)")
+		errs = append(errs, errors.New("CONDUIT_API_TOKEN: required, at least 32 characters (try: openssl rand -hex 32)"))
 	}
-	return nil
+	if len(c.ConstantsKey) != 32 {
+		errs = append(errs, errors.New("CONDUIT_CONSTANTS_KEY: required, 32 bytes as base64 (try: openssl rand -base64 32)"))
+	}
+	return errors.Join(errs...)
 }
 
 // parsePorts reads a comma-separated list of ports, such as 80,443.

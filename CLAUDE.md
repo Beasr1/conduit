@@ -15,7 +15,9 @@ changes something a version that never changes, which a step uses at a
 pinned version, showing only what it keeps and opening the upstream, which
 is changed on its own page; Publish takes only steps that use one, a
 published workflow is one too, and an upstream no saved revision pins can
-be deleted.**
+be deleted. Plan 06's constants are built too: named values every
+expression reads as `$const.name`, sealed at rest, changed in one place for
+every run from then on, a secret one masked in what runs keep and answer.**
 The web app signs in with a session cookie, which sign-out or 30 minutes
 unused ends, lists workflows and creates them, and edits, checks, saves
 and publishes one in graph mode, previewing what each step reads and sends
@@ -56,7 +58,12 @@ served: it gives the workflow's input fields values, its responses the
 workflow's answers, previewed by the workflow's own preview, and it runs
 as a run of its own, linked to its caller, a hop further in its trace. A
 workflow can't use itself, directly or through others. An upstream's page
-deletes it once no saved revision of any workflow pins it. What was built, and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
+deletes it once no saved revision of any workflow pins it. A Constants
+page beside them holds named values, plain or secret, which every
+expression reads as `$const.name` and a field offers by name: a run reads
+each as it is when the run starts, a preview a secret's stand-in, and what
+a run keeps or answers has every exact copy of a secret masked,
+`[secret crm_token]`. A constant something reads can't be deleted. What was built, and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
 13-minimal-editor.md, 14-the-response-picks.md, 06-hardening.md and
 07-tests-and-catalogue.md; the bigger picture is docs/plans/README.md.
 
@@ -133,7 +140,9 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`, and
 - Settings are in two gitignored files, each loaded only where it's needed:
   `.env` for setup (compose's passwords, the tests' database URLs) and
   `server/.env` for the server. `just setup` makes both from their
-  `.env.example`. Store and HTTP tests need Postgres: `just test` and
+  `.env.example`, and adds a random `CONDUIT_CONSTANTS_KEY` to
+  `server/.env` when it has none: it seals constants' values, so losing it
+  loses them. Store and HTTP tests need Postgres: `just test` and
   `just check` start it.
 - `just dev` lets its server call private networks and port 8090, so runs
   reach the test upstream. `just up` is as production is: runs there reach

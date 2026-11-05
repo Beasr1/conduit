@@ -16,6 +16,7 @@ import (
 	"github.com/Beasr1/conduit/server/internal/engine"
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
 	"github.com/Beasr1/conduit/server/internal/store"
+	"github.com/Beasr1/conduit/server/internal/transform"
 	"github.com/Beasr1/conduit/server/internal/workflow"
 )
 
@@ -190,6 +191,13 @@ func (a *api) PreviewDefinition(ctx context.Context, req gen.PreviewDefinitionRe
 	if err != nil {
 		return nil, err
 	}
+	// Each constant as a run reads it, a secret one as its stand-in: a
+	// preview never holds a secret (plan 06).
+	cs, err := a.store.Constants(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx = transform.WithConstants(ctx, standIns(cs))
 	// An unsaved version stands in for the one a step pins, to show what an
 	// edit to its upstream would do. The step is pointed at it alone, so
 	// another step using the upstream keeps its own version.
@@ -277,7 +285,7 @@ func (a *api) problemsOf(ctx context.Context, d *workflow.Definition, self strin
 		return nil, err
 	}
 	rd, ps := workflow.Resolve(d, deps, self)
-	_, err = engine.Compile(rd)
+	_, err = engine.Compile(rd, deps.Constants)
 	var compiled workflow.Problems
 	errors.As(err, &compiled)
 	// What Publish needs besides what a run does (plan 12): listed with the

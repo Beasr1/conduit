@@ -21,6 +21,9 @@ type Revisions map[Uses]*Definition
 type Deps struct {
 	Versions  Versions
 	Revisions Revisions
+	// Constants is the names of the constants there are, which
+	// expressions may read (plan 06).
+	Constants map[string]bool
 }
 
 // Resolve is d with each node that uses an upstream or a workflow filled

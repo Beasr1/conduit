@@ -48,7 +48,7 @@ func (a *api) CreateUpstream(ctx context.Context, req gen.CreateUpstreamRequestO
 			errors: []gen.ProblemError{{Pointer: "/name", Code: "invalid_name", Detail: "a name is 1 to 200 characters"}},
 		}
 	}
-	if err := checkUpstream("/definition", &b.Definition); err != nil {
+	if err := a.checkUpstream(ctx, "/definition", &b.Definition); err != nil {
 		return nil, err
 	}
 	def, err := json.Marshal(b.Definition)
@@ -102,7 +102,7 @@ func (a *api) SaveUpstream(ctx context.Context, req gen.SaveUpstreamRequestObjec
 			detail: `If-Match must be one version's ETag, such as "3".`,
 		}
 	}
-	if err := checkUpstream("", req.Body); err != nil {
+	if err := a.checkUpstream(ctx, "", req.Body); err != nil {
 		return nil, err
 	}
 	def, err := json.Marshal(req.Body)
@@ -143,8 +143,12 @@ func (a *api) GetUpstreamVersion(ctx context.Context, req gen.GetUpstreamVersion
 	return gen.GetUpstreamVersion200JSONResponse(out), nil
 }
 
-func (*api) ValidateUpstream(_ context.Context, req gen.ValidateUpstreamRequestObject) (gen.ValidateUpstreamResponseObject, error) {
-	return gen.ValidateUpstream200JSONResponse{Problems: problemErrors(engine.CheckUpstream(req.Body))}, nil
+func (a *api) ValidateUpstream(ctx context.Context, req gen.ValidateUpstreamRequestObject) (gen.ValidateUpstreamResponseObject, error) {
+	known, err := a.store.ConstantNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return gen.ValidateUpstream200JSONResponse{Problems: problemErrors(engine.CheckUpstream(req.Body, known))}, nil
 }
 
 func (a *api) ListUpstreamUsers(ctx context.Context, req gen.ListUpstreamUsersRequestObject) (gen.ListUpstreamUsersResponseObject, error) {
@@ -163,8 +167,12 @@ func (a *api) ListUpstreamUsers(ctx context.Context, req gen.ListUpstreamUsersRe
 
 // checkUpstream refuses a version with problems, each pointing into the
 // request's body, where the version is at prefix.
-func checkUpstream(prefix string, u *workflow.Upstream) error {
-	ps := engine.CheckUpstream(u)
+func (a *api) checkUpstream(ctx context.Context, prefix string, u *workflow.Upstream) error {
+	known, err := a.store.ConstantNames(ctx)
+	if err != nil {
+		return err
+	}
+	ps := engine.CheckUpstream(u, known)
 	if len(ps) == 0 {
 		return nil
 	}

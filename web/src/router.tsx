@@ -16,6 +16,7 @@ export const routes = {
   workflow: (id: string) => `/workflows/${encodeURIComponent(id)}`,
   upstreams: () => "/upstreams",
   upstream: (id: string) => `/upstreams/${encodeURIComponent(id)}`,
+  constants: () => "/constants",
 };
 
 // safeFrom is where to go after signing in: a path on this site, or the
@@ -94,6 +95,7 @@ export const appRoutes: RouteObject[] = [
                 path: "upstreams/:id",
                 lazy: () => import("@/routes/upstream"),
               },
+              { path: "constants", lazy: () => import("@/routes/constants") },
             ],
           },
         ],

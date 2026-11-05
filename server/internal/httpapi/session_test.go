@@ -202,7 +202,7 @@ func TestSession_AWrongHeaderIsNotRescuedByTheCookie(t *testing.T) {
 // each is a 500, not a 401 that would send the app to sign in again.
 func TestSession_DatabaseDown(t *testing.T) {
 	t.Parallel()
-	closed, err := store.Open(t.Context(), dbURL)
+	closed, err := store.Open(t.Context(), dbURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

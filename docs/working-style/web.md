@@ -59,7 +59,9 @@ the API is `/api` on the page's own origin.
 - A feature never reaches into another feature's internals. Code moves to
   `components/` or `lib/` when a second feature needs it: the queries the
   editor shares with the library and the workflow list are in
-  `lib/upstreams.ts` and `lib/workflows.ts`. The upstream's page is the
+  `lib/upstreams.ts` and `lib/workflows.ts`, and the constants it offers
+  expressions, which the Constants page lists, in `lib/constants.ts`. The
+  upstream's page is the
   editor's (`features/editor/components/upstream-page.tsx`), as it edits
   an upstream as a step, with the editor's step parts and store.
 

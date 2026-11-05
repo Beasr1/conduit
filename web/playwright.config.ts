@@ -37,6 +37,7 @@ export default defineConfig({
       env: {
         CONDUIT_DATABASE_URL: database,
         CONDUIT_API_TOKEN: stack.token,
+        CONDUIT_CONSTANTS_KEY: stack.constantsKey,
         CONDUIT_HTTP_ADDR: hostOf(stack.server),
         // Its runs call the test upstream, on loopback.
         CONDUIT_ALLOW_PRIVATE_NETWORKS: "true",

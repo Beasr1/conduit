@@ -59,6 +59,8 @@ function answerPage(problems: Validation["problems"] = []) {
     http.post("/api/v1/upstreams/validate", () =>
       HttpResponse.json<Validation>({ problems }),
     ),
+    // No constants, as the page offers each to its fields (plan 06).
+    http.get("/api/v1/constants", () => HttpResponse.json({ constants: [] })),
     http.post("/api/v1/preview", () =>
       HttpResponse.json<Preview>({
         reads: { input: null, nodes: {} },

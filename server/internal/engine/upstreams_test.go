@@ -60,7 +60,7 @@ func TestCheckUpstream(t *testing.T) {
 				t.Fatal(err)
 			}
 			var got []string
-			for _, p := range CheckUpstream(&u) {
+			for _, p := range CheckUpstream(&u, nil) {
 				got = append(got, p.Pointer+" "+p.Code)
 			}
 			slices.Sort(got)
@@ -119,7 +119,7 @@ func TestCheckUpstream_Says(t *testing.T) {
 		Request:    workflow.HTTPRequest{Method: workflow.HTTPRequestMethodGET, URL: "https://users.example.com/v1/users/{{ usr_id }}"},
 	}
 	want := "it reads usr_id, which isn't one of the upstream's parameters: add it, or fix the name"
-	if ps := CheckUpstream(&u); len(ps) != 1 || ps[0].Detail != want {
+	if ps := CheckUpstream(&u, nil); len(ps) != 1 || ps[0].Detail != want {
 		t.Errorf("CheckUpstream() = %+v, want one saying %q", []workflow.Problem(ps), want)
 	}
 }
@@ -158,7 +158,7 @@ func TestRun_ANodeThatUsesAnUpstream(t *testing.T) {
 		if len(ps) > 0 {
 			t.Fatalf("Resolve() = %v", ps)
 		}
-		p, err := Compile(rd)
+		p, err := Compile(rd, nil)
 		if err != nil {
 			t.Fatalf("Compile: %v", err)
 		}

@@ -990,3 +990,35 @@ test("an input field's problem opens the Input tab, at the field", async () => {
     ),
   );
 });
+
+// A value can read a constant, offered by its name beside the data it
+// reads: a secret one as secret (plan 06).
+test("a parameter's value inserts a constant by its name", async () => {
+  library(version(users, 2));
+  renderEditor(using, [], { "u-1@2": users });
+  server.use(
+    http.get("/api/v1/constants", () =>
+      HttpResponse.json({
+        constants: [
+          {
+            name: "crm_token",
+            secret: true,
+            has_previous: false,
+            provenance: { actor: "token" },
+            updated_at: at,
+            created_at: at,
+          },
+        ],
+      }),
+    ),
+  );
+  const panel = await openStep("user");
+  const pick = await within(panel).findByRole("button", {
+    name: "Insert $const.crm_token",
+  });
+  expect(pick.parentElement?.textContent).toBe("$const.crm_tokensecret");
+  fireEvent.click(pick);
+  expect(
+    screen.getByLabelText("user_id", { selector: "textarea" }),
+  ).toHaveProperty("value", "input.user_id$const.crm_token");
+});

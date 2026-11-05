@@ -130,9 +130,11 @@ func (c *compiler) bindings(ptr string, with map[string]string) []binding {
 }
 
 // Compile checks d and compiles every expression in it. The error, when
-// there is one, is a workflow.Problems listing everything wrong.
-func Compile(d *workflow.Definition) (*Program, error) {
-	p, ps := build(d)
+// there is one, is a workflow.Problems listing everything wrong. known is
+// the constants there are, which expressions may read as $const.name
+// (plan 06); nil checks no names, for a program that reads none.
+func Compile(d *workflow.Definition, known map[string]bool) (*Program, error) {
+	p, ps := build(d, known)
 	if len(ps) > 0 {
 		return nil, ps
 	}
@@ -143,8 +145,8 @@ func Compile(d *workflow.Definition) (*Program, error) {
 // expression that doesn't compile is left nil, and an edge is wired only
 // when each end names another node, so the program is whole only when
 // nothing is wrong. A preview reads what there is.
-func build(d *workflow.Definition) (*Program, workflow.Problems) {
-	c := compiler{problems: workflow.Validate(d)}
+func build(d *workflow.Definition, known map[string]bool) (*Program, workflow.Problems) {
+	c := compiler{problems: workflow.Validate(d), known: known}
 	p := &Program{nodes: make([]node, len(d.Nodes)), edges: make([]edge, len(d.Edges))}
 
 	for i, n := range d.Nodes {
@@ -192,9 +194,7 @@ func build(d *workflow.Definition) (*Program, workflow.Problems) {
 	for k, e := range d.Edges {
 		p.edges[k].on, p.edges[k].required = e.Output(), e.Required
 		if e.When != "" {
-			when, err := transform.CompileCondition(e.When)
-			c.check(fmt.Sprintf("/edges/%d/when", k), err)
-			p.edges[k].when = when
+			p.edges[k].when = c.condition(fmt.Sprintf("/edges/%d/when", k), e.When)
 		}
 	}
 	if d.Output != "" {
@@ -284,6 +284,7 @@ func (p *Program) ancestors(i int) []int {
 
 type compiler struct {
 	problems workflow.Problems
+	known    map[string]bool // the constants there are; nil checks no names
 }
 
 func (c *compiler) check(pointer string, err error) {
@@ -295,7 +296,43 @@ func (c *compiler) check(pointer string, err error) {
 func (c *compiler) expr(pointer, src string) *transform.Expr {
 	x, err := transform.Compile(src)
 	c.check(pointer, err)
+	if x != nil {
+		names, whole := x.Constants()
+		c.constants(pointer, names, whole)
+	}
 	return x
+}
+
+func (c *compiler) condition(pointer, src string) *transform.Condition {
+	x, err := transform.CompileCondition(src)
+	c.check(pointer, err)
+	if x != nil {
+		names, whole := x.Constants()
+		c.constants(pointer, names, whole)
+	}
+	return x
+}
+
+// constants checks what an expression at pointer reads as $const: each
+// constant by its name, and one there is (plan 06).
+func (c *compiler) constants(pointer string, names []string, whole bool) {
+	if whole {
+		c.problems = append(c.problems, workflow.Problem{
+			Pointer: pointer, Code: "whole_constants",
+			Detail: "it reads $const as a whole: read each constant by its name, $const.name",
+		})
+	}
+	if c.known == nil {
+		return
+	}
+	for _, name := range names {
+		if !c.known[name] {
+			c.problems = append(c.problems, workflow.Problem{
+				Pointer: pointer, Code: "unknown_constant",
+				Detail: fmt.Sprintf("it reads $const.%s, which no constant is named: make it on the Constants page, or fix the name", name),
+			})
+		}
+	}
 }
 
 // cases compiles a switch: its cases, and whether every
@@ -315,9 +352,7 @@ func (c *compiler) cases(pointer string, s *workflow.Switch) ([]switchCase, bool
 		ptr := fmt.Sprintf("%s/cases/%d", pointer, k)
 		var when *transform.Condition
 		if sc.When != "" { // a missing condition is validation's problem
-			var err error
-			when, err = transform.CompileCondition(sc.When)
-			c.check(ptr+"/when", err)
+			when = c.condition(ptr+"/when", sc.When)
 		}
 		whole = whole && when != nil
 		out[k] = switchCase{when: when, status: sc.Status, body: body(ptr, sc.Body)}
@@ -328,6 +363,10 @@ func (c *compiler) cases(pointer string, s *workflow.Switch) ([]switchCase, bool
 func (c *compiler) template(pointer, src string) *transform.Template {
 	t, err := transform.CompileTemplate(src)
 	c.check(pointer, err)
+	if t != nil {
+		names, whole := t.Constants()
+		c.constants(pointer, names, whole)
+	}
 	return t
 }
 

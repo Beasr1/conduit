@@ -103,7 +103,7 @@ func Simulate(ctx context.Context, d *workflow.Definition, id string, deps workf
 			return nil, ErrNoSuchNode
 		}
 	}
-	p, problems := build(d)
+	p, problems := build(d, deps.Constants)
 	if ways := p.ways(target); len(ways) > 1 {
 		pv = simulateWays(ctx, p, d, target, problems, ways, deps)
 	} else {
@@ -305,7 +305,7 @@ type sim struct {
 // newSim compiles what it can of d for a preview, and lists everything wrong
 // with it.
 func newSim(ctx context.Context, d *workflow.Definition, deps workflow.Deps) (*sim, workflow.Problems) {
-	p, problems := build(d)
+	p, problems := build(d, deps.Constants)
 	return simOf(ctx, p, d, deps), problems
 }
 

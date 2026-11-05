@@ -25,10 +25,13 @@ import (
 	"github.com/Beasr1/conduit/server/internal/upstream"
 )
 
-var db *store.Store
+var (
+	db    *store.Store
+	dbURL string // the package's own database
+)
 
 func TestMain(m *testing.M) {
-	os.Exit(storetest.Run(m, func(s *store.Store, _ string) { db = s }))
+	os.Exit(storetest.Run(m, func(s *store.Store, url string) { db, dbURL = s, url }))
 }
 
 // newRunner reaches httptest servers, which listen on loopback. It's

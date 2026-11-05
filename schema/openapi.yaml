@@ -542,6 +542,126 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
 
+  /v1/constants:
+    get:
+      operationId: listConstants
+      summary: List the constants, by name
+      description: Values every expression reads as $const.name (plan 06). A secret one's value is never sent.
+      responses:
+        "200":
+          description: Every constant, by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConstantList"
+        "401":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createConstant
+      summary: Make a constant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateConstant"
+      responses:
+        "201":
+          description: Made.
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Constant"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+
+  /v1/constants/{name}:
+    parameters:
+      - $ref: "#/components/parameters/ConstantName"
+    put:
+      operationId: setConstant
+      summary: Change a constant's value, keeping the one before
+      description: Every run from then on reads the new value, with no Publish. secret true makes a plain constant secret, for good, as there's no showing it again. A value equal to the one it has changes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetConstant"
+      responses:
+        "200":
+          description: Changed, or as it was.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Constant"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteConstant
+      summary: Delete a constant nothing reads
+      description: Refused with 409 constant_in_use while a saved revision of a workflow, or a version of an upstream, reads it, as either can run again.
+      responses:
+        "204":
+          description: Deleted, with its previous value.
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+
+  /v1/constants/{name}/undo:
+    parameters:
+      - $ref: "#/components/parameters/ConstantName"
+    post:
+      operationId: undoConstant
+      summary: Put a constant's previous value back
+      description: The value it replaces becomes the previous one, so undoing again puts it back. Refused with 409 nothing_to_undo when it has no previous value.
+      responses:
+        "200":
+          description: Its previous value, back.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Constant"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+
+  /v1/constants/{name}/users:
+    parameters:
+      - $ref: "#/components/parameters/ConstantName"
+    get:
+      operationId: listConstantUsers
+      summary: List the workflows and upstreams whose latest revision or version reads a constant
+      responses:
+        "200":
+          description: The workflows and upstreams, by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConstantUsers"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
   /v1/runs:
     get:
       operationId: listRuns
@@ -688,6 +808,12 @@ components:
         type: string
     UpstreamID:
       name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    ConstantName:
+      name: name
       in: path
       required: true
       schema:
@@ -1061,6 +1187,105 @@ components:
         created_at:
           type: string
           format: date-time
+
+    Constant:
+      type: object
+      required: [name, secret, has_previous, provenance, updated_at, created_at]
+      properties:
+        name:
+          type: string
+          description: How expressions read it, $const.name.
+        secret:
+          type: boolean
+          description: Its value is never sent back, and runs mask it wherever they're kept or shown.
+        value:
+          type: string
+          description: A plain constant's value. Absent for a secret one.
+        has_previous:
+          type: boolean
+          description: Whether undo has a value to put back.
+        provenance:
+          $ref: "#/components/schemas/Provenance"
+        updated_at:
+          type: string
+          format: date-time
+          description: When its value was last set.
+        created_at:
+          type: string
+          format: date-time
+
+    ConstantList:
+      type: object
+      required: [constants]
+      properties:
+        constants:
+          type: array
+          items:
+            $ref: "#/components/schemas/Constant"
+
+    CreateConstant:
+      type: object
+      required: [name, value]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: A lower-case letter, then up to 63 lower-case letters, digits and underscores.
+        value:
+          type: string
+          description: 1 to 4096 characters.
+        secret:
+          type: boolean
+          default: false
+
+    SetConstant:
+      type: object
+      required: [value]
+      additionalProperties: false
+      properties:
+        value:
+          type: string
+          description: 1 to 4096 characters.
+        secret:
+          type: boolean
+          description: True makes a plain constant secret, for good. False or absent leaves it as it is.
+
+    ConstantUsers:
+      type: object
+      required: [workflows, upstreams]
+      properties:
+        workflows:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConstantWorkflowUse"
+        upstreams:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConstantUpstreamUse"
+
+    ConstantWorkflowUse:
+      type: object
+      required: [workflow_id, name, revision]
+      properties:
+        workflow_id:
+          type: string
+        name:
+          type: string
+        revision:
+          type: integer
+          description: The workflow's latest revision, which reads the constant.
+
+    ConstantUpstreamUse:
+      type: object
+      required: [upstream_id, name, version]
+      properties:
+        upstream_id:
+          type: string
+        name:
+          type: string
+        version:
+          type: integer
+          description: The upstream's latest version, which reads the constant.
 
     WorkflowRevision:
       type: object

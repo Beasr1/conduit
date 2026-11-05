@@ -6,6 +6,8 @@ package store
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"errors"
 	"fmt"
 
@@ -29,12 +31,30 @@ var (
 // Store is the database. It's safe for concurrent use.
 type Store struct {
 	pool *pgxpool.Pool
+	// seals constants' values (plan 06); nil without a key.
+	aead cipher.AEAD
 }
 
 // Open connects with the session settings the server runs under. A query
 // that runs longer than 5 s, or a transaction left idle for 10 s, fails
-// rather than holding locks. Migrate connects without them.
-func Open(ctx context.Context, databaseURL string) (*Store, error) {
+// rather than holding locks. Migrate connects without them. constantsKey,
+// 32 bytes, seals constants' values; without one, constants are refused
+// with ErrNoKey.
+func Open(ctx context.Context, databaseURL string, constantsKey []byte) (*Store, error) {
+	var aead cipher.AEAD
+	if constantsKey != nil {
+		if len(constantsKey) != 32 {
+			return nil, errors.New("open the database: the constants key isn't 32 bytes")
+		}
+		block, err := aes.NewCipher(constantsKey)
+		if err != nil {
+			return nil, fmt.Errorf("open the database: %w", err)
+		}
+		// A random nonce for each value, prepended to it.
+		if aead, err = cipher.NewGCMWithRandomNonce(block); err != nil {
+			return nil, fmt.Errorf("open the database: %w", err)
+		}
+	}
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		// pgx's own message redacts passwords only "best effort".
@@ -48,7 +68,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open the database: %w", err)
 	}
-	return &Store{pool: pool}, nil
+	return &Store{pool: pool, aead: aead}, nil
 }
 
 // Close waits for queries in progress and closes every connection.

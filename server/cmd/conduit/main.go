@@ -58,7 +58,7 @@ func serve(ctx context.Context, stop context.CancelFunc, cfg config.Config) erro
 		return fmt.Errorf("load config: %w", err)
 	}
 	log := newLogger(cfg)
-	db, err := store.Open(ctx, cfg.DatabaseURL)
+	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.ConstantsKey)
 	if err != nil {
 		return err
 	}

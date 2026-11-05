@@ -13,11 +13,11 @@ type reader interface {
 
 // CheckUpstream checks one version of an upstream (plan 07): what
 // workflow.ValidateUpstream does, that every expression in its request
-// compiles, and that each reads only the upstream's parameters, by name.
-// One that may read what it doesn't name, the whole input say, is left to
-// run time.
-func CheckUpstream(u *workflow.Upstream) workflow.Problems {
-	c := compiler{problems: workflow.ValidateUpstream(u)}
+// compiles, and that each reads only the upstream's parameters, by name,
+// and constants there are, known (plan 06). One that may read what it
+// doesn't name, the whole input say, is left to run time.
+func CheckUpstream(u *workflow.Upstream, known map[string]bool) workflow.Problems {
+	c := compiler{problems: workflow.ValidateUpstream(u), known: known}
 	params := make(map[string]bool, len(u.Parameters))
 	for _, p := range u.Parameters {
 		params[p.Name] = true

@@ -29,7 +29,7 @@ func program(t *testing.T, base, def string) *Program {
 	if err := json.Unmarshal([]byte(strings.ReplaceAll(def, "BASE", base)), &d); err != nil {
 		t.Fatalf("decode definition: %v", err)
 	}
-	p, err := Compile(&d)
+	p, err := Compile(&d, nil)
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -1039,7 +1039,7 @@ func TestCompile_ReportsExpressionProblemsWithTheRest(t *testing.T) {
 	}`), &d); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Compile(&d)
+	_, err := Compile(&d, nil)
 	var ps workflow.Problems
 	if !errors.As(err, &ps) {
 		t.Fatalf("Compile error = %v, want workflow.Problems", err)
@@ -1085,7 +1085,7 @@ func TestCompile_ChecksJSONSchemas(t *testing.T) {
 			if err := json.Unmarshal([]byte(`{"nodes": [{"id": "a", "kind": "transform", "expr": "1"}], `+tt.schemas+`}`), &d); err != nil {
 				t.Fatal(err)
 			}
-			_, err := Compile(&d)
+			_, err := Compile(&d, nil)
 			var got []string
 			var ps workflow.Problems
 			if errors.As(err, &ps) {

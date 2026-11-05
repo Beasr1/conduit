@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { Hint } from "@/components/hint";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
+import { ConstantPicks } from "@/features/editor/components/constant-picks";
 import { DataTree } from "@/features/editor/components/data-tree";
 import { Where } from "@/features/editor/components/problem-list";
 import { outcomeTag } from "@/features/editor/flow";
@@ -182,6 +183,7 @@ export function Reads({
           </div>
         </>
       )}
+      <ConstantPicks onPick={onPick} />
     </>
   );
   if (folded)

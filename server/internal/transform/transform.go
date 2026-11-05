@@ -47,7 +47,8 @@ func compile(src string) (*gnata.Expression, error) {
 // Expr is a compiled expression whose value is used as JSON: a request body,
 // a transform node's result, a run's output.
 type Expr struct {
-	e *gnata.Expression
+	e   *gnata.Expression
+	src string
 }
 
 // Compile compiles a JSONata expression.
@@ -56,7 +57,7 @@ func Compile(src string) (*Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{e: e}, nil
+	return &Expr{e: e, src: src}, nil
 }
 
 // Reads is what x reads, as paths of field names from the root of what
@@ -64,12 +65,12 @@ func Compile(src string) (*Expr, error) {
 // what it doesn't name, the whole input say. A static analysis, gnata's,
 // not a boundary.
 func (x *Expr) Reads() (paths [][]string, complete bool) {
-	return x.e.ReferencedPaths()
+	return analysed(x.e, x.src).ReferencedPaths()
 }
 
 // Eval evaluates x over doc, raw JSON, and returns the value as JSON.
 func (x *Expr) Eval(ctx context.Context, doc []byte) (json.RawMessage, error) {
-	v, err := x.e.EvalBytes(ctx, doc)
+	v, err := x.e.EvalBytesWithVars(ctx, doc, varsOf(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +131,8 @@ func allJSON(xs []any) bool {
 
 // Condition is a compiled condition, such as an edge's when.
 type Condition struct {
-	e *gnata.Expression
+	e   *gnata.Expression
+	src string
 }
 
 // CompileCondition compiles a JSONata condition. Its value is cast to a
@@ -144,12 +146,12 @@ func CompileCondition(src string) (*Condition, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Condition{e: e}, nil
+	return &Condition{e: e, src: src}, nil
 }
 
 // Eval evaluates c over doc. Nothing counts as false.
 func (c *Condition) Eval(ctx context.Context, doc []byte) (bool, error) {
-	v, err := c.e.EvalBytes(ctx, doc)
+	v, err := c.e.EvalBytesWithVars(ctx, doc, varsOf(ctx))
 	if err != nil {
 		return false, err
 	}

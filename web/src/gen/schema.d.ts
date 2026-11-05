@@ -354,6 +354,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/constants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the constants, by name
+         * @description Values every expression reads as $const.name (plan 06). A secret one's value is never sent.
+         */
+        get: operations["listConstants"];
+        put?: never;
+        /** Make a constant */
+        post: operations["createConstant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/constants/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change a constant's value, keeping the one before
+         * @description Every run from then on reads the new value, with no Publish. secret true makes a plain constant secret, for good, as there's no showing it again. A value equal to the one it has changes nothing.
+         */
+        put: operations["setConstant"];
+        post?: never;
+        /**
+         * Delete a constant nothing reads
+         * @description Refused with 409 constant_in_use while a saved revision of a workflow, or a version of an upstream, reads it, as either can run again.
+         */
+        delete: operations["deleteConstant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/constants/{name}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put a constant's previous value back
+         * @description The value it replaces becomes the previous one, so undoing again puts it back. Refused with 409 nothing_to_undo when it has no previous value.
+         */
+        post: operations["undoConstant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/constants/{name}/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        /** List the workflows and upstreams whose latest revision or version reads a constant */
+        get: operations["listConstantUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runs": {
         parameters: {
             query?: never;
@@ -601,6 +689,57 @@ export interface components {
             provenance: components["schemas"]["Provenance"];
             /** Format: date-time */
             created_at: string;
+        };
+        Constant: {
+            /** @description How expressions read it, $const.name. */
+            name: string;
+            /** @description Its value is never sent back, and runs mask it wherever they're kept or shown. */
+            secret: boolean;
+            /** @description A plain constant's value. Absent for a secret one. */
+            value?: string;
+            /** @description Whether undo has a value to put back. */
+            has_previous: boolean;
+            provenance: components["schemas"]["Provenance"];
+            /**
+             * Format: date-time
+             * @description When its value was last set.
+             */
+            updated_at: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ConstantList: {
+            constants: components["schemas"]["Constant"][];
+        };
+        CreateConstant: {
+            /** @description A lower-case letter, then up to 63 lower-case letters, digits and underscores. */
+            name: string;
+            /** @description 1 to 4096 characters. */
+            value: string;
+            /** @default false */
+            secret: boolean;
+        };
+        SetConstant: {
+            /** @description 1 to 4096 characters. */
+            value: string;
+            /** @description True makes a plain constant secret, for good. False or absent leaves it as it is. */
+            secret?: boolean;
+        };
+        ConstantUsers: {
+            workflows: components["schemas"]["ConstantWorkflowUse"][];
+            upstreams: components["schemas"]["ConstantUpstreamUse"][];
+        };
+        ConstantWorkflowUse: {
+            workflow_id: string;
+            name: string;
+            /** @description The workflow's latest revision, which reads the constant. */
+            revision: number;
+        };
+        ConstantUpstreamUse: {
+            upstream_id: string;
+            name: string;
+            /** @description The upstream's latest version, which reads the constant. */
+            version: number;
         };
         WorkflowRevision: {
             workflow: components["schemas"]["Workflow"];
@@ -980,6 +1119,7 @@ export interface components {
     parameters: {
         WorkflowID: string;
         UpstreamID: string;
+        ConstantName: string;
         RunID: string;
     };
     requestBodies: never;
@@ -1561,6 +1701,156 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpstreamVersion"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listConstants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every constant, by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConstantList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+        };
+    };
+    createConstant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateConstant"];
+            };
+        };
+        responses: {
+            /** @description Made. */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Constant"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    setConstant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetConstant"];
+            };
+        };
+        responses: {
+            /** @description Changed, or as it was. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Constant"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    deleteConstant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted, with its previous value. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    undoConstant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Its previous value, back. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Constant"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    listConstantUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workflows and upstreams, by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConstantUsers"];
                 };
             };
             401: components["responses"]["Problem"];
