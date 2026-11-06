@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -272,7 +273,7 @@ func TestServe(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			w := saveWorkflow(t, srv.URL, tt.def)
-			out, err := r.Serve(t.Context(), w.Slug, nil)
+			out, err := r.Serve(t.Context(), w.Slug, "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -317,7 +318,7 @@ func TestServe_AnErrorBodyThatFails(t *testing.T) {
 	r := newRunner(t, Options{})
 	w := saveWorkflow(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}}],
 	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}], "errors": {"body": "$number(error.code)"}}}`)
-	out, err := r.Serve(t.Context(), w.Slug, nil)
+	out, err := r.Serve(t.Context(), w.Slug, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +343,7 @@ func TestServe_AnErrorAnswerWhoseBodyFails(t *testing.T) {
 	r := newRunner(t, Options{})
 	w := saveWorkflow(t, srv.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}, "outputs": [{"status": 404}]}],
 	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 404, "lines": [{"from": "a", "on": 404}]}], "errors": {"body": "$number(error.code)"}}}`)
-	out, err := r.Serve(t.Context(), w.Slug, nil)
+	out, err := r.Serve(t.Context(), w.Slug, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +402,7 @@ func TestServe_ErrorAnswers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			w := saveWorkflow(t, srv.URL, tt.def)
-			out, err := r.Serve(t.Context(), w.Slug, nil)
+			out, err := r.Serve(t.Context(), w.Slug, "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -427,7 +428,7 @@ func TestServe_ATransformsUnhandledBodyIsRecorded(t *testing.T) {
 	    {"id": "next", "kind": "transform", "expr": "nodes.count.body + 1"}],
 	  "edges": [{"from": "count", "to": "next", "unhandled": true}],
 	  "response": {"answers": [{"status": 200, "lines": [{"from": "next"}]}]}}`)
-	out, err := r.Serve(t.Context(), w.Slug, nil)
+	out, err := r.Serve(t.Context(), w.Slug, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +452,7 @@ func TestServe_ACasesStatusIsRecorded(t *testing.T) {
 	w := saveWorkflow(t, "", `{"nodes": [{"id": "check", "kind": "transform",
 	    "switch": {"cases": [{"when": "input.id = 0", "status": 404, "body": "{ 'error': 'gone' }"}, {"when": "true", "status": 200}]}}],
 	  "response": {"answers": [{"status": 200, "lines": [{"from": "check", "on": 200}]}, {"status": 404, "lines": [{"from": "check", "on": 404}]}]}}`)
-	out, err := r.Serve(t.Context(), w.Slug, json.RawMessage(`{"id": 0}`))
+	out, err := r.Serve(t.Context(), w.Slug, "", json.RawMessage(`{"id": 0}`))
 	if err != nil || out.Answer != 404 || string(out.Output) != `{"error":"gone"}` {
 		t.Fatalf("Serve() = %d %s, %v", out.Answer, out.Output, err)
 	}
@@ -482,7 +483,7 @@ func TestServe_TheLinesTakenAreRecorded(t *testing.T) {
 		`{"n": "2"}`:   {"2", []Line{{To: "e"}}},
 		`{"n": "two"}`: {"0", []Line{{To: "e", Unhandled: true}}},
 	} {
-		out, err := r.Serve(t.Context(), w.Slug, json.RawMessage(input))
+		out, err := r.Serve(t.Context(), w.Slug, "", json.RawMessage(input))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -512,7 +513,7 @@ func TestServe_AStepsUnhandledTakesItsFailure(t *testing.T) {
 	    {"id": "sorry", "kind": "transform", "expr": "{ 'error': nodes.a.error.code, 'upstream': nodes.a.status }"}],
 	  "edges": [{"from": "a", "to": "sorry", "unhandled": true}],
 	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 503, "lines": [{"from": "sorry"}]}]}}`)
-	out, err := r.Serve(t.Context(), w.Slug, nil)
+	out, err := r.Serve(t.Context(), w.Slug, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +555,7 @@ func TestServe_AStepThatUsesAWorkflow(t *testing.T) {
 	    {"id": "both", "kind": "transform", "expr": "{ 'greeting': nodes.greet.body.hello, 'broken': nodes.broken.body.why }", "unhandled": {"fail": true}}],
 	  "edges": [{"from": "greet", "to": "both"}, {"from": "broken", "to": "both", "unhandled": true}],
 	  "response": {"answers": [{"status": 200, "lines": [{"from": "both"}]}]}}`)
-	out, err := r.Serve(ctx, caller.Slug, json.RawMessage(`{"who": "Ada"}`))
+	out, err := r.Serve(ctx, caller.Slug, "", json.RawMessage(`{"who": "Ada"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +586,7 @@ func TestCall_Refusals(t *testing.T) {
 	w := saveWorkflow(t, "", `{"nodes": [{"id": "hi", "kind": "transform", "expr": "1", "unhandled": {"fail": true}}],
 	  "input_schema": {"type": "object", "required": ["name"]},
 	  "response": {"answers": [{"status": 200, "lines": [{"from": "hi"}]}]}}`)
-	parent, err := db.StartRun(t.Context(), w.ID, 1, "editor", "4bf92f3577b34da6a3ce929d0e0e4736", store.Parent{}, json.RawMessage(`null`))
+	parent, err := db.StartRun(t.Context(), store.NewRun{WorkflowID: w.ID, Revision: 1, Trigger: "editor", TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", Input: json.RawMessage(`null`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,15 +611,36 @@ func TestServe_Refusals(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	r := newRunner(t, Options{})
-	if _, err := r.Serve(ctx, "no-such-slug", nil); !errors.Is(err, store.ErrNotFound) {
+	if _, err := r.Serve(ctx, "no-such-slug", "", nil); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("an unknown slug: %v", err)
 	}
 	w, _, err := db.CreateWorkflow(ctx, slug(t), "test", json.RawMessage(`{"nodes": []}`), store.Provenance{Actor: "token"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Serve(ctx, w.Slug, nil); !errors.Is(err, ErrNotPublished) {
+	if _, err := r.Serve(ctx, w.Slug, "", nil); !errors.Is(err, ErrNotPublished) {
 		t.Errorf("a workflow never published: %v", err)
+	}
+}
+
+// A served run records the key it was called with (plan 07).
+func TestServe_RecordsTheKey(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	r := newRunner(t, Options{})
+	w := saveWorkflow(t, "http://x.example", `{"nodes": [], "output": "1"}`)
+	h := sha256.Sum256([]byte(t.Name()))
+	key, err := db.CreateKey(ctx, w.ID, "CRM sync", store.NewKey{Prefix: "cnd_test", Hash: h[:]}, store.Provenance{Actor: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := r.Serve(ctx, w.Slug, key.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := store.RunKey{ID: key.ID, Name: "CRM sync", Prefix: "cnd_test"}
+	if got := out.Run.Key; got == nil || *got != want {
+		t.Errorf("the run's key = %+v; want %+v", got, want)
 	}
 }
 
@@ -631,7 +653,7 @@ func TestServe_APanicIsOurBugAndOnlyTheLogSaysMore(t *testing.T) {
 	t.Cleanup(r.Stop)
 	w := saveWorkflow(t, "http://x.example", holdDef)
 
-	out, err := r.Serve(t.Context(), w.Slug, nil)
+	out, err := r.Serve(t.Context(), w.Slug, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +721,7 @@ func TestServe_ACallerWhoHangsUpCancelsTheRun(t *testing.T) {
 	ctx, hangUp := context.WithCancel(t.Context())
 	done := make(chan Outcome, 1)
 	go func() {
-		out, err := r.Serve(ctx, w.Slug, nil)
+		out, err := r.Serve(ctx, w.Slug, "", nil)
 		if err != nil {
 			t.Error(err)
 		}
@@ -732,23 +754,23 @@ func TestStart_RefusedAtTheCap(t *testing.T) {
 	if _, err := r.Start(ctx, w.ID, 0, nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("a second editor run: %v, want ErrBusy", err)
 	}
-	if _, err := r.Serve(ctx, w.Slug, nil); !errors.Is(err, ErrBusy) {
+	if _, err := r.Serve(ctx, w.Slug, "", nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("a served run: %v, want ErrBusy", err)
 	}
 	// Another workflow's run, refused at the server's cap, isn't counted
 	// against its own share.
 	other := saveWorkflow(t, h.srv.URL, holdDef)
-	if _, err := r.Serve(ctx, other.Slug, nil); !errors.Is(err, ErrBusy) || errors.Is(err, ErrWorkflowBusy) {
+	if _, err := r.Serve(ctx, other.Slug, "", nil); !errors.Is(err, ErrBusy) || errors.Is(err, ErrWorkflowBusy) {
 		t.Errorf("another workflow's run: %v, want the server's ErrBusy", err)
 	}
 	close(h.release)
 	if got := seqs(collect(t, r, first.ID)); got != "1 a started, 2 a succeeded, end run succeeded" {
 		t.Errorf("first run = %s", got)
 	}
-	if _, err := r.Serve(ctx, w.Slug, nil); err != nil {
+	if _, err := r.Serve(ctx, w.Slug, "", nil); err != nil {
 		t.Errorf("once the first run ended: %v", err)
 	}
-	if _, err := r.Serve(ctx, other.Slug, nil); err != nil {
+	if _, err := r.Serve(ctx, other.Slug, "", nil); err != nil {
 		t.Errorf("the other workflow, once the first run ended: %v", err)
 	}
 }
@@ -774,17 +796,17 @@ func TestStart_AWorkflowHasAQuarterOfTheSlots(t *testing.T) {
 		h.wait(t)
 		held = append(held, run)
 	}
-	if _, err := r.Serve(ctx, w.Slug, nil); !errors.Is(err, ErrWorkflowBusy) || !errors.Is(err, ErrBusy) {
+	if _, err := r.Serve(ctx, w.Slug, "", nil); !errors.Is(err, ErrWorkflowBusy) || !errors.Is(err, ErrBusy) {
 		t.Errorf("a third run of the workflow: %v, want ErrWorkflowBusy, a kind of ErrBusy", err)
 	}
-	if _, err := r.Serve(ctx, saveWorkflow(t, quick.URL, holdDef).Slug, nil); err != nil {
+	if _, err := r.Serve(ctx, saveWorkflow(t, quick.URL, holdDef).Slug, "", nil); err != nil {
 		t.Errorf("another workflow meanwhile: %v", err)
 	}
 	close(h.release)
 	for _, run := range held {
 		collect(t, r, run.ID)
 	}
-	if _, err := r.Serve(ctx, w.Slug, nil); err != nil {
+	if _, err := r.Serve(ctx, w.Slug, "", nil); err != nil {
 		t.Errorf("once its runs ended: %v", err)
 	}
 }
@@ -815,10 +837,10 @@ func TestStart_Traces(t *testing.T) {
 	if _, err := r.Start(at(trace.MaxHops), w.ID, 0, nil); !errors.Is(err, ErrLoop) {
 		t.Errorf("an editor run %d hops in: %v, want ErrLoop", trace.MaxHops, err)
 	}
-	if _, err := r.Serve(at(trace.MaxHops), w.Slug, nil); !errors.Is(err, ErrLoop) {
+	if _, err := r.Serve(at(trace.MaxHops), w.Slug, "", nil); !errors.Is(err, ErrLoop) {
 		t.Errorf("a served run %d hops in: %v, want ErrLoop", trace.MaxHops, err)
 	}
-	out, err := r.Serve(at(trace.MaxHops-1), w.Slug, nil)
+	out, err := r.Serve(at(trace.MaxHops-1), w.Slug, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -929,7 +951,7 @@ func TestWatch(t *testing.T) {
 	if _, err := r.Watch(ctx, "01890000-0000-7000-8000-000000000000", 0); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("an unknown run: %v", err)
 	}
-	other, err := db.StartRun(ctx, w.ID, 1, "editor", "4bf92f3577b34da6a3ce929d0e0e4736", store.Parent{}, json.RawMessage(`null`))
+	other, err := db.StartRun(ctx, store.NewRun{WorkflowID: w.ID, Revision: 1, Trigger: "editor", TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", Input: json.RawMessage(`null`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -975,7 +997,7 @@ func TestRecover(t *testing.T) {
 	ctx := t.Context()
 	r := newRunner(t, Options{})
 	w := saveWorkflow(t, "", `{"nodes": []}`)
-	left, err := db.StartRun(ctx, w.ID, 1, "served", "4bf92f3577b34da6a3ce929d0e0e4736", store.Parent{}, json.RawMessage(`null`))
+	left, err := db.StartRun(ctx, store.NewRun{WorkflowID: w.ID, Revision: 1, Trigger: "served", TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", Input: json.RawMessage(`null`)})
 	if err != nil {
 		t.Fatal(err)
 	}

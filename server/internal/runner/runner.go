@@ -146,7 +146,7 @@ func (r *Runner) Start(ctx context.Context, workflowID string, revision int, inp
 	if err != nil {
 		return store.Run{}, err
 	}
-	run, err := r.begin(ctx, w.ID, revision, "editor", store.Parent{}, input, pr.mask)
+	run, err := r.begin(ctx, store.NewRun{WorkflowID: w.ID, Revision: revision, Trigger: "editor", Input: input}, pr.mask)
 	if err != nil {
 		return store.Run{}, err
 	}
@@ -161,10 +161,11 @@ func (r *Runner) Start(ctx context.Context, workflowID string, revision int, inp
 	return run, nil
 }
 
-// Serve runs the published revision of the workflow at slug, and returns
-// once the run has ended and been recorded. A caller who hangs up cancels
-// the run.
-func (r *Runner) Serve(ctx context.Context, slug string, input json.RawMessage) (Outcome, error) {
+// Serve runs the published revision of the workflow at slug for a caller
+// with the key whose id is key, which the run records (plan 07), and
+// returns once the run has ended and been recorded. A caller who hangs up
+// cancels the run.
+func (r *Runner) Serve(ctx context.Context, slug, key string, input json.RawMessage) (Outcome, error) {
 	ctx = traced(ctx)
 	w, err := r.store.WorkflowBySlug(ctx, slug)
 	if err != nil {
@@ -178,7 +179,7 @@ func (r *Runner) Serve(ctx context.Context, slug string, input json.RawMessage) 
 	if err != nil {
 		return Outcome{}, err
 	}
-	run, err := r.begin(ctx, w.ID, *w.PublishedRevision, "served", store.Parent{}, input, pr.mask)
+	run, err := r.begin(ctx, store.NewRun{WorkflowID: w.ID, Revision: *w.PublishedRevision, Trigger: "served", Key: key, Input: input}, pr.mask)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -204,7 +205,7 @@ func (r *Runner) Call(ctx context.Context, c engine.Call, input json.RawMessage)
 	if err != nil {
 		return engine.Answer{}, refused(c, err)
 	}
-	run, err := r.begin(ctx, c.Workflow, c.Revision, "workflow", store.Parent{Run: c.Run, Node: c.Node}, input, pr.mask)
+	run, err := r.begin(ctx, store.NewRun{WorkflowID: c.Workflow, Revision: c.Revision, Trigger: "workflow", Parent: store.Parent{Run: c.Run, Node: c.Node}, Input: input}, pr.mask)
 	if err != nil {
 		return engine.Answer{}, refused(c, err)
 	}
@@ -424,9 +425,8 @@ func traced(ctx context.Context) context.Context {
 }
 
 // begin takes a slot, one of the workflow's share, and records the run as
-// running, in its trace, called from parent if it's a step's; unless the
-// trace has gone round too often.
-func (r *Runner) begin(ctx context.Context, workflowID string, revision int, trigger string, parent store.Parent, input json.RawMessage, m masker) (store.Run, error) {
+// running, in its trace; unless the trace has gone round too often.
+func (r *Runner) begin(ctx context.Context, n store.NewRun, m masker) (store.Run, error) {
 	t, _ := trace.From(ctx)
 	if t.Hops >= trace.MaxHops {
 		return store.Run{}, ErrLoop
@@ -434,20 +434,22 @@ func (r *Runner) begin(ctx context.Context, workflowID string, revision int, tri
 	if r.stopping.Err() != nil {
 		return store.Run{}, ErrBusy
 	}
-	if !r.take(workflowID) {
+	if !r.take(n.WorkflowID) {
 		return store.Run{}, ErrWorkflowBusy
 	}
 	select {
 	case r.slots <- struct{}{}:
 	default:
-		r.leave(workflowID)
+		r.leave(n.WorkflowID)
 		return store.Run{}, ErrBusy
 	}
 	// Kept masked; the run itself reads the input as it came.
-	run, err := r.store.StartRun(ctx, workflowID, revision, trigger, t.ID, parent, m.json(input))
+	input := n.Input
+	n.TraceID, n.Input = t.ID, m.json(input)
+	run, err := r.store.StartRun(ctx, n)
 	if err != nil {
 		<-r.slots
-		r.leave(workflowID)
+		r.leave(n.WorkflowID)
 		return store.Run{}, err
 	}
 	run.Input = input

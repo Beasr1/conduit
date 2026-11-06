@@ -17,11 +17,12 @@ type Run struct {
 	Trigger         string          `db:"trigger"`    // editor, served, or workflow: a step's (plan 07)
 	ParentRun       string          `db:"parent_run"` // the run a workflow run was called from, and its node; else empty
 	ParentNode      string          `db:"parent_node"`
-	TraceID         string          `db:"trace_id"` // its W3C trace (plan 06); empty for runs from before
-	Status          string          `db:"status"`   // running, succeeded, failed or cancelled
-	Input           json.RawMessage `db:"input"`    // empty in lists
-	Answered        int             `db:"answered"` // the answer's status, once it succeeded with one; else 0
-	Output          json.RawMessage `db:"output"`   // the answer's body, unless it has none; empty in lists
+	TraceID         string          `db:"trace_id"`   // its W3C trace (plan 06); empty for runs from before
+	Key             *RunKey         `db:"caller_key"` // the caller key a served run was called with (plan 07); else nil
+	Status          string          `db:"status"`     // running, succeeded, failed or cancelled
+	Input           json.RawMessage `db:"input"`      // empty in lists
+	Answered        int             `db:"answered"`   // the answer's status, once it succeeded with one; else 0
+	Output          json.RawMessage `db:"output"`     // the answer's body, unless it has none; empty in lists
 	OutputTruncated bool            `db:"output_truncated"`
 	Error           json.RawMessage `db:"error"` // {code, detail, node}, once it failed or was cancelled
 	StartedAt       time.Time       `db:"started_at"`
@@ -42,9 +43,19 @@ type NodeRun struct {
 	EndedAt   time.Time       `db:"ended_at"`
 }
 
+// RunKey is the caller key a served run was called with (plan 07).
+type RunKey struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Prefix string `json:"prefix"`
+}
+
 const (
+	// runKey is a run's key, as a RunKey, or null.
+	runKey = `(SELECT jsonb_build_object('id', k.id, 'name', k.name, 'prefix', k.prefix)
+		FROM caller_keys k WHERE k.id = runs.caller_key) AS caller_key`
 	runColumns = `id::text AS id, workflow_id::text AS workflow_id, revision, trigger, COALESCE(trace_id, '') AS trace_id,
-		COALESCE(parent_run::text, '') AS parent_run, COALESCE(parent_node, '') AS parent_node, status,
+		COALESCE(parent_run::text, '') AS parent_run, COALESCE(parent_node, '') AS parent_node, ` + runKey + `, status,
 		input, COALESCE(answered, 0) AS answered, output, output_truncated, error, started_at, ended_at`
 	nodeRunColumns = `run_id::text AS run_id, node_id, status, attempts, request, response, error, took, started_at, ended_at`
 )
@@ -56,13 +67,24 @@ type Parent struct {
 	Node string
 }
 
-// StartRun records a run of revision as running, and returns it with its id.
-func (s *Store) StartRun(ctx context.Context, workflowID string, revision int, trigger, traceID string, parent Parent, input json.RawMessage) (Run, error) {
-	r, err := one[Run](ctx, s.pool, `INSERT INTO runs (workflow_id, revision, trigger, trace_id, parent_run, parent_node, status, input)
-		VALUES ($1::uuid, $2, $3, $4, NULLIF($5, '')::uuid, NULLIF($6, ''), 'running', $7) RETURNING `+runColumns,
-		workflowID, revision, trigger, traceID, parent.Run, parent.Node, input)
+// NewRun is a run about to start.
+type NewRun struct {
+	WorkflowID string
+	Revision   int
+	Trigger    string // editor, served or workflow
+	TraceID    string
+	Parent     Parent // a workflow run's; else zero
+	Key        string // the id of the caller key a served run was called with (plan 07); else empty
+	Input      json.RawMessage
+}
+
+// StartRun records a run as running, and returns it with its id.
+func (s *Store) StartRun(ctx context.Context, n NewRun) (Run, error) {
+	r, err := one[Run](ctx, s.pool, `INSERT INTO runs (workflow_id, revision, trigger, trace_id, parent_run, parent_node, caller_key, status, input)
+		VALUES ($1::uuid, $2, $3, $4, NULLIF($5, '')::uuid, NULLIF($6, ''), NULLIF($7, '')::uuid, 'running', $8) RETURNING `+runColumns,
+		n.WorkflowID, n.Revision, n.Trigger, n.TraceID, n.Parent.Run, n.Parent.Node, n.Key, n.Input)
 	if err != nil {
-		return Run{}, fmt.Errorf("start a run of %s revision %d: %w", workflowID, revision, translate(err))
+		return Run{}, fmt.Errorf("start a run of %s revision %d: %w", n.WorkflowID, n.Revision, translate(err))
 	}
 	return r, nil
 }
@@ -132,7 +154,7 @@ func (s *Store) NodeRuns(ctx context.Context, runID string) ([]NodeRun, error) {
 // when it isn't empty.
 func (s *Store) Runs(ctx context.Context, workflowID string, limit int, before string) ([]Run, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id::text AS id, workflow_id::text AS workflow_id, revision, trigger, COALESCE(trace_id, '') AS trace_id,
-		COALESCE(parent_run::text, '') AS parent_run, COALESCE(parent_node, '') AS parent_node, status,
+		COALESCE(parent_run::text, '') AS parent_run, COALESCE(parent_node, '') AS parent_node, `+runKey+`, status,
 		COALESCE(answered, 0) AS answered, output_truncated, error, started_at, ended_at FROM runs
 		WHERE ($2::uuid IS NULL OR workflow_id = $2::uuid) AND ($3::uuid IS NULL OR id < $3::uuid)
 		ORDER BY id DESC LIMIT $1`, limit, orNull(workflowID), orNull(before))

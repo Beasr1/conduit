@@ -288,7 +288,7 @@ export function Canvas({ workflow }: { workflow: string }) {
       <Controls showInteractive={false} />
       {/* nokey: Delete or Backspace on these buttons would otherwise delete
           what's selected on the canvas. */}
-      <Panel position="top-left" className="nokey flex gap-2">
+      <Panel position="top-left" className="nokey flex flex-wrap gap-2">
         <AddNodeDialog kind="http" workflow={workflow} />
         <AddNodeDialog kind="transform" workflow={workflow} />
         <Button
@@ -301,6 +301,9 @@ export function Canvas({ workflow }: { workflow: string }) {
         </Button>
         <Button variant="outline" size="sm" onClick={() => openPanel("runs")}>
           Runs
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => openPanel("keys")}>
+          Keys
         </Button>
         <Button variant="ghost" size="sm" onClick={() => setTouring(true)}>
           Tour

@@ -17,7 +17,10 @@ is changed on its own page; Publish takes only steps that use one, a
 published workflow is one too, and an upstream no saved revision pins can
 be deleted. Plan 06's constants are built too: named values every
 expression reads as `$const.name`, sealed at rest, changed in one place for
-every run from then on, a secret one masked in what runs keep and answer.**
+every run from then on, a secret one masked in what runs keep and answer.
+Plan 07's caller keys are built (2026-11-05): `/serve` takes only a key
+of its workflow, one per caller, shown once, rotated with an expiry or
+revoked.**
 The web app signs in with a session cookie, which sign-out or 30 minutes
 unused ends, lists workflows and creates them, and edits, checks, saves
 and publishes one in graph mode, previewing what each step reads and sends
@@ -63,7 +66,11 @@ page beside them holds named values, plain or secret, which every
 expression reads as `$const.name` and a field offers by name: a run reads
 each as it is when the run starts, a preview a secret's stand-in, and what
 a run keeps or answers has every exact copy of a secret masked,
-`[secret crm_token]`. A constant something reads can't be deleted. What was built, and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
+`[secret crm_token]`. A constant something reads can't be deleted. The
+editor's Keys panel makes a workflow's caller keys, one per caller, each
+shown once to copy; rotating one gives its caller a new key and the old
+one an expiry, now, an hour, a day or 7 days, revoking stops one at once,
+neither deletes it, and a served run names the key it came with. What was built, and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
 13-minimal-editor.md, 14-the-response-picks.md, 06-hardening.md and
 07-tests-and-catalogue.md; the bigger picture is docs/plans/README.md.
 
@@ -120,7 +127,7 @@ just dev-server     API server on http://127.0.0.1:8080, after db-up and migrate
 just dev-web        web app on http://127.0.0.1:5173; /api is proxied to the server
 just upstream       the test upstream on http://127.0.0.1:8090, to try runs against
 just check          the gate: format, lint, race tests, coverage floors, typecheck, the browser test on a build, stale generated code
-just e2e            the browser tests: plan 04's Done flow and plan 07's library, in Chromium, against their own database, server and test upstream
+just e2e            the browser tests: plan 04's Done flow, plan 06's constants, plan 07's library and caller keys, in Chromium, against their own database, server and test upstream
 just fmt            apply formatting: gofumpt + goimports, Prettier
 just test           Go and web tests
 just gen            regenerate the HTTP layer, the workflow types and web/src/gen from schema/
@@ -160,6 +167,10 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`, and
 - All outbound HTTP goes through `internal/upstream`, which applies the
   SSRF guard, timeouts and size caps, and passes the run's W3C trace on,
   one hop further. Never use `http.DefaultClient`.
+- `/serve` takes only a caller key of its workflow, never the API token or
+  a session, and every refusal is the same 401 (plan 07). A script or test
+  makes one with `POST /v1/workflows/{id}/keys` (`keyFor` in the Go and
+  browser tests).
 - A call 8 hops into a trace is refused with 508, and a workflow may have
   a quarter of `CONDUIT_MAX_RUNS` in progress (plan 06). A test that
   starts many runs of one workflow needs a cap that allows them.

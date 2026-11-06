@@ -123,7 +123,7 @@ func TestRun_MasksSecrets(t *testing.T) {
 	var logs bytes.Buffer
 	r := New(db, upstream.New(upstream.Options{AllowPrivateNetworks: true}), slog.New(slog.NewTextHandler(&logs, nil)), Options{})
 	t.Cleanup(r.Stop)
-	out, err := r.Serve(t.Context(), w.Slug, json.RawMessage(`{"token": "`+longValue+`"}`))
+	out, err := r.Serve(t.Context(), w.Slug, "", json.RawMessage(`{"token": "`+longValue+`"}`))
 	if err != nil || out.Answer != 200 {
 		t.Fatalf("Serve() = %+v, %v", out, err)
 	}
@@ -162,7 +162,7 @@ func TestRun_MasksSecretsInFailures(t *testing.T) {
 	var logs bytes.Buffer
 	r := New(db, upstream.New(upstream.Options{AllowPrivateNetworks: true}), slog.New(slog.NewTextHandler(&logs, nil)), Options{})
 	t.Cleanup(r.Stop)
-	out, err := r.Serve(context.WithoutCancel(t.Context()), w.Slug, nil)
+	out, err := r.Serve(context.WithoutCancel(t.Context()), w.Slug, "", nil)
 	if err != nil {
 		t.Fatalf("Serve() = %+v, %v", out, err)
 	}
@@ -188,7 +188,7 @@ func TestRun_MasksSecretsInFailures(t *testing.T) {
 	               "errors": {"body": "$error('nor with ' & $const.`+long+`)"}}
 	}`)
 	logs.Reset()
-	out, err = r.Serve(context.WithoutCancel(t.Context()), caught.Slug, nil)
+	out, err = r.Serve(context.WithoutCancel(t.Context()), caught.Slug, "", nil)
 	if err != nil || out.Problem == nil {
 		t.Fatalf("Serve() = %+v, %v; want a problem passed on", out, err)
 	}

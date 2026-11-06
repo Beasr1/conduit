@@ -6,6 +6,7 @@ import {
   failsInto,
   open,
   said,
+  serve,
   signIn,
   step,
   upstreamTab,
@@ -131,10 +132,7 @@ test("the library: make an upstream, use it from a step, run and serve it, chang
   await expect(
     page.getByText(new RegExp(`^Revision 2 is served at .*/serve/${slug}$`)),
   ).toBeVisible();
-  const served = await page.request.post(`/serve/${slug}`, {
-    headers: { Authorization: `Bearer ${stack.token}` },
-    data: { user_id: "7" },
-  });
+  const served = await serve(page, slug, { user_id: "7" });
   expect(served.status()).toBe(200);
   expect(await served.json()).toMatchObject({ id: "7", name: "User 7" });
 
@@ -232,10 +230,7 @@ test("a request of its own: Publish asks for an upstream, and Save as upstream m
   await expect(
     page.getByText(new RegExp(`^Revision 2 is served at .*/serve/${slug}$`)),
   ).toBeVisible();
-  const served = await page.request.post(`/serve/${slug}`, {
-    headers: { Authorization: `Bearer ${stack.token}` },
-    data: { user_id: "7" },
-  });
+  const served = await serve(page, slug, { user_id: "7" });
   expect(served.status()).toBe(200);
   expect(await served.json()).toMatchObject({ id: "7", name: "User 7" });
 });
@@ -375,10 +370,7 @@ test("a workflow as a step: pick a published one, give its input, run and serve 
   await expect(
     page.getByText(new RegExp(`^Revision 2 is served at .*/serve/${slug}$`)),
   ).toBeVisible();
-  const served = await page.request.post(`/serve/${slug}`, {
-    headers: auth,
-    data: { id: "7" },
-  });
+  const served = await serve(page, slug, { id: "7" });
   expect(served.status()).toBe(200);
   expect(await served.json()).toMatchObject({ id: "7", name: "User 7" });
 });

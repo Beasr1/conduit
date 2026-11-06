@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useRuns } from "@/features/editor/hooks/use-runs";
-import { runSaid } from "@/features/editor/runs";
+import { calledBy, runSaid } from "@/features/editor/runs";
 import { useEditor } from "@/features/editor/store";
 
 // RunList lists a workflow's latest runs, newest first: those started here,
@@ -36,8 +36,7 @@ export function RunList({ workflow }: { workflow: string }) {
               {new Date(r.started_at).toLocaleString()} · revision {r.revision}
             </span>
             <span className="text-muted-foreground">
-              {runSaid(r)} ·{" "}
-              {r.trigger === "served" ? "called at its URL" : "run here"}
+              {runSaid(r)} · {calledBy(r)}
             </span>
             {r.trace_id && (
               <span className="font-mono text-xs text-muted-foreground">

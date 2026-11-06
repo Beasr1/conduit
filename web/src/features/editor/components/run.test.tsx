@@ -422,6 +422,7 @@ test("Runs lists the workflow's runs, picking one shows it, and Close run goes b
     ...started,
     id: "r-2",
     trigger: "served",
+    key: { id: "k-1", name: "CRM sync", prefix: "cnd_7f3a" },
     status: "failed",
     ended_at: at(40),
     error: {
@@ -452,11 +453,22 @@ test("Runs lists the workflow's runs, picking one shows it, and Close run goes b
             workflow_id: served.workflow_id,
             revision: served.revision,
             trigger: served.trigger,
+            key: served.key,
             trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
             status: served.status,
             started_at: served.started_at,
             ended_at: at(40),
             error: served.error,
+          },
+          // From before served runs kept their key.
+          {
+            id: "r-1",
+            workflow_id: served.workflow_id,
+            revision: 1,
+            trigger: "served",
+            status: "succeeded",
+            started_at: at(-500),
+            ended_at: at(-400),
           },
           // From before runs kept their trace.
           {
@@ -481,12 +493,18 @@ test("Runs lists the workflow's runs, picking one shows it, and Close run goes b
     await within(panel).findByText("trace 4bf92f3577b34da6a3ce929d0e0e4736"),
   ).toBeTruthy();
   expect(within(panel).getAllByText(/^trace/)).toHaveLength(1);
+  expect(
+    within(panel).getByRole("button", { name: /called at its URL/ }),
+  ).toBeTruthy();
+  expect(within(panel).getByRole("button", { name: /run here/ })).toBeTruthy();
   fireEvent.click(
-    await within(panel).findByRole("button", { name: /called at its URL/ }),
+    within(panel).getByRole("button", {
+      name: /called by CRM sync \(cnd_7f3a…\)/,
+    }),
   );
   expect(
     await screen.findByText(
-      /^Run of revision 1, started .*: failed in 40 ms: user answered 503$/,
+      /^Run of revision 1, called by CRM sync \(cnd_7f3a…\), started .*: failed in 40 ms: user answered 503$/,
     ),
   ).toBeTruthy();
   await waitFor(() => expect(line("user")).toBe("failed: 503"));

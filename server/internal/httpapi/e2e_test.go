@@ -84,8 +84,12 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("run = %s", r.body)
 	}
 
-	// The served endpoint: the output, or problem details naming the node.
-	r = send(http.MethodPost, "/serve/"+slug, `{"user_id": "7"}`)
+	// The served endpoint, called with a key of the workflow's own: the
+	// output, or problem details naming the node.
+	r = send(http.MethodPost, "/v1/workflows/"+id+"/keys", `{"name": "Greeter"}`)
+	want(r, http.StatusCreated, "make a key")
+	key := "Bearer " + strict[gen.MadeKey](t, r.body).Value
+	r = send(http.MethodPost, "/serve/"+slug, `{"user_id": "7"}`, "Authorization", key)
 	want(r, http.StatusOK, "serve")
 	if string(r.body) != `{"greeting":"Hello, Ada"}` {
 		t.Errorf("served output = %s", r.body)
@@ -99,7 +103,7 @@ func TestEndToEnd(t *testing.T) {
 		{`{"user_id": "500"}`, http.StatusBadGateway, "upstream_failed"},
 		{`{"user_id": "slow"}`, http.StatusGatewayTimeout, "timeout"},
 	} {
-		r := send(http.MethodPost, "/serve/"+slug, tt.input)
+		r := send(http.MethodPost, "/serve/"+slug, tt.input, "Authorization", key)
 		want(r, tt.status, "serve "+tt.input)
 		if p := problemOf(t, r); p.Code != tt.code || (tt.status != http.StatusBadRequest && p.Node != "user") {
 			t.Errorf("serve %s: %+v", tt.input, p)

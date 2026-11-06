@@ -19,6 +19,30 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for CallerKeyStatus.
+const (
+	Active   CallerKeyStatus = "active"
+	Expired  CallerKeyStatus = "expired"
+	Expiring CallerKeyStatus = "expiring"
+	Revoked  CallerKeyStatus = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the CallerKeyStatus enum.
+func (e CallerKeyStatus) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case Expired:
+		return true
+	case Expiring:
+		return true
+	case Revoked:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NodeEventKind.
 const (
 	NodeEventKindCancelled NodeEventKind = "cancelled"
@@ -67,6 +91,30 @@ func (e NodeRunStatus) Valid() bool {
 	case NodeRunStatusSkipped:
 		return true
 	case NodeRunStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RotateKeyOldExpiresIn.
+const (
+	N1D RotateKeyOldExpiresIn = "1d"
+	N1H RotateKeyOldExpiresIn = "1h"
+	N7D RotateKeyOldExpiresIn = "7d"
+	Now RotateKeyOldExpiresIn = "now"
+)
+
+// Valid indicates whether the value is a known member of the RotateKeyOldExpiresIn enum.
+func (e RotateKeyOldExpiresIn) Valid() bool {
+	switch e {
+	case N1D:
+		return true
+	case N1H:
+		return true
+	case N7D:
+		return true
+	case Now:
 		return true
 	default:
 		return false
@@ -193,6 +241,39 @@ func (e RunSummaryTrigger) Valid() bool {
 	}
 }
 
+// CallerKey defines model for CallerKey.
+type CallerKey struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// ExpiresAt When a rotated key stops working, as chosen when it was rotated. Absent for a key not rotated.
+	ExpiresAt time.Time `json:"expires_at,omitempty,omitzero"`
+	ID        string    `json:"id"`
+
+	// LastUsedAt When its latest run started. Absent for a key no run has used.
+	LastUsedAt time.Time `json:"last_used_at,omitempty,omitzero"`
+
+	// Name Who calls with it, such as CRM sync. A rotated key's new key has its name.
+	Name string `json:"name"`
+
+	// Prefix The key's first 8 characters, cnd_ and 4 more, to tell it apart. The server keeps no more of it than these and its SHA-256.
+	Prefix     string     `json:"prefix"`
+	Provenance Provenance `json:"provenance"`
+
+	// RevokedAt When it was revoked. Absent for a key not revoked.
+	RevokedAt time.Time `json:"revoked_at,omitempty,omitzero"`
+
+	// Status active, it works and can be rotated; expiring, rotated, and it works until expires_at; expired, rotated, and past expires_at; revoked, stopped at revoked_at. Active and expiring keys work.
+	Status CallerKeyStatus `json:"status"`
+}
+
+// CallerKeyStatus active, it works and can be rotated; expiring, rotated, and it works until expires_at; expired, rotated, and past expires_at; revoked, stopped at revoked_at. Active and expiring keys work.
+type CallerKeyStatus string
+
+// CallerKeyList defines model for CallerKeyList.
+type CallerKeyList struct {
+	Keys []CallerKey `json:"keys"`
+}
+
 // Constant defines model for Constant.
 type Constant struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -253,6 +334,12 @@ type CreateConstant struct {
 	Value string `json:"value"`
 }
 
+// CreateKey defines model for CreateKey.
+type CreateKey struct {
+	// Name Who calls with it, 1 to 200 characters.
+	Name string `json:"name"`
+}
+
 // CreateUpstream defines model for CreateUpstream.
 type CreateUpstream struct {
 	// Definition A saved API endpoint and how it's handled, one version of it (plan 07). Every save makes a new version, which never changes, and a step that uses the upstream pins one. Its templates and body read its parameters by name, {{ user_id }}, and each step that uses it gives them values.
@@ -281,6 +368,14 @@ type Line struct {
 
 	// Unhandled It left the node's Unhandled block, and on is absent.
 	Unhandled bool `json:"unhandled,omitempty,omitzero"`
+}
+
+// MadeKey defines model for MadeKey.
+type MadeKey struct {
+	Key CallerKey `json:"key"`
+
+	// Value The key itself, cnd_ and 43 letters and digits. It's never sent again.
+	Value string `json:"value"`
 }
 
 // NodeEvent The data of a `node` event in a run's stream.
@@ -487,6 +582,27 @@ type RevisionSummary struct {
 	Revision   int        `json:"revision"`
 }
 
+// RotateKey defines model for RotateKey.
+type RotateKey struct {
+	// OldExpiresIn How long the old key goes on working, so its caller can change over to the new one; now stops it at once.
+	OldExpiresIn RotateKeyOldExpiresIn `json:"old_expires_in"`
+}
+
+// RotateKeyOldExpiresIn How long the old key goes on working, so its caller can change over to the new one; now stops it at once.
+type RotateKeyOldExpiresIn string
+
+// RotatedKey defines model for RotatedKey.
+type RotatedKey struct {
+	// Key The new key.
+	Key CallerKey `json:"key"`
+
+	// Old The old key, with its expiry.
+	Old CallerKey `json:"old"`
+
+	// Value The new key itself, cnd_ and 43 letters and digits. It's never sent again.
+	Value string `json:"value"`
+}
+
 // Run defines model for Run.
 type Run struct {
 	// Answered The status of the answer the run gave, its own once it succeeded, or, once it failed, the status by cause its response's error body answered with, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none.
@@ -501,6 +617,9 @@ type Run struct {
 
 	// Input The input, as sent.
 	Input json.RawMessage `json:"input"`
+
+	// Key The caller key a served run was called with (plan 07). Absent for any other run, and for served runs from before keys.
+	Key RunKey `json:"key,omitempty,omitzero"`
 
 	// Nodes What each node did, in the order they ended. Only from GET /v1/runs/{id}.
 	Nodes []NodeRun `json:"nodes,omitempty,omitzero"`
@@ -555,6 +674,17 @@ type RunError struct {
 // interrupted: the server stopped before the run ended.
 type RunErrorCode string
 
+// RunKey defines model for RunKey.
+type RunKey struct {
+	ID string `json:"id"`
+
+	// Name Who calls with it.
+	Name string `json:"name"`
+
+	// Prefix Its first characters, which tell a rotated key and its new key apart.
+	Prefix string `json:"prefix"`
+}
+
 // RunList defines model for RunList.
 type RunList struct {
 	// Next Pass as `before` for the next page. Absent on the last page.
@@ -579,6 +709,9 @@ type RunSummary struct {
 	// Error Why a run or a node didn't succeed.
 	Error RunError `json:"error,omitempty,omitzero"`
 	ID    string   `json:"id"`
+
+	// Key The caller key a served run was called with (plan 07). Absent for any other run, and for served runs from before keys.
+	Key RunKey `json:"key,omitempty,omitzero"`
 
 	// Parent A run of a workflow a step uses, the run and the step it was called from. Absent for any other run.
 	Parent    *RunParent       `json:"parent,omitempty"`
@@ -738,6 +871,9 @@ type WorkflowRevision struct {
 // ConstantName defines model for ConstantName.
 type ConstantName = string
 
+// KeyID defines model for KeyID.
+type KeyID = string
+
 // RunID defines model for RunID.
 type RunID = string
 
@@ -836,6 +972,12 @@ type CreateWorkflowJSONRequestBody = CreateWorkflow
 // SaveDraftJSONRequestBody defines body for SaveDraft for application/json ContentType.
 type SaveDraftJSONRequestBody = externalRef0.Definition
 
+// CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
+type CreateKeyJSONRequestBody = CreateKey
+
+// RotateKeyJSONRequestBody defines body for RotateKey for application/json ContentType.
+type RotateKeyJSONRequestBody = RotateKey
+
 // PublishWorkflowJSONRequestBody defines body for PublishWorkflow for application/json ContentType.
 type PublishWorkflowJSONRequestBody = Publish
 
@@ -928,6 +1070,18 @@ type ServerInterface interface {
 	// SaveDraft Save the next revision
 	// (PUT /v1/workflows/{id}/draft)
 	SaveDraft(w http.ResponseWriter, r *http.Request, id WorkflowID, params SaveDraftParams)
+	// ListKeys List a workflow's caller keys, newest first
+	// (GET /v1/workflows/{id}/keys)
+	ListKeys(w http.ResponseWriter, r *http.Request, id WorkflowID)
+	// CreateKey Make a caller key
+	// (POST /v1/workflows/{id}/keys)
+	CreateKey(w http.ResponseWriter, r *http.Request, id WorkflowID)
+	// RevokeKey Stop a key at once
+	// (POST /v1/workflows/{id}/keys/{key}/revoke)
+	RevokeKey(w http.ResponseWriter, r *http.Request, id WorkflowID, key KeyID)
+	// RotateKey Give an active key's caller a new key, and the old one an expiry
+	// (POST /v1/workflows/{id}/keys/{key}/rotate)
+	RotateKey(w http.ResponseWriter, r *http.Request, id WorkflowID, key KeyID)
 	// PublishWorkflow Make a revision the one served
 	// (POST /v1/workflows/{id}/publish)
 	PublishWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID)
@@ -1722,6 +1876,128 @@ func (siw *ServerInterfaceWrapper) SaveDraft(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// ListKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListKeys(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKeys(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateKey operation middleware
+func (siw *ServerInterfaceWrapper) CreateKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateKey(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeKey operation middleware
+func (siw *ServerInterfaceWrapper) RevokeKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeKey(w, r, id, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateKey operation middleware
+func (siw *ServerInterfaceWrapper) RotateKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateKey(w, r, id, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PublishWorkflow operation middleware
 func (siw *ServerInterfaceWrapper) PublishWorkflow(w http.ResponseWriter, r *http.Request) {
 
@@ -1969,6 +2245,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/validate", wrapper.ValidateDefinition)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/preview", wrapper.PreviewDefinition)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/runs", wrapper.StartRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{id}/keys", wrapper.ListKeys)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/keys", wrapper.CreateKey)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/keys/{key}/rotate", wrapper.RotateKey)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/keys/{key}/revoke", wrapper.RevokeKey)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams", wrapper.ListUpstreams)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams", wrapper.CreateUpstream)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams/validate", wrapper.ValidateUpstream)
@@ -3704,6 +3984,274 @@ func (response SaveDraft428ApplicationProblemPlusJSONResponse) VisitSaveDraftRes
 	return err
 }
 
+type ListKeysRequestObject struct {
+	ID WorkflowID `json:"id"`
+}
+
+type ListKeysResponseObject interface {
+	VisitListKeysResponse(w http.ResponseWriter) error
+}
+
+type ListKeys200JSONResponse CallerKeyList
+
+func (response ListKeys200JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListKeys401ApplicationProblemPlusJSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys404ApplicationProblemPlusJSONResponse Problem
+
+func (response ListKeys404ApplicationProblemPlusJSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyRequestObject struct {
+	ID   WorkflowID `json:"id"`
+	Body *CreateKeyJSONRequestBody
+}
+
+type CreateKeyResponseObject interface {
+	VisitCreateKeyResponse(w http.ResponseWriter) error
+}
+
+type CreateKey201JSONResponse MadeKey
+
+func (response CreateKey201JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response CreateKey401ApplicationProblemPlusJSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey404ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateKey404ApplicationProblemPlusJSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey409ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateKey409ApplicationProblemPlusJSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey422ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateKey422ApplicationProblemPlusJSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeKeyRequestObject struct {
+	ID  WorkflowID `json:"id"`
+	Key KeyID      `json:"key"`
+}
+
+type RevokeKeyResponseObject interface {
+	VisitRevokeKeyResponse(w http.ResponseWriter) error
+}
+
+type RevokeKey200JSONResponse CallerKey
+
+func (response RevokeKey200JSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeKey401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeKey401ApplicationProblemPlusJSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeKey404ApplicationProblemPlusJSONResponse Problem
+
+func (response RevokeKey404ApplicationProblemPlusJSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateKeyRequestObject struct {
+	ID   WorkflowID `json:"id"`
+	Key  KeyID      `json:"key"`
+	Body *RotateKeyJSONRequestBody
+}
+
+type RotateKeyResponseObject interface {
+	VisitRotateKeyResponse(w http.ResponseWriter) error
+}
+
+type RotateKey200JSONResponse RotatedKey
+
+func (response RotateKey200JSONResponse) VisitRotateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateKey401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RotateKey401ApplicationProblemPlusJSONResponse) VisitRotateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateKey404ApplicationProblemPlusJSONResponse Problem
+
+func (response RotateKey404ApplicationProblemPlusJSONResponse) VisitRotateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateKey409ApplicationProblemPlusJSONResponse Problem
+
+func (response RotateKey409ApplicationProblemPlusJSONResponse) VisitRotateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateKey422ApplicationProblemPlusJSONResponse Problem
+
+func (response RotateKey422ApplicationProblemPlusJSONResponse) VisitRotateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type PublishWorkflowRequestObject struct {
 	ID   WorkflowID `json:"id"`
 	Body *PublishWorkflowJSONRequestBody
@@ -4082,6 +4630,18 @@ type StrictServerInterface interface {
 	// SaveDraft Save the next revision
 	// (PUT /v1/workflows/{id}/draft)
 	SaveDraft(ctx context.Context, request SaveDraftRequestObject) (SaveDraftResponseObject, error)
+	// ListKeys List a workflow's caller keys, newest first
+	// (GET /v1/workflows/{id}/keys)
+	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
+	// CreateKey Make a caller key
+	// (POST /v1/workflows/{id}/keys)
+	CreateKey(ctx context.Context, request CreateKeyRequestObject) (CreateKeyResponseObject, error)
+	// RevokeKey Stop a key at once
+	// (POST /v1/workflows/{id}/keys/{key}/revoke)
+	RevokeKey(ctx context.Context, request RevokeKeyRequestObject) (RevokeKeyResponseObject, error)
+	// RotateKey Give an active key's caller a new key, and the old one an expiry
+	// (POST /v1/workflows/{id}/keys/{key}/rotate)
+	RotateKey(ctx context.Context, request RotateKeyRequestObject) (RotateKeyResponseObject, error)
 	// PublishWorkflow Make a revision the one served
 	// (POST /v1/workflows/{id}/publish)
 	PublishWorkflow(ctx context.Context, request PublishWorkflowRequestObject) (PublishWorkflowResponseObject, error)
@@ -4920,6 +5480,126 @@ func (sh *strictHandler) SaveDraft(w http.ResponseWriter, r *http.Request, id Wo
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SaveDraftResponseObject); ok {
 		if err := validResponse.VisitSaveDraftResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListKeys operation middleware
+func (sh *strictHandler) ListKeys(w http.ResponseWriter, r *http.Request, id WorkflowID) {
+	var request ListKeysRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListKeys(ctx, request.(ListKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListKeysResponseObject); ok {
+		if err := validResponse.VisitListKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateKey operation middleware
+func (sh *strictHandler) CreateKey(w http.ResponseWriter, r *http.Request, id WorkflowID) {
+	var request CreateKeyRequestObject
+
+	request.ID = id
+
+	var body CreateKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateKey(ctx, request.(CreateKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateKeyResponseObject); ok {
+		if err := validResponse.VisitCreateKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeKey operation middleware
+func (sh *strictHandler) RevokeKey(w http.ResponseWriter, r *http.Request, id WorkflowID, key KeyID) {
+	var request RevokeKeyRequestObject
+
+	request.ID = id
+	request.Key = key
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeKey(ctx, request.(RevokeKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeKeyResponseObject); ok {
+		if err := validResponse.VisitRevokeKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateKey operation middleware
+func (sh *strictHandler) RotateKey(w http.ResponseWriter, r *http.Request, id WorkflowID, key KeyID) {
+	var request RotateKeyRequestObject
+
+	request.ID = id
+	request.Key = key
+
+	var body RotateKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateKey(ctx, request.(RotateKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateKeyResponseObject); ok {
+		if err := validResponse.VisitRotateKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

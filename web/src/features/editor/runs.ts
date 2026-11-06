@@ -142,6 +142,22 @@ export function took(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+// calledBy says where a run came from: here, a step of another workflow's
+// run (plan 07), or its URL, by the caller key it was called with, which
+// its first characters tell apart from the key it was rotated to.
+export function calledBy(run: RunSummary): string {
+  switch (run.trigger) {
+    case "editor":
+      return "run here";
+    case "workflow":
+      return "called by a step of another workflow";
+    case "served":
+      return run.key
+        ? `called by ${run.key.name} (${run.key.prefix}…)`
+        : "called at its URL";
+  }
+}
+
 // runSaid is how a run went, in a few words: "running", "succeeded in
 // 1.2 s, answered 404", "failed: …", and "; Unhandled answered 502" when
 // its response's unhandled answered its failure.

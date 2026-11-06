@@ -16,36 +16,42 @@ import (
 	"github.com/Beasr1/conduit/server/internal/trace"
 )
 
-// serveDef is one step calling URL with the token, its failures failing
-// the run, and its 2xx answering 200.
+// serveDef is one step calling URL with KEY as its bearer token, its
+// failures failing the run, and its 2xx answering 200.
 const serveDef = `{"nodes": [{"id": "call", "kind": "http", "unhandled": {"fail": true},
-    "request": {"method": "POST", "url": "URL", "headers": {"Authorization": "Bearer ` + testToken + `"}, "body": "{}"}}],
+    "request": {"method": "POST", "url": "URL", "headers": {"Authorization": "Bearer KEY"}, "body": "{}"}}],
   "response": {"answers": [{"status": 200, "lines": [{"from": "call"}]}]}}`
 
-// servedAt stores serveDef, calling url, as a new workflow at slug, and
-// publishes it: the slug comes first, as the step may call its own.
-func servedAt(t *testing.T, slug, url string) store.Workflow {
+// servedAt stores serveDef, calling url, as a new workflow at slug, with a
+// caller key, and publishes it; it returns the workflow and its key, which
+// its step calls with. The slug and the key come first, as the step may
+// call its own workflow.
+func servedAt(t *testing.T, slug, url string) (store.Workflow, string) {
 	t.Helper()
-	def := json.RawMessage(strings.ReplaceAll(serveDef, "URL", url))
+	key, k := mintKey()
+	def := json.RawMessage(strings.NewReplacer("URL", url, "KEY", key).Replace(serveDef))
 	w, _, err := db.CreateWorkflow(t.Context(), slug, slug, def, store.Provenance{Actor: "token"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateKey(t.Context(), w.ID, "itself", k, store.Provenance{Actor: "token"}); err != nil {
 		t.Fatal(err)
 	}
 	if w, err = db.Publish(t.Context(), w.ID, 1); err != nil {
 		t.Fatal(err)
 	}
-	return w
+	return w, key
 }
 
-// serve calls /serve/slug on srv with the token, and no trace of its own.
-func serve(t *testing.T, srv *httptest.Server, slug string) reply {
+// serve calls /serve/slug on srv with key, and no trace of its own.
+func serve(t *testing.T, srv *httptest.Server, slug, key string) reply {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/serve/"+slug, strings.NewReader("{}"))
 	if err != nil {
 		t.Error(err)
 		return reply{}
 	}
-	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := srv.Client().Do(req)
 	if err != nil {
@@ -75,11 +81,11 @@ func TestServe_AWorkflowCallingItselfStops(t *testing.T) {
 	srv := httptest.NewServer(newRouter(db, runner.Options{}, 0))
 	t.Cleanup(srv.Close)
 	slug := newSlug(t)
-	w := servedAt(t, slug, srv.URL+"/serve/"+slug)
+	w, key := servedAt(t, slug, srv.URL+"/serve/"+slug)
 
 	// Each turn fails on the one after it, so the caller's answer is the
 	// first turn's failure.
-	if r := serve(t, srv, slug); r.status != http.StatusBadGateway {
+	if r := serve(t, srv, slug, key); r.status != http.StatusBadGateway {
 		t.Errorf("POST /serve/%s = %d %s, want 502", slug, r.status, r.body)
 	}
 	runs := runsOf(t, w)
@@ -102,8 +108,8 @@ func TestServe_AWorkflowCallingItselfStops(t *testing.T) {
 func TestServe_ALoopIs508(t *testing.T) {
 	t.Parallel()
 	slug := newSlug(t)
-	servedAt(t, slug, "https://crm.example.com/v1")
-	r := call(t, http.MethodPost, "/serve/"+slug, "{}",
+	_, key := servedAt(t, slug, "https://crm.example.com/v1")
+	r := serveWith(t, slug, key, "{}",
 		"Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
 		"Tracestate", fmt.Sprintf("conduit=h:%d", trace.MaxHops))
 	if r.status != http.StatusLoopDetected {
@@ -123,28 +129,28 @@ func TestServe_ALoopThroughABlackBoxHoldsItsShare(t *testing.T) {
 	t.Cleanup(srv.Close)
 	quick := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{}`) }))
 	t.Cleanup(quick.Close)
-	other := servedAt(t, newSlug(t), quick.URL)
+	other, otherKey := servedAt(t, newSlug(t), quick.URL)
 
-	// The box calls the workflow back with none of the trace it was sent.
-	// On its second call, with the workflow's two runs in progress, it
-	// calls the other workflow first.
+	// The box calls the workflow back, with the key it was called with and
+	// none of the trace. On its second call, with the workflow's two runs in
+	// progress, it calls the other workflow first.
 	var calls atomic.Int32
 	var meanwhile, refused reply
 	slug := newSlug(t)
 	box := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if calls.Add(1) == 2 {
-			meanwhile = serve(t, srv, other.Slug)
+			meanwhile = serve(t, srv, other.Slug, otherKey)
 		}
-		back := serve(t, srv, slug)
+		back := serve(t, srv, slug, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		if back.status == http.StatusServiceUnavailable {
 			refused = back
 		}
 		w.WriteHeader(back.status)
 	}))
 	t.Cleanup(box.Close)
-	w := servedAt(t, slug, box.URL)
+	w, key := servedAt(t, slug, box.URL)
 
-	if r := serve(t, srv, slug); r.status != http.StatusBadGateway {
+	if r := serve(t, srv, slug, key); r.status != http.StatusBadGateway {
 		t.Errorf("POST /serve/%s = %d %s, want 502", slug, r.status, r.body)
 	}
 	if calls.Load() != 2 || meanwhile.status != http.StatusOK {

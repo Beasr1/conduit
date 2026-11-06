@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useFollowRun, useRun } from "@/features/editor/hooks/use-runs";
-import { runSaid } from "@/features/editor/runs";
+import { calledBy, runSaid } from "@/features/editor/runs";
 import { useEditor } from "@/features/editor/store";
 
 // RunBar says which run the canvas shows and how it went, follows the run
@@ -23,7 +23,7 @@ export function RunBar({ moved }: { moved: (revision: number) => boolean }) {
       {/* A status, so a screen reader hears the run end. */}
       <p role="status">
         {run.data
-          ? `Run of revision ${run.data.revision}, started ${started}: ${runSaid(run.data)}${moved(run.data.revision) ? ". The draft has changed since." : ""}`
+          ? `Run of revision ${run.data.revision}${run.data.key ? `, ${calledBy(run.data)}` : ""}, started ${started}: ${runSaid(run.data)}${moved(run.data.revision) ? ". The draft has changed since." : ""}`
           : run.isError
             ? "Couldn't load the run."
             : "Loading the run…"}

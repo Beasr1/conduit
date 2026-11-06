@@ -272,10 +272,11 @@ func TestUpstreams_AStepThatUsesOne(t *testing.T) {
 	if r = call(t, http.MethodPost, "/v1/workflows/"+wr.Workflow.ID+"/publish", `{"revision": 1}`); r.status != http.StatusOK {
 		t.Fatalf("publish = %d %s", r.status, r.body)
 	}
-	if r = call(t, http.MethodPost, "/serve/"+wr.Workflow.Slug, `{"user_id": "7"}`); r.status != http.StatusOK || !strings.Contains(string(r.body), `"Ada"`) {
+	key := keyFor(t, wr.Workflow.ID)
+	if r = serveWith(t, wr.Workflow.Slug, key, `{"user_id": "7"}`); r.status != http.StatusOK || !strings.Contains(string(r.body), `"Ada"`) {
 		t.Errorf("serve 7 = %d %s", r.status, r.body)
 	}
-	if r = call(t, http.MethodPost, "/serve/"+wr.Workflow.Slug, `{"user_id": "gone"}`); r.status != http.StatusNotFound {
+	if r = serveWith(t, wr.Workflow.Slug, key, `{"user_id": "gone"}`); r.status != http.StatusNotFound {
 		t.Errorf("serve gone = %d %s", r.status, r.body)
 	}
 	// The library says which workflow that uses it is served.
@@ -365,7 +366,7 @@ func TestWorkflowsAsSteps(t *testing.T) {
 	if r = call(t, http.MethodPost, "/v1/workflows/"+wr.Workflow.ID+"/publish", `{"revision": 1}`); r.status != http.StatusOK {
 		t.Fatalf("publish = %d %s", r.status, r.body)
 	}
-	r = call(t, http.MethodPost, "/serve/"+wr.Workflow.Slug, `{"who": "Ada"}`)
+	r = serveWith(t, wr.Workflow.Slug, keyFor(t, wr.Workflow.ID), `{"who": "Ada"}`)
 	if r.status != http.StatusOK || string(r.body) != `{"hello":"Ada"}` {
 		t.Errorf("serve = %d %s", r.status, r.body)
 	}

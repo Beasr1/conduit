@@ -148,16 +148,20 @@ func TestEveryJSONBodyRefusesUnknownFields(t *testing.T) {
 	id := create(t, validDef).Workflow.ID
 	upstream := makeUpstream(t, usersAPI).Upstream.ID
 	paths := map[string]string{
-		"POST /v1/upstreams":              "/v1/upstreams",
-		"PUT /v1/upstreams/{id}":          "/v1/upstreams/" + upstream,
-		"POST /v1/upstreams/validate":     "/v1/upstreams/validate",
-		"POST /v1/workflows":              "/v1/workflows",
-		"PUT /v1/workflows/{id}/draft":    "/v1/workflows/" + id + "/draft",
-		"POST /v1/workflows/{id}/publish": "/v1/workflows/" + id + "/publish",
-		"POST /v1/validate":               "/v1/validate",
-		"POST /v1/preview":                "/v1/preview",
-		"POST /v1/workflows/{id}/runs":    "/v1/workflows/" + id + "/runs",
-		"POST /v1/session":                "/v1/session",
+		"POST /v1/upstreams":                        "/v1/upstreams",
+		"PUT /v1/upstreams/{id}":                    "/v1/upstreams/" + upstream,
+		"POST /v1/upstreams/validate":               "/v1/upstreams/validate",
+		"POST /v1/workflows":                        "/v1/workflows",
+		"PUT /v1/workflows/{id}/draft":              "/v1/workflows/" + id + "/draft",
+		"POST /v1/workflows/{id}/publish":           "/v1/workflows/" + id + "/publish",
+		"POST /v1/validate":                         "/v1/validate",
+		"POST /v1/preview":                          "/v1/preview",
+		"POST /v1/workflows/{id}/runs":              "/v1/workflows/" + id + "/runs",
+		"POST /v1/session":                          "/v1/session",
+		"POST /v1/constants":                        "/v1/constants",
+		"PUT /v1/constants/{name}":                  "/v1/constants/c_unknown_fields",
+		"POST /v1/workflows/{id}/keys":              "/v1/workflows/" + id + "/keys",
+		"POST /v1/workflows/{id}/keys/{key}/rotate": "/v1/workflows/" + id + "/keys/" + makeKey(t, id, "CRM sync").Key.ID + "/rotate",
 	}
 	for pattern := range bodies {
 		path, ok := paths[pattern]
@@ -169,6 +173,33 @@ func TestEveryJSONBodyRefusesUnknownFields(t *testing.T) {
 		r := call(t, method, path, `{"surprise": true}`, "If-Match", `"1"`)
 		if p := problemOf(t, r); r.status != 422 || !strings.Contains(pointers(p), "/surprise unknown_field") {
 			t.Errorf("%s: %d %s", pattern, r.status, r.body)
+		}
+	}
+}
+
+// routes records the patterns a router is given.
+type routes []string
+
+func (rs *routes) HandleFunc(pattern string, _ func(http.ResponseWriter, *http.Request)) {
+	*rs = append(*rs, pattern)
+}
+func (*routes) ServeHTTP(http.ResponseWriter, *http.Request) {}
+
+// Every route a body is sent to is in bodies, unless it takes none, or any
+// JSON at all: one left out would drop an unknown field without a word.
+func TestEveryBodyIsChecked(t *testing.T) {
+	t.Parallel()
+	unchecked := map[string]bool{
+		"POST /serve/{slug}":                        true, // the run's input, any JSON
+		"POST /v1/constants/{name}/undo":            true, // none
+		"POST /v1/workflows/{id}/keys/{key}/revoke": true, // none
+	}
+	var rs routes
+	gen.HandlerWithOptions(nil, gen.StdHTTPServerOptions{BaseRouter: &rs})
+	for _, p := range rs {
+		method, _, _ := strings.Cut(p, " ")
+		if (method == http.MethodPost || method == http.MethodPut) && !unchecked[p] && bodies[p] == nil {
+			t.Errorf("%s takes a body that isn't in bodies", p)
 		}
 	}
 }
@@ -343,8 +374,8 @@ func TestPublish_TakesStepsThatUseAnUpstream(t *testing.T) {
 		t.Errorf("publish once it uses one = %d %s", r.status, r.body)
 	}
 
-	before := publishedBefore(t, base, own).Workflow.Slug
-	if r := call(t, http.MethodPost, "/serve/"+before, `{"user_id": "7"}`); r.status != http.StatusOK {
+	before := publishedBefore(t, base, own).Workflow
+	if r := serveWith(t, before.Slug, keyFor(t, before.ID), `{"user_id": "7"}`); r.status != http.StatusOK {
 		t.Errorf("serve what was published before = %d %s", r.status, r.body)
 	}
 }

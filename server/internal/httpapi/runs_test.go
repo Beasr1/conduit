@@ -358,23 +358,28 @@ func TestGetRun_NotFound(t *testing.T) {
 func TestServe(t *testing.T) {
 	t.Parallel()
 	up := usersUpstream(t)
-	greet := published(t, up.URL, greetDef).Workflow.Slug
-	answers := published(t, up.URL, answersDef).Workflow.Slug
-	noBody := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': 204 }", "unhandled": {"fail": true}}],
-	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 204, "lines": [{"from": "a"}]}]}}`).Workflow.Slug
-	noResponse := publishedBefore(t, up.URL, `{"nodes": []}`).Workflow.Slug
-	noAnswer := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': 418 }", "unhandled": {"fail": true}}],
-	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 404, "lines": [{"from": "a"}]}]}}`).Workflow.Slug
+	keys := map[string]string{} // each workflow's caller key, by its slug
+	keyed := func(wr gen.WorkflowRevision) string {
+		keys[wr.Workflow.Slug] = keyFor(t, wr.Workflow.ID)
+		return wr.Workflow.Slug
+	}
+	greet := keyed(published(t, up.URL, greetDef))
+	answers := keyed(published(t, up.URL, answersDef))
+	noBody := keyed(published(t, up.URL, `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': 204 }", "unhandled": {"fail": true}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 204, "lines": [{"from": "a"}]}]}}`))
+	noResponse := keyed(publishedBefore(t, up.URL, `{"nodes": []}`))
+	noAnswer := keyed(published(t, up.URL, `{"nodes": [{"id": "a", "kind": "transform", "expr": "{ 'status': 418 }", "unhandled": {"fail": true}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}, {"status": 404, "lines": [{"from": "a"}]}]}}`))
 	// A failure answers with unhandled's body, at the status of its cause.
-	unhandled := published(t, up.URL, `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}", "timeout_ms": 1000}, "unhandled": {"fail": true}}],
-	  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}], "errors": {"body": "{ 'error': error.code, 'step': error.node }"}}}`).Workflow.Slug
-	broken := publishedBefore(t, up.URL, `{"nodes": [{"id": "t", "kind": "transform", "expr": "$number('one')"}]}`).Workflow.Slug
-	unpublished := create(t, validDef).Workflow.Slug
+	unhandled := keyed(published(t, up.URL, `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}", "timeout_ms": 1000}, "unhandled": {"fail": true}}],
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}], "errors": {"body": "{ 'error': error.code, 'step': error.node }"}}}`))
+	broken := keyed(publishedBefore(t, up.URL, `{"nodes": [{"id": "t", "kind": "transform", "expr": "$number('one')"}]}`))
+	unpublished := keyed(create(t, validDef))
 	// user's 404 joined straight to an answer, with no error body: problem
 	// details at 404 (plan 12).
-	errorBlock := published(t, up.URL, `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"},
+	errorBlock := keyed(published(t, up.URL, `{"nodes": [{"id": "user", "kind": "http", "request": {"method": "GET", "url": "BASE/users/{{ input.user_id }}"},
 	    "outputs": [{"status": 404}], "unhandled": {"fail": true}}],
-	  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}, {"status": 404, "lines": [{"from": "user", "on": 404}]}]}}`).Workflow.Slug
+	  "response": {"answers": [{"status": 200, "lines": [{"from": "user"}]}, {"status": 404, "lines": [{"from": "user", "on": 404}]}]}}`))
 
 	tests := []struct {
 		name, slug, body string
@@ -395,13 +400,17 @@ func TestServe(t *testing.T) {
 		{"unhandled answers an upstream's failure", unhandled, `{"user_id": "500"}`, 502, `{"error":"upstream_failed","step":"user"}`},
 		{"and a timeout", unhandled, `{"user_id": "slow"}`, 504, `{"error":"timeout","step":"user"}`},
 		{"an error block answers problem details", errorBlock, `{"user_id": "gone"}`, 404, "upstream_failed user"},
-		{"no such slug", "no-such-slug", ``, 404, "not_found"},
+		{"no such slug, with another workflow's key", "no-such-slug", ``, 401, "unauthorized"},
 		{"never published", unpublished, ``, 404, "not_found"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			r := call(t, http.MethodPost, "/serve/"+tt.slug, tt.body)
+			key, ok := keys[tt.slug]
+			if !ok {
+				key = keys[greet]
+			}
+			r := serveWith(t, tt.slug, key, tt.body)
 			if r.status != tt.status {
 				t.Fatalf("status = %d, want %d; body %s", r.status, tt.status, r.body)
 			}
@@ -443,18 +452,18 @@ func TestServe_BusyAtTheCap(t *testing.T) {
 	wr := published(t, up.URL, `{"nodes": [{"id": "a", "kind": "http", "request": {"method": "GET", "url": "BASE/"}, "unhandled": {"fail": true}}],
 	  "response": {"answers": [{"status": 200, "lines": [{"from": "a"}]}]}}`)
 
-	send := func(method, path, body string) *httptest.ResponseRecorder {
+	send := func(method, path, body, auth string) *httptest.ResponseRecorder {
 		req := httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+testToken)
+		req.Header.Set("Authorization", auth)
 		rec := httptest.NewRecorder()
 		capped.ServeHTTP(rec, req)
 		return rec
 	}
-	if rec := send(http.MethodPost, "/v1/workflows/"+wr.Workflow.ID+"/runs", `{}`); rec.Code != http.StatusAccepted {
+	if rec := send(http.MethodPost, "/v1/workflows/"+wr.Workflow.ID+"/runs", `{}`, "Bearer "+testToken); rec.Code != http.StatusAccepted {
 		t.Fatalf("start = %d %s", rec.Code, rec.Body)
 	}
 	<-arrived
-	rec := send(http.MethodPost, "/serve/"+wr.Workflow.Slug, ``)
+	rec := send(http.MethodPost, "/serve/"+wr.Workflow.Slug, ``, "Bearer "+keyFor(t, wr.Workflow.ID))
 	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "5" || !strings.Contains(rec.Body.String(), `"code":"busy"`) {
 		t.Errorf("at the cap = %d, Retry-After %q, %s", rec.Code, rec.Header().Get("Retry-After"), rec.Body)
 	}

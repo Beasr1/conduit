@@ -554,6 +554,147 @@ once Use vN works) catch them all.
 - Taking a newer version in every workflow at once, as Zapier migrates:
   each would become a new revision, published or not?
 
+## Caller keys (accepted 2026-11-05)
+
+Your call, 2026-11-05: caller keys next, "also add rotate api feature";
+asked then, a rotated key's old value works until an expiry you choose,
+now or later; several named keys per workflow, one per caller; and
+`/serve` takes only keys, never the API token. Accepted as drafted. The roadmap's 07 row has asked for "per-workflow caller
+keys" since 2026-10-19.
+
+### Goal
+
+Each published workflow is called with keys of its own, one per caller,
+each named, rotated and revoked on its own, and each run says which key
+called it. The API token, which can edit, publish and archive every
+workflow, never has to leave its holder's hands.
+
+### What's wrong today
+
+`/serve` takes the one API token (`server/internal/httpapi/auth.go:57`).
+Every caller of any workflow holds a key to all of Conduit, a leaked one
+means changing it for everyone at once, and no run says who called it.
+
+### What others do
+
+Stripe's keys are the model here. Many per account, each for one use:
+"Create as many RAKs as you want and assign them to different parts of
+your application" ✓. Shown once: "Save the key value. You can't retrieve it
+later." ✓ Rotated with a grace period: "both the old and new keys work for
+up to 7 days" ✓, or cut off at once: "If you choose **Now**, the old key is
+deleted" ✓.
+
+### How it would work
+
+1. **A workflow has caller keys, each named for its caller**, `CRM sync`,
+   `Mobile app`. A key is shown once, when it's made. The server keeps only
+   its SHA-256 hash and its first characters, `cnd_7f3a…`, to tell it
+   apart. A slow hash is for what can be guessed: OWASP's reason for one is
+   that it "makes brute‑force attacks significantly more difficult" ✓, and a
+   key of 256 random bits leaves nothing to guess. The `cnd_` prefix marks
+   it as Conduit's wherever it's pasted.
+2. **`/serve/{slug}` takes a key of that workflow** as its bearer token. A
+   key of another workflow, a revoked one and one past its expiry are all
+   401, alike, so the answer doesn't say which keys exist.
+3. **Rotating gives the caller a new key**, shown once, and the old one
+   keeps working until the expiry chosen then: now, an hour, a day or 7
+   days.
+4. **Revoking stops a key at once.** Revoked and expired keys stay listed,
+   for audit, and are never deleted.
+5. **A run records the key that called it**, by name, and the run view and
+   the Runs list say so. A key's last use is its latest run.
+6. **Archiving a workflow revokes its keys** (next, in the archive work).
+7. **In the editor, a Keys panel** beside Runs: each key's name, its first
+   characters, when it was made, last used, and its expiry or revocation;
+   New key, Rotate, Revoke.
+8. **Through the API**, as everything is: list and make a workflow's keys,
+   rotate one with its expiry, revoke one.
+
+### Decided with you
+
+- Several named keys per workflow, one per caller, over one per workflow:
+  revoking one caller's key leaves the rest working, and a run names its
+  caller.
+- `/serve` takes only a workflow's keys: the API token, which can do
+  anything, is never handed to a caller. Scripts and tests make a key.
+
+### Steps
+
+**A. The store and the API.** A table of keys, their hashes and expiries,
+and each run's key; `/serve` checking a key against its workflow;
+list, make, rotate, revoke in `openapi.yaml`. Tests first: a key serves its
+workflow and no other; a rotated key's old value works until its expiry
+and not after; a revoked key is refused at once.
+
+**B. The editor.** The Keys panel; a new key shown once with Copy; Rotate
+with its expiry; Revoke asked again; which key called, on a run.
+
+**C. The rest.** A browser test, mutation checks, docs, a walk in Chromium
+through nginx, light and dark, desktop and phone.
+
+### Done means
+
+- A workflow is served with its own key, and another workflow's key is
+  refused.
+- A rotated key's old value works until its expiry, then is refused; a
+  revoked key is refused at once.
+- Every served run says which key called it.
+- `just check` is green.
+
+### Built (2026-11-05)
+
+All three phases. `/serve/{slug}` takes only a key of that workflow;
+`caller_keys` keeps each key's SHA-256 and its first 8 characters, an
+expiry once it's rotated and the time it was revoked; and `runs.caller_key`
+names the key, one of the run's own workflow's (a foreign key on the key
+and the workflow together), on served runs only. The API lists, makes,
+rotates and revokes keys under `/v1/workflows/{id}/keys`; a run says
+`key {id, name, prefix}`. The editor's Keys panel, beside Runs, lists the
+keys that work and, under Stopped, those that don't; New key and Rotate
+show a key once, with Copy; Revoke asks again. The Runs list and the run
+bar say "called by CRM sync (cnd_7f3a…)".
+
+Decided while building, on your behalf; each can change:
+- A key is `cnd_` and 43 letters and digits, 256 random bits as one
+  number in base 62. Your call after the lesson, 2026-11-05, over
+  base64url, whose `-` is in about half of all keys and stops a
+  double-click selecting the key (sources.md). Keys made before keep
+  working, as only their hash is checked.
+- A refused bearer token is told `error="invalid_token"`, on `/serve`
+  and the API, and a request without one isn't, as RFC 6750 asks (your
+  call, the same day). Every refused token still gets the same answer.
+- A slug with no workflow is the same 401 as a wrong key, so the answer
+  doesn't say which workflows exist either. A key of a workflow not yet
+  published gets 404, as its holder knows the workflow is there.
+- A key's name is 1 to 200 characters, as a workflow's is, and the
+  workflow's active keys each have their own. A rotated key and its new
+  one share it, told apart by their first characters.
+- The server says what state a key is in: active, expiring (rotated, and
+  working until its expiry), expired or revoked.
+- Only an active key rotates. The old key of a rotation is cut off sooner
+  by revoking it; revoking a key revoked already, or past its expiry,
+  changes nothing.
+- A key's last use is its latest run's start, so a call refused before a
+  run starts, for its input or a busy server, isn't one.
+- Rotate has no expiry picked to begin with: the button waits for one,
+  as stopping a caller now and leaving a leaked key a week both cost.
+- Who revoked a key isn't kept yet: v1 has one actor, the token's holder.
+  The archive work can keep who did it, for everything at once.
+
+Found on the way:
+- The constants' `POST` and `PUT` bodies were never in the shape check's
+  table, so their unknown fields were dropped without a word since plan
+  06. They're in, and a test now fails for any `POST` or `PUT` route left
+  out.
+- The Rotate dialog first sat in its key's row. Asked again after a
+  rotation, the list changed that row, and the dialog went with it, and
+  the new key, before it could be copied. The panel holds the dialog now,
+  and a mutation that puts it back in the row is caught.
+
+Checks: 37 mutations of the server's keys (store, migration, runner, API)
+and 28 of the editor's, each caught; 8 browser tests, the keys one among
+them.
+
 ## Open questions (decide when 07 starts)
 
 - At Publish, live tests: run again, require the revision's last live
@@ -620,3 +761,7 @@ once Use vN works) catch them all.
     https://www.w3.org/WAI/WCAG22/Techniques/general/G201
   - TanStack Query, refetching on window focus ✓:
     https://tanstack.com/query/latest/docs/framework/react/guides/window-focus-refetching
+- Caller keys (2026-11-05):
+  - Stripe, API keys, rotating them ✓: https://docs.stripe.com/keys
+  - OWASP Password Storage Cheat Sheet ✓:
+    https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html

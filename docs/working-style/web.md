@@ -286,6 +286,12 @@ the API is `/api` on the page's own origin.
   once, so every stop stayed at the first. It's offered once per browser,
   remembered in local storage, read and written in `try`, and Tour in the
   toolbar opens it again.
+- A dialog that shows a key once, in the Keys panel (plan 07), forgets it
+  once it has closed, in `onOpenChangeComplete`, however it was closed:
+  setting `open` itself, as Done does, doesn't call `onOpenChange`
+  (sources.md). A dialog acting on one row of a list that the action
+  changes is the list's, not the row's: asked again, the list moves or
+  changes the row, and a dialog in it would go with it, the new key on it.
 - A link that looks like a button is a `Link` styled with
   `buttonVariants()`. A `Button` rendering a link would be announced as a
   button. A trigger rendered as a `Button` takes `render={<Button />}`, as
@@ -338,7 +344,10 @@ the API is `/api` on the page's own origin.
   makes an upstream, uses it from a step, runs and publishes it, changes
   it on its page in a new tab (`upstreamTab`, `backFrom`), and saves a
   step's request as one; and a published workflow
-  is picked as a step, reopened, run and served. Their steps, such as
+  is picked as a step, reopened, run and served. Two more cover plan 06's
+  constants (`constants.spec.ts`) and plan 07's caller keys
+  (`keys.spec.ts`): a key made in the Keys panel, copied from Chromium's
+  clipboard, served with, rotated and revoked. Their steps, such as
   opening a panel or joining a block, are in `web/e2e/editor.ts`. A
   button is named exactly where another's name holds it, Save beside Save
   as upstream, as Playwright otherwise matches a name as a substring

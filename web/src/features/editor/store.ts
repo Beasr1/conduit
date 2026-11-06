@@ -75,8 +75,8 @@ export interface EditorState {
   // What the side panel shows while nothing is picked: the workflow's own
   // settings, the list of problems, or its runs. Opening one puts away what
   // was picked, and picking something closes it.
-  panel: "settings" | "problems" | "runs" | undefined;
-  openPanel: (panel: "settings" | "problems" | "runs") => void;
+  panel: "settings" | "problems" | "runs" | "keys" | undefined;
+  openPanel: (panel: "settings" | "problems" | "runs" | "keys") => void;
   closePanel: () => void;
   // The run the canvas shows, by its id, while it shows one. The run itself
   // is the query cache's.

@@ -80,7 +80,7 @@ func (s *sessions) mac(id string) string {
 	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }
 
-// hashOf is what the store knows a session by.
+// hashOf is what the store knows a session or a caller key by.
 func hashOf(id string) []byte {
 	h := sha256.Sum256([]byte(id))
 	return h[:]

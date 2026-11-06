@@ -12,6 +12,31 @@ export async function signIn(page: Page) {
   await expect(page).toHaveURL(/\/workflows$/);
 }
 
+// keyFor makes a caller key of a workflow through the API, and gives it, to
+// serve the workflow with (plan 07).
+export async function keyFor(page: Page, workflow: string): Promise<string> {
+  const r = await page.request.post(`/api/v1/workflows/${workflow}/keys`, {
+    headers: { Authorization: `Bearer ${stack.token}` },
+    data: { name: `e2e ${Math.random().toString(36).slice(2, 8)}` },
+  });
+  expect(r.status()).toBe(201);
+  return ((await r.json()) as { value: string }).value;
+}
+
+// serve calls the workflow the page has open, at /serve/slug, with a key
+// of its own.
+export async function serve(page: Page, slug: string, data: unknown) {
+  const workflow = /^\/workflows\/([0-9a-f-]+)$/.exec(
+    new URL(page.url()).pathname,
+  )?.[1];
+  expect(workflow).toBeDefined();
+  const key = await keyFor(page, workflow!);
+  return page.request.post(`/serve/${slug}`, {
+    headers: { Authorization: `Bearer ${key}` },
+    data,
+  });
+}
+
 // step is a step's card on the canvas.
 export const step = (page: Page, id: string) =>
   page.getByTestId(`rf__node-${id}`);

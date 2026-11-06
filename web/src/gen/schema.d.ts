@@ -52,7 +52,7 @@ export interface paths {
         put?: never;
         /**
          * Sign a browser in
-         * @description Trades the API token for the session cookie the web app uses. Scripts, agents and served callers send the token as a bearer token instead.
+         * @description Trades the API token for the session cookie the web app uses. Scripts and agents send the token as a bearer token instead, and a served workflow's callers, one of its caller keys.
          */
         post: operations["createSession"];
         /**
@@ -241,6 +241,78 @@ export interface paths {
          * @description The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and one that has already passed through Conduit 8 times is refused with 508 (plan 06).
          */
         post: operations["startRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a workflow's caller keys, newest first
+         * @description Every key the workflow has had, never with its value (plan 07). Rotated, expired and revoked keys stay listed, for audit.
+         */
+        get: operations["listKeys"];
+        put?: never;
+        /**
+         * Make a caller key
+         * @description The answer holds the key, the only time it's sent; the server keeps its SHA-256 and its first characters. /serve/{slug} takes it as a bearer token. Each of a workflow's active keys has a name of its own, so a name one has already is 409 conflict.
+         */
+        post: operations["createKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/keys/{key}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+                key: components["parameters"]["KeyID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give an active key's caller a new key, and the old one an expiry
+         * @description The new key has the old one's name, and the answer holds it, the only time it's sent. The old key goes on working until the expiry chosen, so its caller can change over, or stops at once. A key rotated or revoked already is 409 key_not_active.
+         */
+        post: operations["rotateKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/keys/{key}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+                key: components["parameters"]["KeyID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop a key at once
+         * @description A revoked key stays listed, for audit. Revoking a key revoked already, or past its expiry, changes nothing.
+         */
+        post: operations["revokeKey"];
         delete?: never;
         options?: never;
         head?: never;
@@ -513,7 +585,7 @@ export interface paths {
         put?: never;
         /**
          * Run a workflow's published revision and answer with the answer it gives
-         * @description The body is the run's input. A run answers with the answer it gave, its status and its body. A run that gives none, as a node failed, or it took no line into the response, or lines from two nodes, answers with its response's default, if it has one, at the status of the cause, 502 an upstream failed, 504 a timeout, 500 otherwise. Without one, or with no response, it answers that status with problem details naming what failed; `instance` is the run, at /v1/runs/{id}. A revision saved with an output answers 200 with it. Served runs time out after 30 s. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and the run's own calls pass it on, one hop further; a call that has already passed through Conduit 8 times, a workflow calling itself, is refused with 508 before a run starts (plan 06).
+         * @description The body is the run's input. A call is made with one of the workflow's caller keys as its bearer token (plan 07), and the run records it; the API token and the session cookie are refused. A key of another workflow, one revoked or past its expiry, and a slug with no workflow are all 401, alike, so the answer doesn't say which keys or workflows there are; as RFC 6750 asks, a refused bearer token is told error="invalid_token" in WWW-Authenticate, and a call without one isn't. A run answers with the answer it gave, its status and its body. A run that gives none, as a node failed, or it took no line into the response, or lines from two nodes, answers with its response's default, if it has one, at the status of the cause, 502 an upstream failed, 504 a timeout, 500 otherwise. Without one, or with no response, it answers that status with problem details naming what failed; `instance` is the run, at /v1/runs/{id}. A revision saved with an output answers 200 with it. Served runs time out after 30 s. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and the run's own calls pass it on, one hop further; a call that has already passed through Conduit 8 times, a workflow calling itself, is refused with 508 before a run starts (plan 06).
          */
         post: operations["serveWorkflow"];
         delete?: never;
@@ -741,6 +813,63 @@ export interface components {
             /** @description The upstream's latest version, which reads the constant. */
             version: number;
         };
+        CallerKey: {
+            id: string;
+            /** @description Who calls with it, such as CRM sync. A rotated key's new key has its name. */
+            name: string;
+            /** @description The key's first 8 characters, cnd_ and 4 more, to tell it apart. The server keeps no more of it than these and its SHA-256. */
+            prefix: string;
+            /**
+             * @description active, it works and can be rotated; expiring, rotated, and it works until expires_at; expired, rotated, and past expires_at; revoked, stopped at revoked_at. Active and expiring keys work.
+             * @enum {string}
+             */
+            status: "active" | "expiring" | "expired" | "revoked";
+            /**
+             * Format: date-time
+             * @description When a rotated key stops working, as chosen when it was rotated. Absent for a key not rotated.
+             */
+            expires_at?: string;
+            /**
+             * Format: date-time
+             * @description When it was revoked. Absent for a key not revoked.
+             */
+            revoked_at?: string;
+            /**
+             * Format: date-time
+             * @description When its latest run started. Absent for a key no run has used.
+             */
+            last_used_at?: string;
+            provenance: components["schemas"]["Provenance"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        CallerKeyList: {
+            keys: components["schemas"]["CallerKey"][];
+        };
+        CreateKey: {
+            /** @description Who calls with it, 1 to 200 characters. */
+            name: string;
+        };
+        MadeKey: {
+            key: components["schemas"]["CallerKey"];
+            /** @description The key itself, cnd_ and 43 letters and digits. It's never sent again. */
+            value: string;
+        };
+        RotateKey: {
+            /**
+             * @description How long the old key goes on working, so its caller can change over to the new one; now stops it at once.
+             * @enum {string}
+             */
+            old_expires_in: "now" | "1h" | "1d" | "7d";
+        };
+        RotatedKey: {
+            /** @description The new key. */
+            key: components["schemas"]["CallerKey"];
+            /** @description The new key itself, cnd_ and 43 letters and digits. It's never sent again. */
+            value: string;
+            /** @description The old key, with its expiry. */
+            old: components["schemas"]["CallerKey"];
+        };
         WorkflowRevision: {
             workflow: components["schemas"]["Workflow"];
             revision: components["schemas"]["Revision"];
@@ -789,6 +918,8 @@ export interface components {
             parent?: components["schemas"]["RunParent"];
             /** @description The W3C trace the run belongs to, 32 lowercase hex digits; the caller's, when the call that started it carried one. Runs that call each other through /serve share it. Absent for runs from before traces were kept. */
             trace_id?: string;
+            /** @description The caller key a served run was called with (plan 07). Absent for any other run, and for served runs from before keys. */
+            key?: components["schemas"]["RunKey"];
             /** @enum {string} */
             status: "running" | "succeeded" | "failed" | "cancelled";
             error?: components["schemas"]["RunError"];
@@ -801,6 +932,13 @@ export interface components {
             ended_at?: string;
             /** @description The status of the answer the run gave, its own once it succeeded, or, once it failed, the status by cause its response's error body answered with, if it has one; a served run answered its caller with it. Absent while it goes on, and when it gave none. */
             answered?: number;
+        };
+        RunKey: {
+            id: string;
+            /** @description Who calls with it. */
+            name: string;
+            /** @description Its first characters, which tell a rotated key and its new key apart. */
+            prefix: string;
         };
         Run: components["schemas"]["RunSummary"] & {
             /** @description The input, as sent. */
@@ -1120,6 +1258,7 @@ export interface components {
         WorkflowID: string;
         UpstreamID: string;
         ConstantName: string;
+        KeyID: string;
         RunID: string;
     };
     requestBodies: never;
@@ -1494,6 +1633,116 @@ export interface operations {
             422: components["responses"]["Problem"];
             503: components["responses"]["Busy"];
             508: components["responses"]["Problem"];
+        };
+    };
+    listKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Its keys, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallerKeyList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateKey"];
+            };
+        };
+        responses: {
+            /** @description Made. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MadeKey"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    rotateKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+                key: components["parameters"]["KeyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RotateKey"];
+            };
+        };
+        responses: {
+            /** @description Rotated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RotatedKey"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    revokeKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+                key: components["parameters"]["KeyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked, or as it was. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallerKey"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     listUpstreams: {

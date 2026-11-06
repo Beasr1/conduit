@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import { UNHANDLED } from "@/features/editor/flow";
 import {
+  calledBy,
   runSaid,
   said,
   type StepRun,
@@ -163,6 +164,34 @@ test.each([
   [1234, "1.2 s"],
 ])("%d ms is %j", (ms, words) => {
   expect(took(ms)).toBe(words);
+});
+
+// A served run names the key it was called with, by its caller and its
+// first characters (plan 07); one from before keys, only that it was.
+test("a run says where it came from", () => {
+  const run = {
+    id: "r-1",
+    workflow_id: "wf-1",
+    revision: 3,
+    status: "running",
+    started_at: "2026-10-30T20:00:00.000Z",
+  } as const;
+  expect(calledBy({ ...run, trigger: "editor" })).toBe("run here");
+  expect(
+    calledBy({
+      ...run,
+      trigger: "workflow",
+      parent: { run: "r-0", node: "find" },
+    }),
+  ).toBe("called by a step of another workflow");
+  expect(
+    calledBy({
+      ...run,
+      trigger: "served",
+      key: { id: "k-1", name: "CRM sync", prefix: "cnd_7f3a" },
+    }),
+  ).toBe("called by CRM sync (cnd_7f3a…)");
+  expect(calledBy({ ...run, trigger: "served" })).toBe("called at its URL");
 });
 
 test("a run says how it went", () => {

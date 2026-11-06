@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { signIn } from "./editor";
+import { keyFor, signIn } from "./editor";
 import { stack } from "./stack";
 
 // Plan 06's constants: a secret one made on the Constants page, and a plain
@@ -79,9 +79,10 @@ test("constants: made, read by an upstream, masked in a run, changed and undone"
   );
   expect(published.status()).toBe(200);
 
+  const key = await keyFor(page, workflow);
   const serve = async () => {
     const r = await page.request.post(`/serve/${slug}`, {
-      headers: auth,
+      headers: { Authorization: `Bearer ${key}` },
       data: {},
     });
     expect(r.status()).toBe(200);

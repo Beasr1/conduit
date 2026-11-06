@@ -4,6 +4,7 @@ import { type ReactNode, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { ConnectionForm } from "@/features/editor/components/connection-form";
 import { JsonField } from "@/features/editor/components/json-field";
+import { KeysPanel } from "@/features/editor/components/keys-panel";
 import { ProblemList } from "@/features/editor/components/problem-list";
 import { ResponseForm } from "@/features/editor/components/response-form";
 import { RunList } from "@/features/editor/components/run-list";
@@ -18,7 +19,8 @@ const stepTitles: Record<string, string> = {
 
 // SidePanel holds the settings of what's picked on the canvas, one thing at a
 // time: a step, a connection or the response, or else the workflow's own
-// settings, the list of problems or its runs, once they're opened.
+// settings, the list of problems, its runs or its caller keys, once
+// they're opened.
 export function SidePanel({ workflow }: { workflow: string }) {
   const draft = useEditor((s) => s.draft);
   const selected = useEditor((s) => s.selected);
@@ -70,6 +72,10 @@ export function SidePanel({ workflow }: { workflow: string }) {
   } else if (panel === "runs") {
     title = "Runs";
     body = <RunList workflow={workflow} />;
+    close = closePanel;
+  } else if (panel === "keys") {
+    title = "Caller keys";
+    body = <KeysPanel workflow={workflow} />;
     close = closePanel;
   } else if (node === RESPONSE || answering) {
     title = "Response";

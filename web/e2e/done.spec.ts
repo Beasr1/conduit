@@ -8,6 +8,7 @@ import {
   inRun,
   open,
   said,
+  serve,
   signIn,
   step,
   upstreamTab,
@@ -192,10 +193,7 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
   await expect(
     page.getByText(new RegExp(`^Revision 3 is served at .*/serve/${slug}$`)),
   ).toBeVisible();
-  const served = await page.request.post(`/serve/${slug}`, {
-    headers: { Authorization: `Bearer ${stack.token}` },
-    data: { user_id: "7" },
-  });
+  const served = await serve(page, slug, { user_id: "7" });
   expect(served.status()).toBe(200);
   expect(await served.json()).toMatchObject({
     id: "c-1",

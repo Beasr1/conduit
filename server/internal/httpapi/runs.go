@@ -124,7 +124,7 @@ func (a *api) ServeWorkflow(ctx context.Context, req gen.ServeWorkflowRequestObj
 	if req.Body != nil {
 		input = *req.Body
 	}
-	out, err := a.runner.Serve(ctx, req.Slug, input)
+	out, err := a.runner.Serve(ctx, req.Slug, callerFrom(ctx).key, input)
 	var invalid *runner.InvalidError
 	switch {
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, runner.ErrNotPublished):
@@ -222,6 +222,9 @@ func runSummaryOut(r store.Run) (gen.RunSummary, error) {
 	if r.ParentRun != "" {
 		out.Parent = &gen.RunParent{Run: r.ParentRun, Node: r.ParentNode}
 	}
+	if k := r.Key; k != nil {
+		out.Key = gen.RunKey{ID: k.ID, Name: k.Name, Prefix: k.Prefix}
+	}
 	return out, decodeDoc(r.Error, &out.Error, "run "+r.ID+"'s error")
 }
 
@@ -229,7 +232,7 @@ func runOut(r store.Run) (gen.Run, error) {
 	s, err := runSummaryOut(r)
 	return gen.Run{
 		ID: s.ID, WorkflowID: s.WorkflowID, Revision: s.Revision,
-		Trigger: gen.RunTrigger(s.Trigger), Parent: s.Parent, TraceID: s.TraceID, Status: gen.RunStatus(s.Status),
+		Trigger: gen.RunTrigger(s.Trigger), Parent: s.Parent, TraceID: s.TraceID, Key: s.Key, Status: gen.RunStatus(s.Status),
 		Answered: s.Answered, Error: s.Error, StartedAt: s.StartedAt, EndedAt: s.EndedAt,
 		Input: r.Input, Output: r.Output, OutputTruncated: r.OutputTruncated,
 	}, err

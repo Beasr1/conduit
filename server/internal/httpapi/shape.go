@@ -19,16 +19,20 @@ import (
 // bodies is every route that takes a JSON body, with the type it decodes
 // into. A test sends each one an unknown field.
 var bodies = map[string]reflect.Type{
-	"POST /v1/workflows":              reflect.TypeFor[gen.CreateWorkflow](),
-	"PUT /v1/workflows/{id}/draft":    reflect.TypeFor[workflow.Definition](),
-	"POST /v1/workflows/{id}/publish": reflect.TypeFor[gen.Publish](),
-	"POST /v1/validate":               reflect.TypeFor[workflow.Definition](),
-	"POST /v1/preview":                reflect.TypeFor[gen.PreviewRequest](),
-	"POST /v1/session":                reflect.TypeFor[gen.SignIn](),
-	"POST /v1/workflows/{id}/runs":    reflect.TypeFor[gen.StartRun](),
-	"POST /v1/upstreams":              reflect.TypeFor[gen.CreateUpstream](),
-	"PUT /v1/upstreams/{id}":          reflect.TypeFor[workflow.Upstream](),
-	"POST /v1/upstreams/validate":     reflect.TypeFor[workflow.Upstream](),
+	"POST /v1/workflows":                        reflect.TypeFor[gen.CreateWorkflow](),
+	"PUT /v1/workflows/{id}/draft":              reflect.TypeFor[workflow.Definition](),
+	"POST /v1/workflows/{id}/publish":           reflect.TypeFor[gen.Publish](),
+	"POST /v1/validate":                         reflect.TypeFor[workflow.Definition](),
+	"POST /v1/preview":                          reflect.TypeFor[gen.PreviewRequest](),
+	"POST /v1/session":                          reflect.TypeFor[gen.SignIn](),
+	"POST /v1/workflows/{id}/runs":              reflect.TypeFor[gen.StartRun](),
+	"POST /v1/upstreams":                        reflect.TypeFor[gen.CreateUpstream](),
+	"PUT /v1/upstreams/{id}":                    reflect.TypeFor[workflow.Upstream](),
+	"POST /v1/upstreams/validate":               reflect.TypeFor[workflow.Upstream](),
+	"POST /v1/constants":                        reflect.TypeFor[gen.CreateConstant](),
+	"PUT /v1/constants/{name}":                  reflect.TypeFor[gen.SetConstant](),
+	"POST /v1/workflows/{id}/keys":              reflect.TypeFor[gen.CreateKey](),
+	"POST /v1/workflows/{id}/keys/{key}/rotate": reflect.TypeFor[gen.RotateKey](),
 }
 
 // checkShape refuses a body that doesn't fit its route's type: a field the

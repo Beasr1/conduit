@@ -107,15 +107,19 @@ func TestReadyz_NeedsNoToken(t *testing.T) {
 
 func TestToken(t *testing.T) {
 	t.Parallel()
+	// A refused bearer token is told so (RFC 6750 §3); no token, or another
+	// scheme, gets the plain challenge.
 	tests := []struct {
 		name, auth string
 		want       int
+		challenge  string
 	}{
-		{"missing", "", http.StatusUnauthorized},
-		{"wrong", "Bearer nope", http.StatusUnauthorized},
-		{"right token, wrong scheme", "Basic " + testToken, http.StatusUnauthorized},
-		{"right", "Bearer " + testToken, http.StatusOK},
-		{"the scheme is case-insensitive", "bearer " + testToken, http.StatusOK},
+		{"missing", "", http.StatusUnauthorized, challenge},
+		{"wrong", "Bearer nope", http.StatusUnauthorized, refusedChallenge},
+		{"wrong, the scheme in lower case", "bearer nope", http.StatusUnauthorized, refusedChallenge},
+		{"right token, wrong scheme", "Basic " + testToken, http.StatusUnauthorized, challenge},
+		{"right", "Bearer " + testToken, http.StatusOK, ""},
+		{"the scheme is case-insensitive", "bearer " + testToken, http.StatusOK, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -125,8 +129,9 @@ func TestToken(t *testing.T) {
 				t.Fatalf("status = %d, want %d; body %s", r.status, tt.want, r.body)
 			}
 			if tt.want == http.StatusUnauthorized {
-				if p := problemOf(t, r); p.Code != "unauthorized" || r.header.Get("WWW-Authenticate") == "" {
-					t.Errorf("problem %+v, WWW-Authenticate %q", p, r.header.Get("WWW-Authenticate"))
+				if p := problemOf(t, r); p.Code != "unauthorized" || p.Detail != "Send the API token as Authorization: Bearer <token>, or sign in." ||
+					r.header.Get("WWW-Authenticate") != tt.challenge {
+					t.Errorf("problem %+v, WWW-Authenticate %q, want %q", p, r.header.Get("WWW-Authenticate"), tt.challenge)
 				}
 			}
 		})
