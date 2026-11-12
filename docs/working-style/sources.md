@@ -94,6 +94,11 @@ resolve, but their claims weren't re-read.
 | A dialog that shows a key once forgets it in `onOpenChangeComplete` (plan 07) | Base UI's `onOpenChangeComplete` is an "Event handler called after any animations complete when the dialog is opened or closed" ✓ [115], read in its 1.9.0 docs; `onOpenChange` hears only the dialog's own closing, so Done, which sets `open`, left the key in the dialog to come back (caught by a test) |
 | A browser test names a button exactly where another's name holds it: Save, beside Save as upstream (plan 07) | Playwright's `name`: "By default, matching is case-insensitive and searches for a substring, use exact to control this behavior" ✓ [103] |
 | Each row of a step's tabs is named for a screen reader, Blocks and Request (plan 13, 2026-11-02) | The WAI-ARIA tabs pattern: with no visible label, "the `tablist` element has a label provided by aria-label" ✓ [44] |
+| Archived is a state you see, read-only, and undone by Restore, not a delete hidden behind a flag (plan 15, 2026-11-07) | GitHub: "You can archive a repository to make it read-only for all users and indicate that it's no longer actively maintained", and "You can also unarchive repositories that have been archived" ✓ [118]. Against hidden soft deletes: "soft deletion logic bleeds out into all parts of your code" ✓ [122], so each place that has to know has a test |
+| Names stay taken while archived, so an old URL never reaches something new (plan 15) | GitHub on a renamed repository: "do not reuse the original name", or "redirects to the renamed repository will no longer work" ✓ [119] |
+| Disabling a secret apart from destroying it (plan 15): an archived secret keeps its sealed value | Vault "uses soft deletes to make data inaccessible while allowing data recovery" ✓ [120]; Google: "Destroying a secret version is a permanent action", so "try disabling it first" ✓ [121]. Destroying a value is on the README's list, as GDPR's storage limitation, personal data "kept in a form which permits identification of data subjects for no longer than is necessary" ✓ [123], doesn't fit a value kept for ever |
+| Archive and Publish take one lock of their own (plan 15) | PostgreSQL: advisory locks "can be useful for locking strategies that are an awkward fit for the MVCC model", and transaction-level ones "are automatically released at the end of the transaction, and there is no explicit unlock operation" ✓ [124] |
+| One fieldset makes a read-only panel, a tab a `div` inside it (plan 15) | HTML: `disabled` on a fieldset "causes all the form control descendants of the fieldset element" to be disabled ✓ [125]; Base UI's `nativeButton`: "Set to `false` if the rendered element is not a button (for example, `<div>`)" ✓ [126] |
 | What a field is for is a hint behind ⓘ beside its label, a line or two, rather than a sentence under it; a hint is a popover that opens on hover or a press (plan 13, 2026-11-02) | Base UI: "Popups that open when hovering an info icon should use Popover with the openOnHover prop on the trigger instead of a tooltip", as "Tooltips don't work well with touch input" and "are disabled on touch devices"; and "If the description is important to understanding the element, don't hide it behind a tooltip" ✓ [89], so a problem stays under its field |
 
 ## Contested: kept anyway, revisit if it hurts
@@ -107,6 +112,7 @@ resolve, but their claims weren't re-read.
 | gnata | created 2026-03-10 ✓, ported with AI, pre-1.0, breaking changes in 0.6.0 ✓ | the alternatives are stale (blues/jsonata-go targets JSONata 1.5.4). Pin it exact, wrap it, golden-test it |
 | No Redis in v1 | the spec lists it | nothing in v1 needs it; agreed as D7 |
 | nginx's stable branch | nginx recommends mainline: "This version is recommended for production unless your organization has strict requirements for stability" ✓ [86] | fewer changes. CI builds the images and tests nginx's config (`just images`, 2026-11-01), so following mainline is dropping one ignore rule in `dependabot.yml` |
+| Only what nothing live uses is archived (plan 15, 2026-11-06) | Stripe archives what's still in use: a price's `active` is "Whether the price can be used for new purchases" ✓ [127], so what uses it goes on | your call: archived means retired, so nothing runs on it, and the refusal names what's left to do |
 | Upstreams only: Publish refuses an HTTP step with a request of its own (plan 07, 2026-11-03) | every tool checked keeps a generic HTTP step beside its catalog: n8n's HTTP Request node "allows you to make HTTP requests to query data from any app or service with a REST API" ✓ [105]; Logic Apps: "To call an endpoint from anywhere else in your workflow, add the built-in action named HTTP" ✓ [106]; Step Functions' HTTP Task holds its URL and method itself, and shares only the credentials, through a connection that "helps you avoid hard-coding secrets, such as API keys, into your state machine definition" ✓ [107] | your call: every call, and how it's handled, in one place. Their catalogs are the vendor's, so a generic step is the only way to an API they lack; ours is the user's, and Add HTTP step makes an upstream from a call |
 | 508 for a loop (plan 06) | none of the gateways checked uses it: Fastly answers 503, Envoy 502, Tyk 500; RFC 5842 defines it for WebDAV's "Depth: infinity" ✓ [101] | it's the registered code named for a loop, and a 503 asks for a retry that never helps one (your call, with plan 06, 2026-11-02) |
 | Lists of looks to avoid are review questions, not rules (design.md) | the design skill design.md started from [37] treats its list as rules | a list everyone follows becomes a template of its own (decided 2026-10-28) |
@@ -289,6 +295,16 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 115. https://base-ui.com/react/components/dialog
 116. https://github.blog/engineering/platform-security/behind-githubs-new-authentication-token-formats/
 117. https://www.rfc-editor.org/rfc/rfc6750.html#section-3
+118. https://docs.github.com/en/repositories/archiving-a-github-repository/archiving-repositories
+119. https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository
+120. https://developer.hashicorp.com/vault/docs/secrets/kv/kv-v2
+121. https://docs.cloud.google.com/secret-manager/docs/destroy-secret-version
+122. https://brandur.org/soft-deletion
+123. https://gdpr-info.eu/art-5-gdpr/
+124. https://www.postgresql.org/docs/current/explicit-locking.html
+125. https://html.spec.whatwg.org/multipage/form-elements.html#the-fieldset-element
+126. https://base-ui.com/react/components/tabs
+127. https://docs.stripe.com/api/prices/update
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

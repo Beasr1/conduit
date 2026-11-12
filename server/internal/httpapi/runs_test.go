@@ -20,6 +20,7 @@ import (
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
 	"github.com/Beasr1/conduit/server/internal/runner"
 	"github.com/Beasr1/conduit/server/internal/store"
+	"github.com/Beasr1/conduit/server/internal/store/storetest"
 )
 
 // greetDef calls BASE/users/{user_id} with a secret header and query
@@ -94,7 +95,7 @@ func published(t *testing.T, base, def string) gen.WorkflowRevision {
 func publishedBefore(t *testing.T, base, def string) gen.WorkflowRevision {
 	t.Helper()
 	wr := create(t, strings.ReplaceAll(def, "BASE", base))
-	if _, err := db.Publish(t.Context(), wr.Workflow.ID, 1); err != nil {
+	if _, err := db.Publish(t.Context(), wr.Workflow.ID, 1, storetest.NoCheck); err != nil {
 		t.Fatal(err)
 	}
 	return wr

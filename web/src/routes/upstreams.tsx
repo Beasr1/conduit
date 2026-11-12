@@ -1,3 +1,4 @@
+import { InUseTabs } from "@/components/in-use-tabs";
 import { CreateUpstreamDialog } from "@/features/upstreams/components/create-upstream-dialog";
 import { UpstreamList } from "@/features/upstreams/components/upstream-list";
 
@@ -9,7 +10,11 @@ export function Component() {
         <h1 className="font-heading text-xl font-semibold">Upstreams</h1>
         <CreateUpstreamDialog />
       </div>
-      <UpstreamList />
+      <InUseTabs
+        of="Which upstreams"
+        live={<UpstreamList />}
+        archived={<UpstreamList archived />}
+      />
     </div>
   );
 }

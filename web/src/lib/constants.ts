@@ -10,11 +10,19 @@ import { constantKeys } from "@/lib/query-keys";
 
 export type Constant = components["schemas"]["Constant"];
 
-// useConstants is every constant, by name, a secret one without its value.
-export function useConstants() {
+// useConstants is the constants in use, or those archived, by name, a secret
+// one without its value.
+export function useConstants(archived = false) {
   return useQuery({
-    queryKey: constantKeys.list(),
+    queryKey: constantKeys.list(archived),
     queryFn: ({ signal }) =>
-      call((signal) => api.GET("/v1/constants", { signal }), signal),
+      call(
+        (signal) =>
+          api.GET("/v1/constants", {
+            params: { query: archived ? { archived } : {} },
+            signal,
+          }),
+        signal,
+      ),
   });
 }

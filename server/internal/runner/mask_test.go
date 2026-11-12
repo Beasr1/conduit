@@ -149,6 +149,29 @@ func TestRun_MasksSecrets(t *testing.T) {
 	}
 }
 
+// An archived secret is out of use, and a run that meets its value still
+// doesn't keep it (plan 15).
+func TestRun_MasksArchivedSecrets(t *testing.T) {
+	t.Parallel()
+	long, longValue, _, _ := secrets(t)
+	if _, err := db.ArchiveConstant(t.Context(), long, store.Provenance{Actor: "token"}); err != nil {
+		t.Fatal(err)
+	}
+	w := saveWorkflow(t, "", `{"nodes": [{"id": "echo", "kind": "transform", "expr": "input.token"}], "output": "nodes.echo.body"}`)
+	r := New(db, upstream.New(upstream.Options{AllowPrivateNetworks: true}), slog.New(slog.DiscardHandler), Options{})
+	t.Cleanup(r.Stop)
+	out, err := r.Serve(t.Context(), w.Slug, "", json.RawMessage(`{"token": "`+longValue+`"}`))
+	if err != nil || out.Answer != 200 {
+		t.Fatalf("Serve() = %+v, %v", out, err)
+	}
+	if want := `"[secret ` + long + `]"`; string(out.Output) != want {
+		t.Errorf("answered %s, want %s", out.Output, want)
+	}
+	if kept := left(t, out.Run.ID); strings.Contains(kept, longValue) {
+		t.Errorf("the records hold the secret: %s", kept)
+	}
+}
+
 // A secret in why a run failed is masked too: in the failure it records
 // and answers, and in an error body that fails on its own, logged.
 func TestRun_MasksSecretsInFailures(t *testing.T) {

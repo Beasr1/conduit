@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -36,7 +37,7 @@ func slug(t *testing.T) string {
 }
 
 func def(n int) json.RawMessage {
-	b, _ := json.Marshal(map[string]any{"nodes": []any{}, "output": n})
+	b, _ := json.Marshal(map[string]any{"nodes": []any{}, "output": strconv.Itoa(n)})
 	return b
 }
 
@@ -59,7 +60,7 @@ func TestCreateWorkflow_StoresRevisionOne(t *testing.T) {
 	if w.Slug != s || w.LatestRevision != 1 || w.PublishedRevision != nil || len(w.ID) != 36 {
 		t.Errorf("workflow = %+v", w)
 	}
-	if r.Revision != 1 || r.WorkflowID != w.ID || r.Provenance != person || string(r.Definition) != `{"nodes": [], "output": 1}` {
+	if r.Revision != 1 || r.WorkflowID != w.ID || r.Provenance != person || string(r.Definition) != `{"nodes": [], "output": "1"}` {
 		t.Errorf("revision = %+v, definition %s", r, r.Definition)
 	}
 	got, err := db.Workflow(t.Context(), w.ID)
@@ -101,7 +102,7 @@ func TestSaveRevision(t *testing.T) {
 	}
 	// A save that changes nothing makes no revision: 2 is the answer, as it
 	// was, whoever saves. Key order and spacing don't count.
-	same, err := db.SaveRevision(t.Context(), w.ID, 2, json.RawMessage(`{"output": 2, "nodes": []}`), store.Provenance{Actor: "token", Client: "other"})
+	same, err := db.SaveRevision(t.Context(), w.ID, 2, json.RawMessage(`{"output": "2", "nodes": []}`), store.Provenance{Actor: "token", Client: "other"})
 	if err != nil || same.Revision != 2 || same.Provenance != person {
 		t.Errorf("a save that changes nothing = %+v, %v; want revision 2, as it was", same, err)
 	}
@@ -109,7 +110,7 @@ func TestSaveRevision(t *testing.T) {
 		t.Errorf("save to a missing workflow: error = %v, want ErrNotFound", err)
 	}
 	got, err := db.Revision(t.Context(), w.ID, 2)
-	if err != nil || string(got.Definition) != `{"nodes": [], "output": 2}` {
+	if err != nil || string(got.Definition) != `{"nodes": [], "output": "2"}` {
 		t.Errorf("Revision(2) = %s, %v", got.Definition, err)
 	}
 	rs, err := db.Revisions(t.Context(), w.ID)
@@ -151,11 +152,11 @@ func TestSaveRevision_ConcurrentSavesOnOneBase(t *testing.T) {
 func TestPublish(t *testing.T) {
 	t.Parallel()
 	w := create(t)
-	got, err := db.Publish(t.Context(), w.ID, 1)
+	got, err := db.Publish(t.Context(), w.ID, 1, storetest.NoCheck)
 	if err != nil || got.PublishedRevision == nil || *got.PublishedRevision != 1 {
 		t.Fatalf("Publish(1) = %+v, %v", got, err)
 	}
-	if _, err := db.Publish(t.Context(), w.ID, 2); !errors.Is(err, store.ErrNotFound) {
+	if _, err := db.Publish(t.Context(), w.ID, 2, storetest.NoCheck); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("publish a revision that doesn't exist: error = %v, want ErrNotFound", err)
 	}
 }
@@ -167,14 +168,14 @@ func TestWorkflows_PagesNewestFirst(t *testing.T) {
 	for range 3 {
 		create(t)
 	}
-	first, err := db.Workflows(t.Context(), 2, "")
+	first, err := db.Workflows(t.Context(), 2, "", false)
 	if err != nil || len(first) != 2 {
 		t.Fatalf("Workflows(2) = %d, %v", len(first), err)
 	}
 	if first[0].ID <= first[1].ID {
 		t.Errorf("not newest first: %s then %s", first[0].ID, first[1].ID)
 	}
-	next, err := db.Workflows(t.Context(), 2, first[1].ID)
+	next, err := db.Workflows(t.Context(), 2, first[1].ID, false)
 	if err != nil || len(next) == 0 || next[0].ID >= first[1].ID {
 		t.Errorf("the page after %s = %+v, %v", first[1].ID, next, err)
 	}

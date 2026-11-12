@@ -244,64 +244,167 @@ test("Undo puts the value before back", async () => {
   expect(await within(base).findByText("tenant-a")).toBeTruthy();
 });
 
-// Delete asks again; refused while something reads the constant, it says
-// what, and can't be pressed again.
-test("Delete asks again, and says what reads it when it's refused", async () => {
+// Archive asks again; refused while something reads the constant, it says
+// what, and can't be pressed again (plan 15). Done, the constant moves to
+// the Archived tab, and Restore brings it back.
+test("Archive asks again, says what reads it, and Restore brings it back", async () => {
   const list = answer();
-  const detail =
-    "Saved revisions or upstream versions read it, and each can run again: Orders at revision 3.";
+  const detail = "It's in use, so it can't be archived: Orders at revision 3.";
+  const moved = (name: string, to: Partial<Constant>) => {
+    const c = list.findIndex((k) => k.name === name);
+    list[c] = { ...list[c]!, archived_at: undefined, ...to };
+    return HttpResponse.json<Constant>(list[c]);
+  };
   server.use(
-    http.delete("/api/v1/constants/crm_token", () =>
+    http.get("/api/v1/constants", ({ request }) => {
+      const archived = new URL(request.url).searchParams.has("archived");
+      return HttpResponse.json<ConstantList>({
+        constants: list.filter(
+          (c) => (c.archived_at !== undefined) === archived,
+        ),
+      });
+    }),
+    http.post("/api/v1/constants/crm_token/archive", () =>
       HttpResponse.json(
-        { status: 409, code: "constant_in_use", detail },
+        { status: 409, code: "in_use", detail },
         {
           status: 409,
           headers: { "Content-Type": "application/problem+json" },
         },
       ),
     ),
-    http.delete("/api/v1/constants/base_path", () => {
-      list.splice(
-        list.findIndex((c) => c.name === "base_path"),
-        1,
-      );
-      return new HttpResponse(null, { status: 204 });
-    }),
+    http.post("/api/v1/constants/base_path/archive", () =>
+      moved("base_path", { archived_at: at }),
+    ),
+    http.post("/api/v1/constants/base_path/restore", () =>
+      moved("base_path", {}),
+    ),
   );
   renderPage();
   fireEvent.click(
     within(await row("crm_token")).getByRole("button", {
-      name: "Delete crm_token",
+      name: "Archive crm_token",
     }),
   );
-  let dialog = await screen.findByRole("dialog", { name: "Delete crm_token?" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  let dialog = await screen.findByRole("dialog", {
+    name: "Archive crm_token?",
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
   expect(await within(dialog).findByText(detail)).toBeTruthy();
   expect(
-    within(dialog).getByRole("button", { name: "Delete" }).matches(":disabled"),
+    within(dialog)
+      .getByRole("button", { name: "Archive" })
+      .matches(":disabled"),
   ).toBe(true);
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   await waitFor(() =>
     expect(
-      screen.queryByRole("dialog", { name: "Delete crm_token?" }),
+      screen.queryByRole("dialog", { name: "Archive crm_token?" }),
+    ).toBeNull(),
+  );
+  // Asked again, it starts afresh: the refusal was for the last time.
+  fireEvent.click(
+    within(await row("crm_token")).getByRole("button", {
+      name: "Archive crm_token",
+    }),
+  );
+  dialog = await screen.findByRole("dialog", { name: "Archive crm_token?" });
+  expect(within(dialog).queryByText(detail)).toBeNull();
+  expect(
+    within(dialog)
+      .getByRole("button", { name: "Archive" })
+      .matches(":disabled"),
+  ).toBe(false);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "Archive crm_token?" }),
     ).toBeNull(),
   );
 
   fireEvent.click(
     within(await row("base_path")).getByRole("button", {
-      name: "Delete base_path",
+      name: "Archive base_path",
     }),
   );
-  dialog = await screen.findByRole("dialog", { name: "Delete base_path?" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
-  // The list is asked again, and it's gone: looked for hidden too, as
-  // the page is hidden from a screen reader while the dialog closes.
+  dialog = await screen.findByRole("dialog", { name: "Archive base_path?" });
+  expect(
+    within(dialog).getByText(
+      "Nothing can read it any more. Its value stays sealed, and Restore brings it back.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+  // The list is asked again, and it's left: looked for hidden too, as the
+  // page is hidden from a screen reader while the dialog closes.
   await waitFor(() =>
     expect(
       screen.queryByRole("cell", { name: "base_path", hidden: true }),
     ).toBeNull(),
   );
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull(),
+  );
+
+  fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
+  const archived = await row("base_path");
+  expect(within(archived).getByText("tenant-a")).toBeTruthy();
   expect(
-    screen.getByRole("cell", { name: "crm_token", hidden: true }),
-  ).toBeTruthy();
+    within(archived).queryByRole("button", { name: /Archive/ }),
+  ).toBeNull();
+  expect(within(archived).queryByRole("button", { name: /Change/ })).toBeNull();
+  fireEvent.click(
+    within(archived).getByRole("button", { name: "Restore base_path" }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("cell", { name: "base_path" })).toBeNull(),
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "In use" }));
+  expect(await row("base_path")).toBeTruthy();
+});
+
+// A constant read at its latest and its published revision is listed at each.
+test("Used by lists each revision that reads it", async () => {
+  answer();
+  server.use(
+    http.get("/api/v1/constants/base_path/users", () =>
+      HttpResponse.json<ConstantUsers>({
+        workflows: [
+          { workflow_id: "wf-1", name: "Orders", revision: 1 },
+          { workflow_id: "wf-1", name: "Orders", revision: 3 },
+        ],
+        upstreams: [],
+      }),
+    ),
+  );
+  renderPage();
+  const base = await row("base_path");
+  expect(await within(base).findByText("· r1")).toBeTruthy();
+  expect(within(base).getByText("· r3")).toBeTruthy();
+});
+
+test("the Archived tab says when there's nothing on it", async () => {
+  answer([]);
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Archived" }));
+  expect(await screen.findByText(/Nothing archived/)).toBeTruthy();
+});
+
+// The two lists are asked for apart, so the Archived tab never shows, even
+// for a moment, what's in use.
+test("the Archived tab never shows what's in use", async () => {
+  answer();
+  server.use(
+    http.get("/api/v1/constants", ({ request }) =>
+      HttpResponse.json<ConstantList>({
+        constants: new URL(request.url).searchParams.has("archived")
+          ? []
+          : constants,
+      }),
+    ),
+  );
+  renderPage();
+  await row("base_path");
+  fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
+  expect(screen.queryByRole("cell", { name: "base_path" })).toBeNull();
+  expect(await screen.findByText(/Nothing archived/)).toBeTruthy();
 });

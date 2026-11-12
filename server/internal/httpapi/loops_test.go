@@ -13,6 +13,7 @@ import (
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
 	"github.com/Beasr1/conduit/server/internal/runner"
 	"github.com/Beasr1/conduit/server/internal/store"
+	"github.com/Beasr1/conduit/server/internal/store/storetest"
 	"github.com/Beasr1/conduit/server/internal/trace"
 )
 
@@ -37,7 +38,7 @@ func servedAt(t *testing.T, slug, url string) (store.Workflow, string) {
 	if _, err := db.CreateKey(t.Context(), w.ID, "itself", k, store.Provenance{Actor: "token"}); err != nil {
 		t.Fatal(err)
 	}
-	if w, err = db.Publish(t.Context(), w.ID, 1); err != nil {
+	if w, err = db.Publish(t.Context(), w.ID, 1, storetest.NoCheck); err != nil {
 		t.Fatal(err)
 	}
 	return w, key

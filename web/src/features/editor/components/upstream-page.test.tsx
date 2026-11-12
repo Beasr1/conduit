@@ -4,7 +4,8 @@ import { expect, test } from "vitest";
 
 import { UpstreamPage } from "@/features/editor/components/upstream-page";
 import type { components } from "@/gen/schema";
-import { renderAt } from "@/test/render";
+import { Component as Page } from "@/routes/upstream";
+import { renderAt, renderRoutes } from "@/test/render";
 import { server } from "@/test/server";
 
 type Upstream = components["schemas"]["Upstream"];
@@ -188,41 +189,89 @@ test("Save version says when a newer version was saved elsewhere", async () => {
   ).toBeTruthy();
 });
 
-// Delete asks again, deletes the upstream with every version, and goes
-// back to the library (plan 07).
-test("Delete asks again, then deletes it and goes back to the library", async () => {
-  answerPage();
-  let deleted = false;
+// answerArchive has the server archive and restore it, as the page's query
+// would then hold it.
+function answerArchive() {
+  let archived = false;
+  const summary = () => ({
+    ...version(users, 2).upstream,
+    ...(archived ? { archived_at: at, archived_by: { actor: "token" } } : {}),
+  });
   server.use(
-    http.delete("/api/v1/upstreams/u-1", () => {
-      deleted = true;
-      return new HttpResponse(null, { status: 204 });
+    http.post("/api/v1/upstreams/u-1/archive", () => {
+      archived = true;
+      return HttpResponse.json(summary());
     }),
+    http.post("/api/v1/upstreams/u-1/restore", () => {
+      archived = false;
+      return HttpResponse.json(summary());
+    }),
+    http.get("/api/v1/upstreams/u-1", () =>
+      HttpResponse.json<UpstreamVersion>({
+        ...version(users, 2),
+        upstream: summary(),
+      }),
+    ),
   );
-  renderAt(<UpstreamPage version={version(users, 2)} />, {
-    path: "/upstreams/u-1",
-    routes: ["/upstreams"],
-  });
-  fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+}
+
+// Archive asks again, and the page stays, read-only, with Restore where Save
+// was; Restore brings it all back (plan 15).
+test("Archive asks again, and the page stays, read-only, until it's restored", async () => {
+  answerPage();
+  answerArchive();
+  renderRoutes(
+    [{ path: "/upstreams/:id", element: <Page /> }],
+    "/upstreams/u-1",
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Archive Users API" }),
+  );
   const dialog = await screen.findByRole("dialog", {
-    name: "Delete Users API?",
+    name: "Archive Users API?",
   });
-  expect(deleted).toBe(false);
-  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
-  expect(await screen.findByText("at /upstreams")).toBeTruthy();
-  expect(deleted).toBe(true);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+  const restore = await screen.findByRole("button", { name: "Restore" });
+  expect(screen.getByText(/· Archived/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Save version/ })).toBeNull();
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull(),
+  );
+  // Nothing changes it, and what's on its tabs can still be read.
+  for (const name of ["Name of parameter user_id", "Add a parameter", "URL"])
+    expect(screen.getByRole("textbox", { name }).matches(":disabled")).toBe(
+      true,
+    );
+  fireEvent.click(screen.getByRole("tab", { name: "404" }));
+  expect(screen.getByRole("tab", { name: "404" }).ariaSelected).toBe("true");
+  // Used by is as Archive checks it, and stays.
+  expect(
+    within(screen.getByRole("region", { name: "Used by" })).getByRole("link", {
+      name: "Orders",
+    }),
+  ).toBeTruthy();
+
+  fireEvent.click(restore);
+  expect(
+    await screen.findByRole("button", { name: "Save version 3" }),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Archived/)).toBeNull();
+  expect(
+    screen
+      .getByRole("textbox", { name: "Name of parameter user_id" })
+      .matches(":disabled"),
+  ).toBe(false);
 });
 
-// While a saved revision pins it, the server refuses, and the dialog says
-// which revisions do.
-test("Delete says which revisions pin it when the server refuses", async () => {
+// While something live uses it, the server refuses, and the dialog says
+// what does.
+test("Archive says what uses it when the server refuses", async () => {
   answerPage();
-  const detail =
-    "Saved revisions pin it, and each must keep running: Orders at revision 4.";
+  const detail = "It's in use, so it can't be archived: Orders at revision 4.";
   server.use(
-    http.delete("/api/v1/upstreams/u-1", () =>
+    http.post("/api/v1/upstreams/u-1/archive", () =>
       HttpResponse.json(
-        { status: 409, code: "upstream_in_use", detail },
+        { status: 409, code: "in_use", detail },
         {
           status: 409,
           headers: { "Content-Type": "application/problem+json" },
@@ -232,15 +281,90 @@ test("Delete says which revisions pin it when the server refuses", async () => {
   );
   renderAt(<UpstreamPage version={version(users, 2)} />, {
     path: "/upstreams/u-1",
-    routes: ["/upstreams"],
   });
-  fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Archive Users API" }),
+  );
   const dialog = await screen.findByRole("dialog", {
-    name: "Delete Users API?",
+    name: "Archive Users API?",
   });
-  const confirm = within(dialog).getByRole("button", { name: "Delete" });
+  const confirm = within(dialog).getByRole("button", { name: "Archive" });
   fireEvent.click(confirm);
   expect(await within(dialog).findByText(detail)).toBeTruthy();
   expect(confirm.matches(":disabled")).toBe(true);
-  expect(screen.queryByText("at /upstreams")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Restore" })).toBeNull();
+});
+
+// What's unsaved would be stranded by an archive.
+test("Archive waits for what's unsaved", async () => {
+  answerPage();
+  renderAt(<UpstreamPage version={version(users, 2)} />, {
+    path: "/upstreams/u-1",
+  });
+  const archive = await screen.findByRole("button", {
+    name: "Archive Users API",
+  });
+  expect(archive.matches(":disabled")).toBe(false);
+  fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
+    target: { value: "https://users.example.com/v2/{{ user_id }}" },
+  });
+  expect(await screen.findByText(/Unsaved changes/)).toBeTruthy();
+  expect(archive.matches(":disabled")).toBe(true);
+});
+
+// A workflow on two revisions, latest and served, shows on two lines.
+test("Used by lists each revision that uses it", async () => {
+  answerPage();
+  server.use(
+    http.get("/api/v1/upstreams/u-1/users", () =>
+      HttpResponse.json<UpstreamUsers>({
+        workflows: [
+          {
+            workflow_id: "wf-1",
+            name: "Orders",
+            revision: 3,
+            versions: [1],
+            published: true,
+          },
+          {
+            workflow_id: "wf-1",
+            name: "Orders",
+            revision: 4,
+            versions: [2],
+            published: false,
+          },
+        ],
+      }),
+    ),
+  );
+  renderAt(<UpstreamPage version={version(users, 2)} />, {
+    path: "/upstreams/u-1",
+  });
+  expect(await screen.findByText("· v1 · served")).toBeTruthy();
+  expect(screen.getByText("· v2")).toBeTruthy();
+});
+
+// Nothing will use an archived one, so its Used by says so without "yet".
+test("an archived upstream nothing uses says so plainly", async () => {
+  answerPage();
+  server.use(
+    http.get("/api/v1/upstreams/u-1/users", () =>
+      HttpResponse.json<UpstreamUsers>({ workflows: [] }),
+    ),
+  );
+  const archived = version(users, 2);
+  renderAt(
+    <UpstreamPage
+      version={{
+        ...archived,
+        upstream: {
+          ...archived.upstream,
+          archived_at: at,
+          archived_by: { actor: "token" },
+        },
+      }}
+    />,
+    { path: "/upstreams/u-1" },
+  );
+  expect(await screen.findByText("No workflow uses it.")).toBeTruthy();
 });

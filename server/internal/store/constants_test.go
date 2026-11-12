@@ -2,13 +2,12 @@ package store_test
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -194,9 +193,6 @@ func TestConstants_Refused(t *testing.T) {
 	if _, err := db.UndoConstant(ctx, missing, person); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("UndoConstant(missing) = %v, want ErrNotFound", err)
 	}
-	if err := db.DeleteConstant(ctx, missing); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("DeleteConstant(missing) = %v, want ErrNotFound", err)
-	}
 
 	s, err := store.Open(ctx, dbURL, nil)
 	if err != nil {
@@ -226,109 +222,9 @@ func readingUpstream(name string) json.RawMessage {
 	return b
 }
 
-// A constant a saved revision or an upstream version reads can't be
-// deleted: either can run again (plan 06), as a pinned upstream can't be
-// (plan 07). One whose name merely starts another's is free to go.
-func TestDeleteConstant(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	free, read, upstreamRead := constantName(t), constantName(t), constantName(t)
-	for _, name := range []string{free, read, upstreamRead} {
-		if _, err := db.CreateConstant(ctx, name, "v", false, person); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// read_more is read, and read isn't: the name has to end where the
-	// read does.
-	w, _, err := db.CreateWorkflow(ctx, slug(t), "Reads", reads(free+"_more"), person)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.SaveRevision(ctx, w.ID, 1, reads(read), person); err != nil {
-		t.Fatal(err)
-	}
-	// Revision 3 reads it no more; revision 2 still does, and can run again.
-	if _, err := db.SaveRevision(ctx, w.ID, 2, def(3), person); err != nil {
-		t.Fatal(err)
-	}
-	u, _, err := db.CreateUpstream(ctx, upstreamName(t), readingUpstream(upstreamRead), person)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var inUse *store.ConstantInUseError
-	if err := db.DeleteConstant(ctx, read); !errors.As(err, &inUse) ||
-		len(inUse.Workflows) != 1 || inUse.Workflows[0].ID != w.ID || inUse.Workflows[0].Name != "Reads" ||
-		len(inUse.Workflows[0].At) != 1 || inUse.Workflows[0].At[0] != 2 || len(inUse.Upstreams) != 0 {
-		t.Errorf("deleting one revision 2 reads: %v %+v", err, inUse)
-	}
-	if err := db.DeleteConstant(ctx, upstreamRead); !errors.As(err, &inUse) ||
-		len(inUse.Upstreams) != 1 || inUse.Upstreams[0].ID != u.ID || inUse.Upstreams[0].At[0] != 1 || len(inUse.Workflows) != 0 {
-		t.Errorf("deleting one an upstream reads: %v %+v", err, inUse)
-	}
-	if err := db.DeleteConstant(ctx, free); err != nil {
-		t.Fatalf("deleting one nothing reads: %v", err)
-	}
-	if _, err := db.Constant(ctx, free); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("after delete: %v, want ErrNotFound", err)
-	}
-}
-
-// A version saved reading the constant while it's deleted is seen: the
-// delete waits for the save, then refuses.
-func TestDeleteConstant_ASaveInBetween(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	name := constantName(t)
-	if _, err := db.CreateConstant(ctx, name, "v", false, person); err != nil {
-		t.Fatal(err)
-	}
-	u, _, err := db.CreateUpstream(ctx, upstreamName(t), upstreamDef(1), person)
-	if err != nil {
-		t.Fatal(err)
-	}
-	conn, err := pgx.Connect(ctx, dbURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close(ctx)
-	tx, err := conn.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	// A save of a version that reads it, not yet committed.
-	if _, err := tx.Exec(ctx, `INSERT INTO upstream_versions (upstream_id, version, definition, provenance)
-		VALUES ($1::uuid, 2, $2, $3)`, u.ID, readingUpstream(name), person); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- db.DeleteConstant(context.Background(), name) }()
-	// Once the delete waits for the save, the save commits.
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		var waiting int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM pg_locks
-			WHERE NOT granted AND mode = 'ShareLock' AND relation = 'upstream_versions'::regclass`).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the delete didn't wait for the save")
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	var inUse *store.ConstantInUseError
-	if err := <-done; !errors.As(err, &inUse) {
-		t.Errorf("DeleteConstant() during a save that reads it = %v, want a ConstantInUseError", err)
-	}
-}
-
-// Used by is the workflows whose latest revision reads a constant, and the
-// upstreams whose latest version does.
+// Used by is what Archive checks: the workflows whose latest or published
+// revision reads a constant, each at those, and the upstreams whose latest
+// version does (plan 15).
 func TestConstantUsers(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -340,7 +236,8 @@ func TestConstantUsers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Its latest revision reads it no more, so it isn't listed.
+	// Its latest revision reads it no more, and nothing served did, so it
+	// isn't listed.
 	stopped, _, err := db.CreateWorkflow(ctx, slug(t), "Stopped", reads(name), person)
 	if err != nil {
 		t.Fatal(err)
@@ -348,6 +245,9 @@ func TestConstantUsers(t *testing.T) {
 	if _, err := db.SaveRevision(ctx, stopped.ID, 1, def(2), person); err != nil {
 		t.Fatal(err)
 	}
+	// Each revision that's live is listed: it serves 1, and it's at 3.
+	served := saved(t, "Served", reads(name), def(2), reads(name))
+	publish(t, served.ID, 1)
 	u, _, err := db.CreateUpstream(ctx, upstreamName(t), readingUpstream(name), person)
 	if err != nil {
 		t.Fatal(err)
@@ -356,8 +256,8 @@ func TestConstantUsers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(users.Workflows) != 1 || users.Workflows[0].ID != reading.ID || users.Workflows[0].Name != "Reading" || users.Workflows[0].At[0] != 1 {
-		t.Errorf("workflows = %+v", users.Workflows)
+	if want := []store.LiveUse{use(reading, 1), use(served, 1, 3)}; !reflect.DeepEqual(users.Workflows, want) {
+		t.Errorf("workflows = %+v, want %+v", users.Workflows, want)
 	}
 	if len(users.Upstreams) != 1 || users.Upstreams[0].ID != u.ID || users.Upstreams[0].At[0] != 1 {
 		t.Errorf("upstreams = %+v", users.Upstreams)

@@ -4,7 +4,7 @@ No-code API orchestration. Users compose upstream API calls into a DAG,
 using a graph editor or a page-by-page builder, and map data between steps
 with JSONata. A Go engine runs it, fanning out in parallel.
 
-**Status: plans 12, 13 and 14 are built (2026-11-02), on plan 04's graph
+**Status: plans 12, 13, 14 and 15 are built, on plan 04's graph
 editor: Publish waits until every way a run can go reaches an answer and
 every step's failures are decided, every error is answered in one shape,
 the response picks its answer top to bottom, and the editor says only what
@@ -13,14 +13,15 @@ built too: a workflow calling itself is refused after 8 hops. Plan 07's
 upstreams are built (2026-11-04): a library of them, each save that
 changes something a version that never changes, which a step uses at a
 pinned version, showing only what it keeps and opening the upstream, which
-is changed on its own page; Publish takes only steps that use one, a
-published workflow is one too, and an upstream no saved revision pins can
-be deleted. Plan 06's constants are built too: named values every
+is changed on its own page; Publish takes only steps that use one, and a
+published workflow is one too. Plan 06's constants are built too: named values every
 expression reads as `$const.name`, sealed at rest, changed in one place for
 every run from then on, a secret one masked in what runs keep and answer.
 Plan 07's caller keys are built (2026-11-05): `/serve` takes only a key
 of its workflow, one per caller, shown once, rotated with an expiry or
-revoked.**
+revoked. Plan 15 is built (2026-11-07): nothing is deleted; a workflow, an
+upstream or a constant nothing live uses is archived, read-only, its name
+kept, and restored.**
 The web app signs in with a session cookie, which sign-out or 30 minutes
 unused ends, lists workflows and creates them, and edits, checks, saves
 and publishes one in graph mode, previewing what each step reads and sends
@@ -60,19 +61,25 @@ library. A step can use a published workflow instead, at the revision
 served: it gives the workflow's input fields values, its responses the
 workflow's answers, previewed by the workflow's own preview, and it runs
 as a run of its own, linked to its caller, a hop further in its trace. A
-workflow can't use itself, directly or through others. An upstream's page
-deletes it once no saved revision of any workflow pins it. A Constants
+workflow can't use itself, directly or through others. A Constants
 page beside them holds named values, plain or secret, which every
 expression reads as `$const.name` and a field offers by name: a run reads
 each as it is when the run starts, a preview a secret's stand-in, and what
 a run keeps or answers has every exact copy of a secret masked,
-`[secret crm_token]`. A constant something reads can't be deleted. The
+`[secret crm_token]`. The
 editor's Keys panel makes a workflow's caller keys, one per caller, each
 shown once to copy; rotating one gives its caller a new key and the old
 one an expiry, now, an hour, a day or 7 days, revoking stops one at once,
-neither deletes it, and a served run names the key it came with. What was built, and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
-13-minimal-editor.md, 14-the-response-picks.md, 06-hardening.md and
-07-tests-and-catalogue.md; the bigger picture is docs/plans/README.md.
+neither deletes it, and a served run names the key it came with. Each
+list has what's archived on a tab beside it. Archive is refused while a
+live revision or version reaches the thing, through what it pins, naming
+them; archiving a workflow revokes its keys; what's archived opens
+read-only with Restore; and using one is a problem, so a draft saves and
+a revision that reaches one neither runs nor publishes. What was built,
+and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
+13-minimal-editor.md, 14-the-response-picks.md, 06-hardening.md,
+07-tests-and-catalogue.md and 15-archive.md; the bigger picture is
+docs/plans/README.md.
 
 ## Read before working
 
@@ -127,7 +134,7 @@ just dev-server     API server on http://127.0.0.1:8080, after db-up and migrate
 just dev-web        web app on http://127.0.0.1:5173; /api is proxied to the server
 just upstream       the test upstream on http://127.0.0.1:8090, to try runs against
 just check          the gate: format, lint, race tests, coverage floors, typecheck, the browser test on a build, stale generated code
-just e2e            the browser tests: plan 04's Done flow, plan 06's constants, plan 07's library and caller keys, in Chromium, against their own database, server and test upstream
+just e2e            the browser tests: plan 04's Done flow, plan 06's constants, plan 07's library and caller keys, plan 15's archive, in Chromium, against their own database, server and test upstream
 just fmt            apply formatting: gofumpt + goimports, Prettier
 just test           Go and web tests
 just gen            regenerate the HTTP layer, the workflow types and web/src/gen from schema/
@@ -188,6 +195,12 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`, and
   `just dev` and `just up`; Safari works over https (plan 04, answer 8).
 - A web test fails on any console warning or error it logs
   (`web/src/test/console.ts`). Fix the cause; don't silence the console.
+- Nothing a user makes is deleted, and a change to something archived is
+  409 `archived`. A new way to change a workflow, an upstream or a constant
+  checks it, in its transaction (plan 15). Publish and Archive share one
+  advisory lock, and Publish's check runs inside it on one connection.
+- A script's click reaches a disabled button, which a person's doesn't, so
+  jsdom can't show a disabled control stays shut; `just e2e` can.
 - The page's CSP (nginx) refuses inline styles and eval, and jsdom has no
   CSP, so a violation shows only in a browser through `just up`. A rule a
   Base UI part would inject as `<style>` goes in `web/src/index.css`

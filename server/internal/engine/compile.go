@@ -314,7 +314,7 @@ func (c *compiler) condition(pointer, src string) *transform.Condition {
 }
 
 // constants checks what an expression at pointer reads as $const: each
-// constant by its name, and one there is (plan 06).
+// constant by its name, and one there is (plan 06), in use (plan 15).
 func (c *compiler) constants(pointer string, names []string, whole bool) {
 	if whole {
 		c.problems = append(c.problems, workflow.Problem{
@@ -326,10 +326,17 @@ func (c *compiler) constants(pointer string, names []string, whole bool) {
 		return
 	}
 	for _, name := range names {
-		if !c.known[name] {
+		live, there := c.known[name]
+		switch {
+		case !there:
 			c.problems = append(c.problems, workflow.Problem{
 				Pointer: pointer, Code: "unknown_constant",
 				Detail: fmt.Sprintf("it reads $const.%s, which no constant is named: make it on the Constants page, or fix the name", name),
+			})
+		case !live:
+			c.problems = append(c.problems, workflow.Problem{
+				Pointer: pointer, Code: "archived_constant",
+				Detail: fmt.Sprintf("it reads $const.%s, which is archived: restore it on the Constants page, or read another", name),
 			})
 		}
 	}

@@ -196,6 +196,11 @@ server/
 - Optimistic concurrency: a save names its base revision, and the store
   locks the row (`FOR UPDATE`) to compare. A stale base is
   `ErrRevisionMismatch`, which the API answers with `412`.
+- What's archived says so on its row, and the transaction that changes a
+  thing checks it, so no change slips in beside an archive (plan 15).
+  Archive and Publish share one advisory transaction lock, the store's only
+  one, and Publish's check runs inside it, on that connection: reading from
+  the pool while holding it could leave every connection waiting.
 - A run is recorded as it goes: each node when it ends, the run when it
   ends. Header and query values with secret-looking names are stored as
   `[redacted]`, and bodies over 256 KiB as a string of their first

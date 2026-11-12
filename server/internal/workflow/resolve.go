@@ -21,9 +21,14 @@ type Revisions map[Uses]*Definition
 type Deps struct {
 	Versions  Versions
 	Revisions Revisions
-	// Constants is the names of the constants there are, which
-	// expressions may read (plan 06).
+	// Constants is the constants there are, by name, which expressions may
+	// read: true for one in use, false for one archived (plans 06, 15).
 	Constants map[string]bool
+	// Archived is the archived upstreams and workflows among what's above,
+	// by id, with each one's name (plan 15).
+	Archived map[string]string
+	// Reads is the constants each version and revision above reads, by name.
+	Reads map[Uses][]string
 }
 
 // Resolve is d with each node that uses an upstream or a workflow filled
@@ -34,9 +39,9 @@ type Deps struct {
 // gives its parameters, and a workflow takes them as its input's fields.
 // self is the workflow d is a revision of, which no node may use, directly
 // or through others; "" for none. The problems are how nodes use what they
-// pin: one deps doesn't have, a value missing or for nothing, a node with a
-// request, responses or samples of its own, and a workflow using itself. d
-// isn't changed.
+// pin: one deps doesn't have, or that's archived or reaches something that
+// is, a value missing or for nothing, a node with a request, responses or
+// samples of its own, and a workflow using itself. d isn't changed.
 func Resolve(d *Definition, deps Deps, self string) (*Definition, Problems) {
 	var v validator
 	out := *d
@@ -58,9 +63,9 @@ func Resolve(d *Definition, deps Deps, self string) (*Definition, Problems) {
 			n.Uses.Workflow != "" && n.Uses.Version != 0:
 			v.add(p+"/uses", "not_allowed", "a node uses an upstream at a version or a workflow at a revision, not both")
 		case n.Uses.Workflow != "":
-			v.useWorkflow(n, p, deps.Revisions, self)
+			v.useWorkflow(n, p, deps, self)
 		default:
-			v.useUpstream(n, p, deps.Versions)
+			v.useUpstream(n, p, deps)
 		}
 	}
 	return &out, v.problems
@@ -68,7 +73,7 @@ func Resolve(d *Definition, deps Deps, self string) (*Definition, Problems) {
 
 // useUpstream fills node n, at p, from the upstream version it uses: its
 // request, responses and samples.
-func (v *validator) useUpstream(n *Node, p string, vs Versions) {
+func (v *validator) useUpstream(n *Node, p string, deps Deps) {
 	if n.Request != nil {
 		v.add(p+"/request", "not_allowed", "a node that uses an upstream sends the upstream's request, so it has none of its own")
 	}
@@ -78,10 +83,13 @@ func (v *validator) useUpstream(n *Node, p string, vs Versions) {
 	if n.Sample != nil {
 		v.add(p+"/sample", "not_allowed", "a node that uses an upstream has the upstream's samples, so it has none of its own")
 	}
-	u, ok := vs[*n.Uses]
+	u, ok := deps.Versions[*n.Uses]
 	if !ok {
 		v.add(p+"/uses", "unknown_upstream", "there's no upstream %s at version %d", n.Uses.Upstream, n.Uses.Version)
 		return
+	}
+	if name, ok := deps.Archived[n.Uses.Upstream]; ok {
+		v.add(p+"/uses", "archived_upstream", "the upstream %s is archived: restore it, or use another", name)
 	}
 	params := make(map[string]bool, len(u.Parameters))
 	for _, prm := range u.Parameters {
@@ -102,7 +110,7 @@ func (v *validator) useUpstream(n *Node, p string, vs Versions) {
 // useWorkflow fills node n, at p, from the workflow revision it uses: the
 // workflow's answers besides 2xx are its responses. Each field of the
 // workflow's input is a parameter, the required ones required.
-func (v *validator) useWorkflow(n *Node, p string, rs Revisions, self string) {
+func (v *validator) useWorkflow(n *Node, p string, deps Deps, self string) {
 	if n.Request != nil {
 		v.add(p+"/request", "not_allowed", "a node that uses a workflow runs it, so it sends no request of its own")
 	}
@@ -112,14 +120,18 @@ func (v *validator) useWorkflow(n *Node, p string, rs Revisions, self string) {
 	if n.Sample != nil {
 		v.add(p+"/sample", "not_allowed", "a node that uses a workflow is previewed by the workflow's own preview, so it has no samples of its own")
 	}
-	w, ok := rs[*n.Uses]
+	w, ok := deps.Revisions[*n.Uses]
 	if !ok {
 		v.add(p+"/uses", "unknown_workflow", "there's no workflow %s at revision %d", n.Uses.Workflow, n.Uses.Revision)
 		return
 	}
-	if self != "" && (n.Uses.Workflow == self || reaches(rs, *n.Uses)[self]) {
+	if self != "" && (n.Uses.Workflow == self || reaches(deps.Revisions, *n.Uses)[self]) {
 		v.add(p+"/uses", "uses_itself", "a workflow can't use itself, directly or through others")
 	}
+	if name, ok := deps.Archived[n.Uses.Workflow]; ok {
+		v.add(p+"/uses", "archived_workflow", "the workflow %s is archived: restore it, or use another", name)
+	}
+	v.archivedThrough(p, deps, *n.Uses)
 	fields, required := InputOf(w)
 	for _, f := range fields {
 		if required[f] && strings.TrimSpace(n.With[f]) == "" {
@@ -132,6 +144,46 @@ func (v *validator) useWorkflow(n *Node, p string, rs Revisions, self string) {
 		}
 	}
 	n.Outputs = AnswersOf(w)
+}
+
+// archivedThrough says on the node at p what's archived among what the
+// workflow revision u reaches, each once: what its nodes use, however far
+// in, and the constants those read. What the node's own definition reads,
+// Compile says.
+func (v *validator) archivedThrough(p string, deps Deps, u Uses) {
+	said := map[string]bool{}
+	say := func(code, what string) {
+		if !said[what] {
+			said[what] = true
+			v.add(p+"/uses", code, "the workflow it uses %s, which is archived: restore it, or use another revision", what)
+		}
+	}
+	seen := map[Uses]bool{}
+	var walk func(Uses)
+	walk = func(u Uses) {
+		if seen[u] {
+			return
+		}
+		seen[u] = true
+		for _, name := range deps.Reads[u] {
+			if live, ok := deps.Constants[name]; ok && !live {
+				say("archived_constant", "reads $const."+name)
+			}
+		}
+		for _, n := range deps.Revisions[u].nodes() {
+			if n.Uses == nil {
+				continue
+			}
+			if name, ok := deps.Archived[n.Uses.Upstream]; ok {
+				say("archived_upstream", "reaches the upstream "+name)
+			}
+			if name, ok := deps.Archived[n.Uses.Workflow]; ok {
+				say("archived_workflow", "reaches the workflow "+name)
+			}
+			walk(*n.Uses)
+		}
+	}
+	walk(u)
 }
 
 // reaches is the workflows the revision u pins uses, directly or through

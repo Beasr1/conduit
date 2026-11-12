@@ -117,7 +117,7 @@ export interface paths {
         get?: never;
         /**
          * Save the next revision
-         * @description If-Match must name the latest revision, so a save can't silently undo someone else's. The definition is saved even if it has problems. A definition that's the latest revision's, by value, makes no revision; the answer is that revision, as it was.
+         * @description If-Match must name the latest revision, so a save can't silently undo someone else's. The definition is saved even if it has problems. A definition that's the latest revision's, by value, makes no revision; the answer is that revision, as it was. An archived workflow is refused with 409 archived.
          */
         put: operations["saveDraft"];
         post?: never;
@@ -177,8 +177,55 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Make a revision the one served */
+        /**
+         * Make a revision the one served
+         * @description A revision with problems, among them one that uses something archived, directly or through what it pins, is refused with 422; an archived workflow, with 409 archived. It takes the lock archiving does, so nothing it uses is archived while it's checked.
+         */
         post: operations["publishWorkflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take a workflow out of use
+         * @description Nothing is deleted (plan 15). An archived workflow can be read, with its revisions and runs, and not saved, published, run or given keys, and its keys are revoked, so /serve/{slug} stops answering at once. While the latest or published revision of a workflow not archived uses it, directly or through what it pins, it's refused with 409 in_use, the detail naming them. Its slug stays taken. Archiving one archived already changes nothing.
+         */
+        post: operations["archiveWorkflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bring an archived workflow back as it was
+         * @description It comes back without keys, so its callers need new ones. It's never refused; if what it uses is archived too, its problems say so. Restoring one not archived changes nothing.
+         */
+        post: operations["restoreWorkflow"];
         delete?: never;
         options?: never;
         head?: never;
@@ -238,7 +285,7 @@ export interface paths {
         put?: never;
         /**
          * Run a revision in the background
-         * @description The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and one that has already passed through Conduit 8 times is refused with 508 (plan 06).
+         * @description The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and one that has already passed through Conduit 8 times is refused with 508 (plan 06). An archived workflow is refused with 409 archived.
          */
         post: operations["startRun"];
         delete?: never;
@@ -264,7 +311,7 @@ export interface paths {
         put?: never;
         /**
          * Make a caller key
-         * @description The answer holds the key, the only time it's sent; the server keeps its SHA-256 and its first characters. /serve/{slug} takes it as a bearer token. Each of a workflow's active keys has a name of its own, so a name one has already is 409 conflict.
+         * @description The answer holds the key, the only time it's sent; the server keeps its SHA-256 and its first characters. /serve/{slug} takes it as a bearer token. Each of a workflow's active keys has a name of its own, so a name one has already is 409 conflict. An archived workflow is refused with 409 archived.
          */
         post: operations["createKey"];
         delete?: never;
@@ -287,7 +334,7 @@ export interface paths {
         put?: never;
         /**
          * Give an active key's caller a new key, and the old one an expiry
-         * @description The new key has the old one's name, and the answer holds it, the only time it's sent. The old key goes on working until the expiry chosen, so its caller can change over, or stops at once. A key rotated or revoked already is 409 key_not_active.
+         * @description The new key has the old one's name, and the answer holds it, the only time it's sent. The old key goes on working until the expiry chosen, so its caller can change over, or stops at once. A key rotated or revoked already is 409 key_not_active, and a key of an archived workflow, 409 archived.
          */
         post: operations["rotateKey"];
         delete?: never;
@@ -373,15 +420,55 @@ export interface paths {
         get: operations["getUpstream"];
         /**
          * Save the next version
-         * @description If-Match must name the latest version, so a save can't silently undo someone else's. Versions never change, so a definition with problems isn't saved; they're listed in the 422. A definition that's the latest version's, by value, makes no version; the answer is that version, as it was.
+         * @description If-Match must name the latest version, so a save can't silently undo someone else's. Versions never change, so a definition with problems isn't saved; they're listed in the 422. A definition that's the latest version's, by value, makes no version; the answer is that version, as it was. An archived upstream is refused with 409 archived.
          */
         put: operations["saveUpstream"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/upstreams/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
         /**
-         * Delete an upstream no revision pins
-         * @description Deletes the upstream and every version of it. While a saved revision of any workflow, published or not, pins one of its versions, it's refused with 409, code upstream_in_use, its detail naming those workflows and revisions, as a revision never changes and must keep running (plan 07).
+         * Take an upstream out of use
+         * @description Nothing is deleted (plan 15). An archived upstream can be read, every version of it, and not saved, and a step can't newly use it. While the latest or published revision of a workflow not archived uses it, directly or through what it pins, it's refused with 409 in_use, the detail naming them. Its name stays taken. Archiving one archived already changes nothing.
          */
-        delete: operations["deleteUpstream"];
+        post: operations["archiveUpstream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/upstreams/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bring an archived upstream back as it was
+         * @description It's never refused; if a constant it reads is archived too, a check of it says so. Restoring one not archived changes nothing.
+         */
+        post: operations["restoreUpstream"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -396,7 +483,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** List the workflows whose latest revision uses an upstream, and the versions each pins */
+        /**
+         * List what archiving an upstream is refused for
+         * @description The latest and published revisions of workflows not archived that use the upstream, directly or through what they pin, and the versions each reaches (plan 15).
+         */
         get: operations["listUpstreamUsers"];
         put?: never;
         post?: never;
@@ -459,15 +549,55 @@ export interface paths {
         get?: never;
         /**
          * Change a constant's value, keeping the one before
-         * @description Every run from then on reads the new value, with no Publish. secret true makes a plain constant secret, for good, as there's no showing it again. A value equal to the one it has changes nothing.
+         * @description Every run from then on reads the new value, with no Publish. secret true makes a plain constant secret, for good, as there's no showing it again. A value equal to the one it has changes nothing. An archived constant is refused with 409 archived.
          */
         put: operations["setConstant"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/constants/{name}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
         /**
-         * Delete a constant nothing reads
-         * @description Refused with 409 constant_in_use while a saved revision of a workflow, or a version of an upstream, reads it, as either can run again.
+         * Take a constant out of use
+         * @description Nothing is deleted (plan 15). An archived constant keeps its sealed value and can't be changed or newly read. A run that meets a secret one's value still masks it. While the latest or published revision of a workflow not archived, or the latest version of an upstream not archived, reads it, directly or through what it pins, it's refused with 409 in_use, the detail naming them. Its name stays taken. Archiving one archived already changes nothing.
          */
-        delete: operations["deleteConstant"];
+        post: operations["archiveConstant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/constants/{name}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bring an archived constant back as it was
+         * @description Its value, and the one before it, come back with it. Restoring one not archived changes nothing.
+         */
+        post: operations["restoreConstant"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -486,7 +616,7 @@ export interface paths {
         put?: never;
         /**
          * Put a constant's previous value back
-         * @description The value it replaces becomes the previous one, so undoing again puts it back. Refused with 409 nothing_to_undo when it has no previous value.
+         * @description The value it replaces becomes the previous one, so undoing again puts it back. Refused with 409 nothing_to_undo when it has no previous value, and 409 archived when it's archived.
          */
         post: operations["undoConstant"];
         delete?: never;
@@ -504,7 +634,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** List the workflows and upstreams whose latest revision or version reads a constant */
+        /**
+         * List what archiving a constant is refused for
+         * @description The latest and published revisions of workflows not archived that read the constant, directly or through what they pin, and the latest versions of upstreams not archived that do (plan 15).
+         */
         get: operations["listConstantUsers"];
         put?: never;
         post?: never;
@@ -611,6 +744,12 @@ export interface components {
             published_revision?: number;
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When it was archived. Absent unless it's archived (plan 15).
+             */
+            archived_at?: string;
+            archived_by?: components["schemas"]["Provenance"];
         };
         WorkflowList: {
             workflows: components["schemas"]["Workflow"][];
@@ -731,6 +870,12 @@ export interface components {
             latest_version: number;
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When it was archived. Absent unless it's archived (plan 15).
+             */
+            archived_at?: string;
+            archived_by?: components["schemas"]["Provenance"];
         };
         UpstreamList: {
             upstreams: components["schemas"]["UpstreamSummary"][];
@@ -747,9 +892,9 @@ export interface components {
         UpstreamUse: {
             workflow_id: string;
             name: string;
-            /** @description The workflow's latest revision, which uses the upstream. */
+            /** @description A latest or published revision of the workflow, which uses the upstream, directly or through what it pins. */
             revision: number;
-            /** @description The versions its steps pin, oldest first. */
+            /** @description The versions it reaches, oldest first. */
             versions: number[];
             /** @description Whether that revision is the one the workflow serves. */
             published: boolean;
@@ -779,6 +924,12 @@ export interface components {
             updated_at: string;
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When it was archived. Absent unless it's archived (plan 15).
+             */
+            archived_at?: string;
+            archived_by?: components["schemas"]["Provenance"];
         };
         ConstantList: {
             constants: components["schemas"]["Constant"][];
@@ -804,7 +955,7 @@ export interface components {
         ConstantWorkflowUse: {
             workflow_id: string;
             name: string;
-            /** @description The workflow's latest revision, which reads the constant. */
+            /** @description A latest or published revision of the workflow, which reads the constant, directly or through what it pins. */
             revision: number;
         };
         ConstantUpstreamUse: {
@@ -1364,6 +1515,8 @@ export interface operations {
                 limit?: number;
                 /** @description Return workflows older than this id, for the next page. */
                 before?: string;
+                /** @description List what's archived instead of what's in use (plan 15). */
+                archived?: boolean;
             };
             header?: never;
             path?: never;
@@ -1467,6 +1620,7 @@ export interface operations {
             };
             401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             412: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             428: components["responses"]["Problem"];
@@ -1547,7 +1701,57 @@ export interface operations {
             };
             401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+        };
+    };
+    archiveWorkflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archived, or as it was. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workflow"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    restoreWorkflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restored, or as it was. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workflow"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     validateDefinition: {
@@ -1630,6 +1834,7 @@ export interface operations {
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             503: components["responses"]["Busy"];
             508: components["responses"]["Problem"];
@@ -1751,6 +1956,8 @@ export interface operations {
                 limit?: number;
                 /** @description Return upstreams older than this id, for the next page. */
                 before?: string;
+                /** @description List what's archived instead of what's in use (plan 15). */
+                archived?: boolean;
             };
             header?: never;
             path?: never;
@@ -1879,12 +2086,13 @@ export interface operations {
             };
             401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             412: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             428: components["responses"]["Problem"];
         };
     };
-    deleteUpstream: {
+    archiveUpstream: {
         parameters: {
             query?: never;
             header?: never;
@@ -1895,16 +2103,42 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Deleted, with every version. */
-            204: {
+            /** @description Archived, or as it was. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["UpstreamSummary"];
+                };
             };
             401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    restoreUpstream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restored, or as it was. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpstreamSummary"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     listUpstreamUsers: {
@@ -1918,7 +2152,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The workflows, newest first. */
+            /** @description The revisions, by workflow name, oldest first. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1958,7 +2192,10 @@ export interface operations {
     };
     listConstants: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description List what's archived instead of what's in use (plan 15). */
+                archived?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2031,10 +2268,11 @@ export interface operations {
             };
             401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
         };
     };
-    deleteConstant: {
+    archiveConstant: {
         parameters: {
             query?: never;
             header?: never;
@@ -2045,16 +2283,42 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Deleted, with its previous value. */
-            204: {
+            /** @description Archived, or as it was. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Constant"];
+                };
             };
             401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    restoreConstant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restored, or as it was. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Constant"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     undoConstant: {

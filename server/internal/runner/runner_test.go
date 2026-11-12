@@ -70,7 +70,7 @@ func saveWorkflow(t *testing.T, base, def string) store.Workflow {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w, err = db.Publish(ctx, w.ID, 1); err != nil {
+	if w, err = db.Publish(ctx, w.ID, 1, storetest.NoCheck); err != nil {
 		t.Fatal(err)
 	}
 	return w
@@ -604,6 +604,22 @@ func TestCall_Refusals(t *testing.T) {
 	}
 	if a, err := r.Call(t.Context(), call, json.RawMessage(`{"name": "Ada"}`)); err != nil || a.Status != 200 || string(a.Body) != "1" {
 		t.Errorf("Call() = %+v, %v", a, err)
+	}
+}
+
+// An archived workflow runs no more, of any revision (plan 15).
+func TestStart_Archived(t *testing.T) {
+	t.Parallel()
+	w := saveWorkflow(t, "", `{"nodes": [{"id": "hi", "kind": "transform", "expr": "'hello'"}], "output": "nodes.hi.body"}`)
+	if _, err := db.ArchiveWorkflow(t.Context(), w.ID, store.Provenance{Actor: "token"}); err != nil {
+		t.Fatal(err)
+	}
+	r := New(db, upstream.New(upstream.Options{}), slog.New(slog.DiscardHandler), Options{})
+	t.Cleanup(r.Stop)
+	for _, revision := range []int{0, 1} {
+		if _, err := r.Start(t.Context(), w.ID, revision, json.RawMessage(`{}`)); !errors.Is(err, store.ErrArchived) {
+			t.Errorf("Start(%d) = %v, want ErrArchived", revision, err)
+		}
 	}
 }
 

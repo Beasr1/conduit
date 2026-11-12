@@ -46,6 +46,9 @@ func (a *api) CreateWorkflow(ctx context.Context, req gen.CreateWorkflowRequestO
 		return nil, fmt.Errorf("encode definition: %w", err)
 	}
 	w, r, err := a.store.CreateWorkflow(ctx, b.Slug, b.Name, def, provenance(ctx))
+	if errors.Is(err, store.ErrArchivedName) {
+		return nil, &problem{status: http.StatusConflict, code: "conflict", detail: "An archived workflow has that slug: restore it, or pick another."}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +67,7 @@ func (a *api) ListWorkflows(ctx context.Context, req gen.ListWorkflowsRequestObj
 	if err != nil {
 		return nil, err
 	}
-	ws, err := a.store.Workflows(ctx, limit, req.Params.Before)
+	ws, err := a.store.Workflows(ctx, limit, req.Params.Before, req.Params.Archived)
 	if err != nil {
 		return nil, err
 	}
@@ -151,18 +154,12 @@ func (a *api) GetRevision(ctx context.Context, req gen.GetRevisionRequestObject)
 }
 
 func (a *api) PublishWorkflow(ctx context.Context, req gen.PublishWorkflowRequestObject) (gen.PublishWorkflowResponseObject, error) {
-	r, err := a.store.Revision(ctx, req.ID, req.Body.Revision)
-	if err != nil {
-		return nil, err
-	}
-	rev, err := a.revisionOut(ctx, r)
-	if err != nil {
-		return nil, err
-	}
-	if len(rev.Problems) > 0 {
-		return nil, invalidDefinition(rev.Problems, "Revision %d has problems, so it can't be published.", r.Revision)
-	}
-	w, err := a.store.Publish(ctx, req.ID, r.Revision)
+	w, err := a.store.Publish(ctx, req.ID, req.Body.Revision, func(d *workflow.Definition, deps workflow.Deps) error {
+		if ps := problemsIn(d, deps, req.ID); len(ps) > 0 {
+			return invalidDefinition(ps, "Revision %d has problems, so it can't be published.", req.Body.Revision)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -276,21 +273,27 @@ func pageLimit(limit int) (int, error) {
 }
 
 // problemsOf is everything wrong with d, a revision of workflow self, ""
-// for none: how its nodes use upstreams and workflows, as workflow.Resolve
-// says (plan 07), then what engine.Compile finds in it, filled from those,
-// and what workflow.ReadyToPublish says Publish needs besides.
+// for none, as problemsIn says.
 func (a *api) problemsOf(ctx context.Context, d *workflow.Definition, self string) ([]gen.ProblemError, error) {
 	deps, err := a.store.Deps(ctx, d)
 	if err != nil {
 		return nil, err
 	}
+	return problemsIn(d, deps, self), nil
+}
+
+// problemsIn is everything wrong with d, given what it uses: how its nodes
+// use upstreams and workflows, as workflow.Resolve says (plan 07), then what
+// engine.Compile finds in it, filled from those, and what
+// workflow.ReadyToPublish says Publish needs besides.
+func problemsIn(d *workflow.Definition, deps workflow.Deps, self string) []gen.ProblemError {
 	rd, ps := workflow.Resolve(d, deps, self)
-	_, err = engine.Compile(rd, deps.Constants)
+	_, err := engine.Compile(rd, deps.Constants)
 	var compiled workflow.Problems
 	errors.As(err, &compiled)
 	// What Publish needs besides what a run does (plan 12): listed with the
 	// rest, so a save and a check say them, and Publish refuses them.
-	return problemErrors(slices.Concat(ps, compiled, workflow.ReadyToPublish(rd))), nil
+	return problemErrors(slices.Concat(ps, compiled, workflow.ReadyToPublish(rd)))
 }
 
 // problemErrors is ps as the API sends them: [] rather than null when there
@@ -319,6 +322,7 @@ func workflowOut(w store.Workflow) gen.Workflow {
 	if w.PublishedRevision != nil {
 		out.PublishedRevision = *w.PublishedRevision
 	}
+	out.ArchivedAt, out.ArchivedBy = archiveOut(w.ArchivedAt, w.ArchivedBy)
 	return out
 }
 

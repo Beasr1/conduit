@@ -9,15 +9,21 @@ import { workflowKeys } from "@/lib/query-keys";
 
 export type Workflow = components["schemas"]["Workflow"];
 
-// useWorkflows pages through the list, newest first, a page at a time.
-export function useWorkflows() {
+// useWorkflows pages through those in use, or those archived, newest first,
+// a page at a time.
+export function useWorkflows(archived = false) {
   return useInfiniteQuery({
-    queryKey: workflowKeys.list(),
+    queryKey: workflowKeys.list(archived),
     queryFn: ({ pageParam, signal }) =>
       call(
         (signal) =>
           api.GET("/v1/workflows", {
-            params: { query: pageParam ? { before: pageParam } : {} },
+            params: {
+              query: {
+                ...(pageParam ? { before: pageParam } : {}),
+                ...(archived ? { archived } : {}),
+              },
+            },
             signal,
           }),
         signal,

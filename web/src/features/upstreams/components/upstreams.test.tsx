@@ -198,3 +198,35 @@ test("New upstream makes one with its sample input and each response", async () 
     outputs: [{ status: 404, sample: { body: { error: "not found" } } }],
   });
 });
+
+// The archived ones are asked for, and say when (plan 15).
+test("the library's Archived tab lists what's archived", async () => {
+  const asked: (string | null)[] = [];
+  server.use(
+    http.get("/api/v1/upstreams", ({ request }) => {
+      asked.push(new URL(request.url).searchParams.get("archived"));
+      return HttpResponse.json<UpstreamList>({
+        upstreams: [
+          {
+            ...version(users, 2).upstream,
+            archived_at: "2026-11-06T09:00:00Z",
+          },
+        ],
+      });
+    }),
+  );
+  renderAt(<UpstreamList archived />, { path: "/upstreams" });
+  expect(await screen.findByRole("link", { name: "Users API" })).toBeTruthy();
+  expect(asked).toEqual(["true"]);
+  expect(screen.getByRole("columnheader", { name: "Archived" })).toBeTruthy();
+});
+
+test("says when nothing in the library is archived", async () => {
+  server.use(
+    http.get("/api/v1/upstreams", () =>
+      HttpResponse.json<UpstreamList>({ upstreams: [] }),
+    ),
+  );
+  renderAt(<UpstreamList archived />, { path: "/upstreams" });
+  expect(await screen.findByText(/Nothing archived/)).toBeTruthy();
+});

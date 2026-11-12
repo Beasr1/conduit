@@ -1,3 +1,4 @@
+import { InUseTabs } from "@/components/in-use-tabs";
 import { ConstantList } from "@/features/constants/components/constant-list";
 import { CreateConstantDialog } from "@/features/constants/components/create-constant-dialog";
 
@@ -10,7 +11,11 @@ export function Component() {
         <h1 className="font-heading text-xl font-semibold">Constants</h1>
         <CreateConstantDialog />
       </div>
-      <ConstantList />
+      <InUseTabs
+        of="Which constants"
+        live={<ConstantList />}
+        archived={<ConstantList archived />}
+      />
     </div>
   );
 }

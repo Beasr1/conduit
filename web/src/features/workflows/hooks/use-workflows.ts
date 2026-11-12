@@ -14,6 +14,6 @@ export function useCreateWorkflow() {
     // The form shows what went wrong, on its fields.
     meta: { quiet: true },
     onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: workflowKeys.list() }),
+      queryClient.invalidateQueries({ queryKey: workflowKeys.lists() }),
   });
 }

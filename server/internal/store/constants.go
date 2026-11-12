@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -32,20 +33,24 @@ type Constant struct {
 	Provenance  Provenance
 	UpdatedAt   time.Time
 	CreatedAt   time.Time
+	ArchivedAt  *time.Time // nil unless it's archived (plan 15)
+	ArchivedBy  *Provenance
 }
 
 // sealed is a constant as stored.
 type sealed struct {
-	Name       string     `db:"name"`
-	Secret     bool       `db:"secret"`
-	Value      []byte     `db:"value"`
-	Previous   []byte     `db:"previous"`
-	Provenance Provenance `db:"provenance"`
-	UpdatedAt  time.Time  `db:"updated_at"`
-	CreatedAt  time.Time  `db:"created_at"`
+	Name       string      `db:"name"`
+	Secret     bool        `db:"secret"`
+	Value      []byte      `db:"value"`
+	Previous   []byte      `db:"previous"`
+	Provenance Provenance  `db:"provenance"`
+	UpdatedAt  time.Time   `db:"updated_at"`
+	CreatedAt  time.Time   `db:"created_at"`
+	ArchivedAt *time.Time  `db:"archived_at"`
+	ArchivedBy *Provenance `db:"archived_by"`
 }
 
-const constantColumns = `name, secret, value, previous, provenance, updated_at, created_at`
+const constantColumns = `name, secret, value, previous, provenance, updated_at, created_at, archived_at, archived_by`
 
 func (s *Store) seal(name, value string) ([]byte, error) {
 	if s.aead == nil {
@@ -65,13 +70,18 @@ func (s *Store) open(c sealed) (Constant, error) {
 	return Constant{
 		Name: c.Name, Secret: c.Secret, Value: string(v), HasPrevious: c.Previous != nil,
 		Provenance: c.Provenance, UpdatedAt: c.UpdatedAt, CreatedAt: c.CreatedAt,
+		ArchivedAt: c.ArchivedAt, ArchivedBy: c.ArchivedBy,
 	}, nil
 }
 
-// CreateConstant stores a new constant.
+// CreateConstant stores a new constant. A name in use is ErrConflict, and
+// one only an archived constant has, ErrArchivedName.
 func (s *Store) CreateConstant(ctx context.Context, name, value string, secret bool, p Provenance) (Constant, error) {
 	v, err := s.seal(name, value)
 	if err != nil {
+		return Constant{}, fmt.Errorf("create constant %s: %w", name, err)
+	}
+	if err := archivedName(ctx, s.pool, `SELECT 1 FROM constants WHERE name = $1 AND archived_at IS NOT NULL`, name); err != nil {
 		return Constant{}, fmt.Errorf("create constant %s: %w", name, err)
 	}
 	c, err := one[sealed](ctx, s.pool, `INSERT INTO constants (name, secret, value, provenance)
@@ -91,25 +101,31 @@ func (s *Store) Constant(ctx context.Context, name string) (Constant, error) {
 	return s.open(c)
 }
 
-// ConstantNames is the names of the constants there are, which
-// expressions may read, with no value opened.
+// ConstantNames is the constants there are, by name, with no value opened:
+// true for one expressions may read, and false for one archived (plan 15).
 func (s *Store) ConstantNames(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.pool.Query(ctx, `SELECT name FROM constants`)
+	return constantNames(ctx, s.pool)
+}
+
+func constantNames(ctx context.Context, q querier) (map[string]bool, error) {
+	rows, err := q.Query(ctx, `SELECT name, archived_at IS NULL FROM constants`)
 	if err != nil {
 		return nil, fmt.Errorf("list constants' names: %w", translate(err))
 	}
-	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
+	known := map[string]bool{}
+	var name string
+	var live bool
+	if _, err := pgx.ForEachRow(rows, []any{&name, &live}, func() error {
+		known[name] = live
+		return nil
+	}); err != nil {
 		return nil, fmt.Errorf("list constants' names: %w", translate(err))
-	}
-	known := make(map[string]bool, len(names))
-	for _, n := range names {
-		known[n] = true
 	}
 	return known, nil
 }
 
-// Constants lists every constant, opened, by name.
+// Constants lists every constant, opened, by name: archived ones too, as a
+// run masks what it meets of a secret one (plan 15).
 func (s *Store) Constants(ctx context.Context) ([]Constant, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+constantColumns+` FROM constants ORDER BY name`)
 	if err != nil {
@@ -131,13 +147,17 @@ func (s *Store) Constants(ctx context.Context) ([]Constant, error) {
 // SetConstant changes a constant's value, keeping the one before for
 // UndoConstant. secret makes a plain constant secret, for good: false
 // leaves it as it is. A value equal to the one it has changes nothing, so
-// the previous value stays the one to go back to.
+// the previous value stays the one to go back to. An archived constant is
+// ErrArchived.
 func (s *Store) SetConstant(ctx context.Context, name, value string, secret bool, p Provenance) (Constant, error) {
 	var out Constant
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		c, err := one[sealed](ctx, tx, `SELECT `+constantColumns+` FROM constants WHERE name = $1 FOR UPDATE`, name)
 		if err != nil {
 			return err
+		}
+		if c.ArchivedAt != nil {
+			return ErrArchived
 		}
 		now, err := s.open(c)
 		if err != nil {
@@ -178,13 +198,17 @@ func (s *Store) SetConstant(ctx context.Context, name, value string, secret bool
 }
 
 // UndoConstant puts a constant's previous value back, and keeps the one it
-// replaces as the previous, so undoing again puts that back.
+// replaces as the previous, so undoing again puts that back. An archived
+// constant is ErrArchived.
 func (s *Store) UndoConstant(ctx context.Context, name string, p Provenance) (Constant, error) {
 	var out Constant
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		c, err := one[sealed](ctx, tx, `SELECT `+constantColumns+` FROM constants WHERE name = $1 FOR UPDATE`, name)
 		if err != nil {
 			return err
+		}
+		if c.ArchivedAt != nil {
+			return ErrArchived
 		}
 		if c.Previous == nil {
 			return ErrNothingToUndo
@@ -204,26 +228,6 @@ func (s *Store) UndoConstant(ctx context.Context, name string, p Provenance) (Co
 	return out, nil
 }
 
-// ConstantReader is a workflow or an upstream that reads a constant: its
-// id, its name, and which of its revisions or versions read it, oldest
-// first.
-type ConstantReader struct {
-	ID   string `db:"id"`
-	Name string `db:"name"`
-	At   []int  `db:"at"`
-}
-
-// ConstantInUseError is a delete refused because saved revisions, or
-// upstream versions, read the constant, and each can run again.
-type ConstantInUseError struct {
-	Workflows []ConstantReader
-	Upstreams []ConstantReader
-}
-
-func (e *ConstantInUseError) Error() string {
-	return fmt.Sprintf("%d workflows and %d upstreams read it", len(e.Workflows), len(e.Upstreams))
-}
-
 // readPattern matches a definition that reads constant name as
 // $const.name, the name ending where the read does. It also matches the
 // words inside a string, which only errs towards keeping a constant.
@@ -231,80 +235,48 @@ func readPattern(name string) string {
 	return `\$const\.` + regexp.QuoteMeta(name) + `([^a-z0-9_]|$)`
 }
 
-// The workflows whose revisions read a constant, and the upstreams whose
-// versions do: every revision and version, or with latest, only the latest
-// of each. $1 is readPattern's.
-const (
-	workflowReaders = `SELECT w.id::text AS id, w.name, array_agg(r.revision ORDER BY r.revision) AS at
-		FROM workflows w JOIN workflow_revisions r ON r.workflow_id = w.id
-		WHERE r.definition::text ~ $1 AND (NOT $2 OR r.revision = w.latest_revision)
-		GROUP BY w.id, w.name ORDER BY w.name, w.id`
-	upstreamReaders = `SELECT u.id::text AS id, u.name, array_agg(v.version ORDER BY v.version) AS at
-		FROM upstreams u JOIN upstream_versions v ON v.upstream_id = u.id
-		WHERE v.definition::text ~ $1 AND (NOT $2 OR v.version = u.latest_version)
-		GROUP BY u.id, u.name ORDER BY u.name, u.id`
-)
+// aRead finds what readPattern looks for, whatever the name.
+var aRead = regexp.MustCompile(`\$const\.([a-z][a-z0-9_]*)`)
 
-func readers(ctx context.Context, q querier, sql, name string, latest bool) ([]ConstantReader, error) {
-	rows, err := q.Query(ctx, sql, readPattern(name), latest)
-	if err != nil {
-		return nil, err
+// constantsIn is the constants definition def reads, each once, by name.
+func constantsIn(def []byte) []string {
+	var names []string
+	for _, m := range aRead.FindAllSubmatch(def, -1) {
+		names = append(names, string(m[1]))
 	}
-	return pgx.CollectRows(rows, pgx.RowToStructByName[ConstantReader])
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
-// DeleteConstant deletes a constant, unless a saved revision of a
-// workflow, published or not, or a version of an upstream reads it: then
-// it's refused with a *ConstantInUseError naming them.
-func (s *Store) DeleteConstant(ctx context.Context, name string) error {
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		// SHARE lets reads through and holds back every insert, so nothing
-		// is saved reading it between the check and the delete.
-		if _, err := tx.Exec(ctx, `LOCK TABLE workflow_revisions, upstream_versions IN SHARE MODE`); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx, `SELECT 1 FROM constants WHERE name = $1 FOR UPDATE`, name).Scan(new(int)); err != nil {
-			return err
-		}
-		ws, err := readers(ctx, tx, workflowReaders, name, false)
-		if err != nil {
-			return err
-		}
-		us, err := readers(ctx, tx, upstreamReaders, name, false)
-		if err != nil {
-			return err
-		}
-		if len(ws) > 0 || len(us) > 0 {
-			return &ConstantInUseError{Workflows: ws, Upstreams: us}
-		}
-		_, err = tx.Exec(ctx, `DELETE FROM constants WHERE name = $1`, name)
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("delete constant %s: %w", name, translate(err))
-	}
-	return nil
-}
-
-// ConstantUsers is what reads a constant now: the workflows whose latest
-// revision does, and the upstreams whose latest version does.
+// ConstantUsers is what reads a constant now, what ArchiveConstant is
+// refused for: the latest and published revisions of workflows not archived
+// that do, directly or through what they pin, and the latest versions of
+// upstreams not archived.
 type ConstantUsers struct {
-	Workflows []ConstantReader
-	Upstreams []ConstantReader
+	Workflows []LiveUse
+	Upstreams []LiveUse
 }
 
-// ConstantUsers lists what reads constant name now.
+// ConstantUsers lists what reads constant name now, each by name.
 func (s *Store) ConstantUsers(ctx context.Context, name string) (ConstantUsers, error) {
 	if err := s.pool.QueryRow(ctx, `SELECT 1 FROM constants WHERE name = $1`, name).Scan(new(int)); err != nil {
 		return ConstantUsers{}, fmt.Errorf("list the users of constant %s: %w", name, translate(err))
 	}
-	ws, err := readers(ctx, s.pool, workflowReaders, name, true)
+	users, err := readersOf(ctx, s.pool, name)
 	if err != nil {
 		return ConstantUsers{}, fmt.Errorf("list the users of constant %s: %w", name, translate(err))
 	}
-	us, err := readers(ctx, s.pool, upstreamReaders, name, true)
+	return users, nil
+}
+
+func readersOf(ctx context.Context, q querier, name string) (ConstantUsers, error) {
+	ws, err := liveUses(ctx, q, workflowReaders, readPattern(name))
 	if err != nil {
-		return ConstantUsers{}, fmt.Errorf("list the users of constant %s: %w", name, translate(err))
+		return ConstantUsers{}, err
+	}
+	us, err := liveUses(ctx, q, upstreamReaders, readPattern(name))
+	if err != nil {
+		return ConstantUsers{}, err
 	}
 	return ConstantUsers{Workflows: ws, Upstreams: us}, nil
 }

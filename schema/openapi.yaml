@@ -102,6 +102,11 @@ paths:
           description: Return workflows older than this id, for the next page.
           schema:
             type: string
+        - name: archived
+          in: query
+          description: List what's archived instead of what's in use (plan 15).
+          schema:
+            type: boolean
       responses:
         "200":
           description: A page of workflows.
@@ -168,7 +173,7 @@ paths:
     put:
       operationId: saveDraft
       summary: Save the next revision
-      description: If-Match must name the latest revision, so a save can't silently undo someone else's. The definition is saved even if it has problems. A definition that's the latest revision's, by value, makes no revision; the answer is that revision, as it was.
+      description: If-Match must name the latest revision, so a save can't silently undo someone else's. The definition is saved even if it has problems. A definition that's the latest revision's, by value, makes no revision; the answer is that revision, as it was. An archived workflow is refused with 409 archived.
       parameters:
         - name: If-Match
           in: header
@@ -194,6 +199,8 @@ paths:
         "401":
           $ref: "#/components/responses/Problem"
         "404":
+          $ref: "#/components/responses/Problem"
+        "409":
           $ref: "#/components/responses/Problem"
         "412":
           $ref: "#/components/responses/Problem"
@@ -250,6 +257,7 @@ paths:
     post:
       operationId: publishWorkflow
       summary: Make a revision the one served
+      description: A revision with problems, among them one that uses something archived, directly or through what it pins, is refused with 422; an archived workflow, with 409 archived. It takes the lock archiving does, so nothing it uses is archived while it's checked.
       requestBody:
         required: true
         content:
@@ -267,7 +275,49 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
         "422":
+          $ref: "#/components/responses/Problem"
+
+  /v1/workflows/{id}/archive:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    post:
+      operationId: archiveWorkflow
+      summary: Take a workflow out of use
+      description: Nothing is deleted (plan 15). An archived workflow can be read, with its revisions and runs, and not saved, published, run or given keys, and its keys are revoked, so /serve/{slug} stops answering at once. While the latest or published revision of a workflow not archived uses it, directly or through what it pins, it's refused with 409 in_use, the detail naming them. Its slug stays taken. Archiving one archived already changes nothing.
+      responses:
+        "200":
+          description: Archived, or as it was.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workflow"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+
+  /v1/workflows/{id}/restore:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    post:
+      operationId: restoreWorkflow
+      summary: Bring an archived workflow back as it was
+      description: It comes back without keys, so its callers need new ones. It's never refused; if what it uses is archived too, its problems say so. Restoring one not archived changes nothing.
+      responses:
+        "200":
+          description: Restored, or as it was.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workflow"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
           $ref: "#/components/responses/Problem"
 
   /v1/validate:
@@ -322,7 +372,7 @@ paths:
     post:
       operationId: startRun
       summary: Run a revision in the background
-      description: The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and one that has already passed through Conduit 8 times is refused with 508 (plan 06).
+      description: The run goes on after this answers, for up to 5 minutes. Follow it at /v1/runs/{id}/events, or fetch it. A call carrying W3C trace context (traceparent, tracestate) continues its trace, and one that has already passed through Conduit 8 times is refused with 508 (plan 06). An archived workflow is refused with 409 archived.
       requestBody:
         required: true
         content:
@@ -345,6 +395,8 @@ paths:
         "401":
           $ref: "#/components/responses/Problem"
         "404":
+          $ref: "#/components/responses/Problem"
+        "409":
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
@@ -374,7 +426,7 @@ paths:
     post:
       operationId: createKey
       summary: Make a caller key
-      description: The answer holds the key, the only time it's sent; the server keeps its SHA-256 and its first characters. /serve/{slug} takes it as a bearer token. Each of a workflow's active keys has a name of its own, so a name one has already is 409 conflict.
+      description: The answer holds the key, the only time it's sent; the server keeps its SHA-256 and its first characters. /serve/{slug} takes it as a bearer token. Each of a workflow's active keys has a name of its own, so a name one has already is 409 conflict. An archived workflow is refused with 409 archived.
       requestBody:
         required: true
         content:
@@ -404,7 +456,7 @@ paths:
     post:
       operationId: rotateKey
       summary: Give an active key's caller a new key, and the old one an expiry
-      description: The new key has the old one's name, and the answer holds it, the only time it's sent. The old key goes on working until the expiry chosen, so its caller can change over, or stops at once. A key rotated or revoked already is 409 key_not_active.
+      description: The new key has the old one's name, and the answer holds it, the only time it's sent. The old key goes on working until the expiry chosen, so its caller can change over, or stops at once. A key rotated or revoked already is 409 key_not_active, and a key of an archived workflow, 409 archived.
       requestBody:
         required: true
         content:
@@ -464,6 +516,11 @@ paths:
           description: Return upstreams older than this id, for the next page.
           schema:
             type: string
+        - name: archived
+          in: query
+          description: List what's archived instead of what's in use (plan 15).
+          schema:
+            type: boolean
       responses:
         "200":
           description: A page of upstreams.
@@ -547,7 +604,7 @@ paths:
     put:
       operationId: saveUpstream
       summary: Save the next version
-      description: If-Match must name the latest version, so a save can't silently undo someone else's. Versions never change, so a definition with problems isn't saved; they're listed in the 422. A definition that's the latest version's, by value, makes no version; the answer is that version, as it was.
+      description: If-Match must name the latest version, so a save can't silently undo someone else's. Versions never change, so a definition with problems isn't saved; they're listed in the 422. A definition that's the latest version's, by value, makes no version; the answer is that version, as it was. An archived upstream is refused with 409 archived.
       parameters:
         - name: If-Match
           in: header
@@ -574,19 +631,29 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
         "412":
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
         "428":
           $ref: "#/components/responses/Problem"
-    delete:
-      operationId: deleteUpstream
-      summary: Delete an upstream no revision pins
-      description: Deletes the upstream and every version of it. While a saved revision of any workflow, published or not, pins one of its versions, it's refused with 409, code upstream_in_use, its detail naming those workflows and revisions, as a revision never changes and must keep running (plan 07).
+
+  /v1/upstreams/{id}/archive:
+    parameters:
+      - $ref: "#/components/parameters/UpstreamID"
+    post:
+      operationId: archiveUpstream
+      summary: Take an upstream out of use
+      description: Nothing is deleted (plan 15). An archived upstream can be read, every version of it, and not saved, and a step can't newly use it. While the latest or published revision of a workflow not archived uses it, directly or through what it pins, it's refused with 409 in_use, the detail naming them. Its name stays taken. Archiving one archived already changes nothing.
       responses:
-        "204":
-          description: Deleted, with every version.
+        "200":
+          description: Archived, or as it was.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamSummary"
         "401":
           $ref: "#/components/responses/Problem"
         "404":
@@ -594,15 +661,35 @@ paths:
         "409":
           $ref: "#/components/responses/Problem"
 
+  /v1/upstreams/{id}/restore:
+    parameters:
+      - $ref: "#/components/parameters/UpstreamID"
+    post:
+      operationId: restoreUpstream
+      summary: Bring an archived upstream back as it was
+      description: It's never refused; if a constant it reads is archived too, a check of it says so. Restoring one not archived changes nothing.
+      responses:
+        "200":
+          description: Restored, or as it was.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamSummary"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
   /v1/upstreams/{id}/users:
     parameters:
       - $ref: "#/components/parameters/UpstreamID"
     get:
       operationId: listUpstreamUsers
-      summary: List the workflows whose latest revision uses an upstream, and the versions each pins
+      summary: List what archiving an upstream is refused for
+      description: The latest and published revisions of workflows not archived that use the upstream, directly or through what they pin, and the versions each reaches (plan 15).
       responses:
         "200":
-          description: The workflows, newest first.
+          description: The revisions, by workflow name, oldest first.
           content:
             application/json:
               schema:
@@ -641,6 +728,12 @@ paths:
       operationId: listConstants
       summary: List the constants, by name
       description: Values every expression reads as $const.name (plan 06). A secret one's value is never sent.
+      parameters:
+        - name: archived
+          in: query
+          description: List what's archived instead of what's in use (plan 15).
+          schema:
+            type: boolean
       responses:
         "200":
           description: Every constant, by name.
@@ -683,7 +776,7 @@ paths:
     put:
       operationId: setConstant
       summary: Change a constant's value, keeping the one before
-      description: Every run from then on reads the new value, with no Publish. secret true makes a plain constant secret, for good, as there's no showing it again. A value equal to the one it has changes nothing.
+      description: Every run from then on reads the new value, with no Publish. secret true makes a plain constant secret, for good, as there's no showing it again. A value equal to the one it has changes nothing. An archived constant is refused with 409 archived.
       requestBody:
         required: true
         content:
@@ -701,20 +794,49 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
-    delete:
-      operationId: deleteConstant
-      summary: Delete a constant nothing reads
-      description: Refused with 409 constant_in_use while a saved revision of a workflow, or a version of an upstream, reads it, as either can run again.
+
+  /v1/constants/{name}/archive:
+    parameters:
+      - $ref: "#/components/parameters/ConstantName"
+    post:
+      operationId: archiveConstant
+      summary: Take a constant out of use
+      description: Nothing is deleted (plan 15). An archived constant keeps its sealed value and can't be changed or newly read. A run that meets a secret one's value still masks it. While the latest or published revision of a workflow not archived, or the latest version of an upstream not archived, reads it, directly or through what it pins, it's refused with 409 in_use, the detail naming them. Its name stays taken. Archiving one archived already changes nothing.
       responses:
-        "204":
-          description: Deleted, with its previous value.
+        "200":
+          description: Archived, or as it was.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Constant"
         "401":
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
         "409":
+          $ref: "#/components/responses/Problem"
+
+  /v1/constants/{name}/restore:
+    parameters:
+      - $ref: "#/components/parameters/ConstantName"
+    post:
+      operationId: restoreConstant
+      summary: Bring an archived constant back as it was
+      description: Its value, and the one before it, come back with it. Restoring one not archived changes nothing.
+      responses:
+        "200":
+          description: Restored, or as it was.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Constant"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
           $ref: "#/components/responses/Problem"
 
   /v1/constants/{name}/undo:
@@ -723,7 +845,7 @@ paths:
     post:
       operationId: undoConstant
       summary: Put a constant's previous value back
-      description: The value it replaces becomes the previous one, so undoing again puts it back. Refused with 409 nothing_to_undo when it has no previous value.
+      description: The value it replaces becomes the previous one, so undoing again puts it back. Refused with 409 nothing_to_undo when it has no previous value, and 409 archived when it's archived.
       responses:
         "200":
           description: Its previous value, back.
@@ -743,7 +865,8 @@ paths:
       - $ref: "#/components/parameters/ConstantName"
     get:
       operationId: listConstantUsers
-      summary: List the workflows and upstreams whose latest revision or version reads a constant
+      summary: List what archiving a constant is refused for
+      description: The latest and published revisions of workflows not archived that read the constant, directly or through what they pin, and the latest versions of upstreams not archived that do (plan 15).
       responses:
         "200":
           description: The workflows and upstreams, by name.
@@ -982,6 +1105,12 @@ components:
         created_at:
           type: string
           format: date-time
+        archived_at:
+          type: string
+          format: date-time
+          description: When it was archived. Absent unless it's archived (plan 15).
+        archived_by:
+          $ref: "#/components/schemas/Provenance"
 
     WorkflowList:
       type: object
@@ -1224,6 +1353,12 @@ components:
         created_at:
           type: string
           format: date-time
+        archived_at:
+          type: string
+          format: date-time
+          description: When it was archived. Absent unless it's archived (plan 15).
+        archived_by:
+          $ref: "#/components/schemas/Provenance"
 
     UpstreamList:
       type: object
@@ -1268,12 +1403,12 @@ components:
           type: string
         revision:
           type: integer
-          description: The workflow's latest revision, which uses the upstream.
+          description: A latest or published revision of the workflow, which uses the upstream, directly or through what it pins.
         versions:
           type: array
           items:
             type: integer
-          description: The versions its steps pin, oldest first.
+          description: The versions it reaches, oldest first.
         published:
           type: boolean
           description: Whether that revision is the one the workflow serves.
@@ -1319,6 +1454,12 @@ components:
         created_at:
           type: string
           format: date-time
+        archived_at:
+          type: string
+          format: date-time
+          description: When it was archived. Absent unless it's archived (plan 15).
+        archived_by:
+          $ref: "#/components/schemas/Provenance"
 
     ConstantList:
       type: object
@@ -1379,7 +1520,7 @@ components:
           type: string
         revision:
           type: integer
-          description: The workflow's latest revision, which reads the constant.
+          description: A latest or published revision of the workflow, which reads the constant, directly or through what it pins.
 
     ConstantUpstreamUse:
       type: object

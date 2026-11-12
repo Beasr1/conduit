@@ -20,7 +20,12 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Beasr1/conduit/server/internal/store"
+	"github.com/Beasr1/conduit/server/internal/workflow"
 )
+
+// NoCheck is a check for store.Publish that finds nothing wrong, for a test
+// that isn't about what a revision holds.
+func NoCheck(*workflow.Definition, workflow.Deps) error { return nil }
 
 // Run creates the database, hands use a Store connected to it and its URL,
 // runs the tests and drops the database. Call it from TestMain:

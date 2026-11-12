@@ -8,16 +8,20 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Beasr1/conduit/server/internal/workflow"
 )
 
 // Workflow is a workflow's identity and where its revisions stand.
 type Workflow struct {
-	ID                string    `db:"id"`
-	Slug              string    `db:"slug"`
-	Name              string    `db:"name"`
-	LatestRevision    int       `db:"latest_revision"`
-	PublishedRevision *int      `db:"published_revision"` // nil until published
-	CreatedAt         time.Time `db:"created_at"`
+	ID                string      `db:"id"`
+	Slug              string      `db:"slug"`
+	Name              string      `db:"name"`
+	LatestRevision    int         `db:"latest_revision"`
+	PublishedRevision *int        `db:"published_revision"` // nil until published
+	CreatedAt         time.Time   `db:"created_at"`
+	ArchivedAt        *time.Time  `db:"archived_at"` // nil unless it's archived (plan 15)
+	ArchivedBy        *Provenance `db:"archived_by"`
 }
 
 // Revision is one saved definition. It never changes once written.
@@ -37,16 +41,20 @@ type Provenance struct {
 }
 
 const (
-	workflowColumns = `id::text AS id, slug, name, latest_revision, published_revision, created_at`
+	workflowColumns = `id::text AS id, slug, name, latest_revision, published_revision, created_at, archived_at, archived_by`
 	revisionColumns = `workflow_id::text AS workflow_id, revision, definition, provenance, created_at`
 )
 
-// CreateWorkflow stores a new workflow with def as revision 1.
+// CreateWorkflow stores a new workflow with def as revision 1. A slug in
+// use is ErrConflict, and one only an archived workflow has, ErrArchivedName.
 func (s *Store) CreateWorkflow(ctx context.Context, slug, name string, def json.RawMessage, p Provenance) (Workflow, Revision, error) {
 	var w Workflow
 	var r Revision
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var err error
+		err := archivedName(ctx, tx, `SELECT 1 FROM workflows WHERE slug = $1 AND archived_at IS NOT NULL`, slug)
+		if err != nil {
+			return err
+		}
 		w, err = one[Workflow](ctx, tx, `INSERT INTO workflows (slug, name, latest_revision) VALUES ($1, $2, 1)
 			RETURNING `+workflowColumns, slug, name)
 		if err != nil {
@@ -71,11 +79,12 @@ func (s *Store) Workflow(ctx context.Context, id string) (Workflow, error) {
 	return w, nil
 }
 
-// Workflows lists up to limit workflows, newest first, older than before
-// when it isn't empty. Ids are UUIDv7, so their order is their age.
-func (s *Store) Workflows(ctx context.Context, limit int, before string) ([]Workflow, error) {
+// Workflows lists up to limit workflows, the archived ones or those in use,
+// newest first, older than before when it isn't empty. Ids are UUIDv7, so
+// their order is their age.
+func (s *Store) Workflows(ctx context.Context, limit int, before string, archived bool) ([]Workflow, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+workflowColumns+` FROM workflows
-		WHERE $2::uuid IS NULL OR id < $2::uuid ORDER BY id DESC LIMIT $1`, limit, orNull(before))
+		WHERE (archived_at IS NOT NULL) = $3 AND ($2::uuid IS NULL OR id < $2::uuid) ORDER BY id DESC LIMIT $1`, limit, orNull(before), archived)
 	if err != nil {
 		return nil, fmt.Errorf("list workflows: %w", translate(err))
 	}
@@ -118,15 +127,19 @@ func (s *Store) Revisions(ctx context.Context, id string) ([]Revision, error) {
 // latest revision, or the save fails with ErrRevisionMismatch: someone else
 // saved in between, and this save would silently undo their change. A def
 // that's base's, by value, makes no revision: base is the answer, as it
-// was.
+// was. An archived workflow is ErrArchived.
 func (s *Store) SaveRevision(ctx context.Context, id string, base int, def json.RawMessage, p Provenance) (Revision, error) {
 	var r Revision
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var latest int
+		var archived bool
 		// FOR UPDATE: two saves on the same base queue here, and the second
 		// sees the first's revision.
-		if err := tx.QueryRow(ctx, `SELECT latest_revision FROM workflows WHERE id = $1::uuid FOR UPDATE`, id).Scan(&latest); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT latest_revision, archived_at IS NOT NULL FROM workflows WHERE id = $1::uuid FOR UPDATE`, id).Scan(&latest, &archived); err != nil {
 			return err
+		}
+		if archived {
+			return ErrArchived
 		}
 		if latest != base {
 			return fmt.Errorf("%w: it's at %d, not %d", ErrRevisionMismatch, latest, base)
@@ -152,11 +165,41 @@ func (s *Store) SaveRevision(ctx context.Context, id string, base int, def json.
 	return r, nil
 }
 
-// Publish makes revision the one served. Checking that it's valid is the
-// caller's job; this only checks that it exists.
-func (s *Store) Publish(ctx context.Context, id string, revision int) (Workflow, error) {
-	w, err := one[Workflow](ctx, s.pool, `UPDATE workflows SET published_revision = $2
-		WHERE id = $1::uuid AND $2 BETWEEN 1 AND latest_revision RETURNING `+workflowColumns, id, revision)
+// Publish makes revision the one served, if check, given it and what it
+// uses, finds nothing wrong with it; what check returns stops the publish.
+// All of it holds lockArchive, in one transaction, so nothing check saw in
+// use is archived before the revision is live, and check, which is given
+// all it needs, waits for no connection while this one holds the lock. An
+// archived workflow is ErrArchived.
+func (s *Store) Publish(ctx context.Context, id string, revision int, check func(*workflow.Definition, workflow.Deps) error) (Workflow, error) {
+	var w Workflow
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := lockArchive(ctx, tx); err != nil {
+			return err
+		}
+		if err := notArchived(ctx, tx, id); err != nil {
+			return err
+		}
+		r, err := one[Revision](ctx, tx, `SELECT `+revisionColumns+` FROM workflow_revisions
+			WHERE workflow_id = $1::uuid AND revision = $2`, id, revision)
+		if err != nil {
+			return err
+		}
+		var d workflow.Definition
+		if err := json.Unmarshal(r.Definition, &d); err != nil {
+			return fmt.Errorf("decode: %w", err)
+		}
+		deps, err := depsOf(ctx, tx, &d)
+		if err != nil {
+			return err
+		}
+		if err := check(&d, deps); err != nil {
+			return err
+		}
+		w, err = one[Workflow](ctx, tx, `UPDATE workflows SET published_revision = $2
+			WHERE id = $1::uuid RETURNING `+workflowColumns, id, revision)
+		return err
+	})
 	if err != nil {
 		return Workflow{}, fmt.Errorf("publish revision %d of %s: %w", revision, id, translate(err))
 	}

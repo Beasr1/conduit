@@ -183,3 +183,81 @@ func TestValidate_ANodeThatUsesAnUpstreamNeedsNoRequest(t *testing.T) {
 		t.Errorf("Validate() of a node with neither = %s", ps)
 	}
 }
+
+// Using something archived is a problem on the node that does, as using
+// something that isn't there is, and the node is still filled, so that's
+// all that's said of it (plan 15). Through a workflow it pins, it's what
+// that revision reaches, however far in: what its nodes use, and the
+// constants those read; each said once, whichever way it's reached.
+func TestResolve_Archived(t *testing.T) {
+	t.Parallel()
+	user := `"kind": "http", "uses": {"upstream": "u-users", "version": 1}, "with": {"user_id": "1"}, "unhandled": {"fail": true}`
+	inner := Uses{Workflow: "w-inner", Revision: 1}
+	outer := Uses{Workflow: "w-outer", Revision: 2}
+	pinned := Uses{Upstream: "u-users", Version: 1}
+	revisions := func(t *testing.T) Revisions {
+		rs := workflows(t)
+		rs[inner] = decode(t, `{"nodes": [{"id": "user", "kind": "http", "uses": {"upstream": "u-users", "version": 1}},
+		    {"id": "again", "kind": "http", "uses": {"upstream": "u-users", "version": 1}}]}`)
+		rs[outer] = decode(t, `{"nodes": [{"id": "in", "kind": "http", "uses": {"workflow": "w-inner", "revision": 1}},
+		    {"id": "self", "kind": "http", "uses": {"workflow": "w-outer", "revision": 2}}]}`)
+		return rs
+	}
+	users, crm := map[string]string{"u-users": "Users"}, map[string]string{"w-inner": "CRM lookup"}
+	tests := []struct {
+		name, node string
+		archived   map[string]string
+		reads      map[Uses][]string
+		want       string
+	}{
+		{"nothing archived", user, nil, nil, ""},
+		{"an upstream", user, users, nil, "/nodes/0/uses archived_upstream the upstream Users is archived: restore it, or use another"},
+		{
+			"a workflow", `"kind": "http", "uses": {"workflow": "w-inner", "revision": 1}`, crm, nil,
+			"/nodes/0/uses archived_workflow the workflow CRM lookup is archived: restore it, or use another",
+		},
+		{
+			"an upstream a workflow pins", `"kind": "http", "uses": {"workflow": "w-inner", "revision": 1}`, users, nil,
+			"/nodes/0/uses archived_upstream the workflow it uses reaches the upstream Users, which is archived: restore it, or use another revision",
+		},
+		{
+			"a workflow a workflow pins, and what it reaches", `"kind": "http", "uses": {"workflow": "w-outer", "revision": 2}`,
+			map[string]string{"w-inner": "CRM lookup", "u-users": "Users"},
+			nil,
+			"/nodes/0/uses archived_workflow the workflow it uses reaches the workflow CRM lookup, which is archived: restore it, or use another revision\n" +
+				"/nodes/0/uses archived_upstream the workflow it uses reaches the upstream Users, which is archived: restore it, or use another revision",
+		},
+		{
+			"a constant a pinned revision reads", `"kind": "http", "uses": {"workflow": "w-inner", "revision": 1}`, nil,
+			map[Uses][]string{inner: {"gone", "kept", "unknown"}},
+			"/nodes/0/uses archived_constant the workflow it uses reads $const.gone, which is archived: restore it, or use another revision",
+		},
+		{
+			"a constant a version it pins reads", `"kind": "http", "uses": {"workflow": "w-outer", "revision": 2}`, nil,
+			map[Uses][]string{pinned: {"gone"}},
+			"/nodes/0/uses archived_constant the workflow it uses reads $const.gone, which is archived: restore it, or use another revision",
+		},
+		// Its own request reads it, and Compile says so where it does.
+		{"a constant the upstream it uses reads", user, nil, map[Uses][]string{pinned: {"gone"}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			deps := Deps{
+				Versions: library(t), Revisions: revisions(t), Archived: tt.archived, Reads: tt.reads,
+				Constants: map[string]bool{"gone": false, "kept": true},
+			}
+			got, ps := Resolve(decode(t, `{"nodes": [{"id": "n", `+tt.node+`}]}`), deps, "w-caller")
+			var said []string
+			for _, p := range ps {
+				said = append(said, p.Pointer+" "+p.Code+" "+p.Detail)
+			}
+			if s := strings.Join(said, "\n"); s != tt.want {
+				t.Errorf("Resolve() =\n%s\nwant\n%s", s, tt.want)
+			}
+			if n := got.Nodes[0]; n.Uses.Upstream != "" && n.Request == nil {
+				t.Errorf("the node isn't filled: %+v", n)
+			}
+		})
+	}
+}

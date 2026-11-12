@@ -14,15 +14,21 @@ import { upstreamKeys } from "@/lib/query-keys";
 export type UpstreamVersion = components["schemas"]["UpstreamVersion"];
 export type CreateUpstream = components["schemas"]["CreateUpstream"];
 
-// useUpstreams pages through the library, newest first.
-export function useUpstreams() {
+// useUpstreams pages through the library, what's in use or what's archived,
+// newest first.
+export function useUpstreams(archived = false) {
   return useInfiniteQuery({
-    queryKey: upstreamKeys.list(),
+    queryKey: upstreamKeys.list(archived),
     queryFn: ({ pageParam, signal }) =>
       call(
         (signal) =>
           api.GET("/v1/upstreams", {
-            params: { query: pageParam ? { before: pageParam } : {} },
+            params: {
+              query: {
+                ...(pageParam ? { before: pageParam } : {}),
+                ...(archived ? { archived } : {}),
+              },
+            },
             signal,
           }),
         signal,
@@ -45,7 +51,7 @@ export function useCreateUpstream() {
         upstreamKeys.version(made.upstream.id, made.version),
         made,
       );
-      void queryClient.invalidateQueries({ queryKey: upstreamKeys.list() });
+      void queryClient.invalidateQueries({ queryKey: upstreamKeys.lists() });
     },
   });
 }

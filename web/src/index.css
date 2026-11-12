@@ -188,3 +188,11 @@
     @apply font-sans;
   }
 }
+
+/* What's archived is there to read (plan 15): a field that a read-only
+   Fields disables keeps its text as strong as it was, where Tailwind's
+   disabled: halves it. Its buttons stay dimmed, as they're off. Outside
+   any layer, so it comes after the utilities. */
+fieldset:disabled :is(input, textarea, [data-slot="select-trigger"]):disabled {
+  opacity: 1;
+}

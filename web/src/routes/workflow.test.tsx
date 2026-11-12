@@ -86,6 +86,23 @@ function serveWorkflow(
         return HttpResponse.json<Workflow>(workflow);
       },
     ),
+    http.post("/api/v1/workflows/wf-1/archive", () => {
+      workflow = {
+        ...workflow,
+        archived_at: "2026-11-06T09:00:00Z",
+        archived_by: { actor: "token" },
+      };
+      return HttpResponse.json<Workflow>(workflow);
+    }),
+    http.post("/api/v1/workflows/wf-1/restore", () => {
+      const { archived_at, archived_by, ...kept } = workflow;
+      void [archived_at, archived_by];
+      workflow = kept;
+      return HttpResponse.json<Workflow>(workflow);
+    }),
+    http.get("/api/v1/workflows/wf-1/keys", () =>
+      HttpResponse.json({ keys: [] }),
+    ),
   );
   return { saves, published, saveElsewhere: save };
 }
@@ -480,4 +497,244 @@ test("a step that uses a workflow opens drawn from the revision it pins", async 
   const card = await screen.findByTestId("rf__node-greet");
   expect(within(card).getByText("Greeter · r1")).toBeTruthy();
   expect(within(card).getByText("404")).toBeTruthy();
+});
+
+// The editor's own controls, by name, that change a workflow.
+const changing = [
+  "Save",
+  "Run",
+  "Publish",
+  "Add HTTP step",
+  "Add transform step",
+];
+
+// Archive asks again, and the workflow stays open, read-only, with Restore
+// where Save, Run and Publish were: what's on its canvas opens to read, and
+// nothing changes it. Restore brings it all back (plan 15).
+test("Archive leaves it open, read-only, until Restore", async () => {
+  serveWorkflow();
+  open();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Archive Send to CRM" }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Archive Send to CRM?",
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+  const restore = await screen.findByRole("button", { name: "Restore" });
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull(),
+  );
+  expect(screen.getByText(/^Revision 1 · Archived/)).toBeTruthy();
+  expect(screen.getByText(/^Nothing is served at/)).toBeTruthy();
+  for (const name of changing)
+    expect(screen.queryByRole("button", { name })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Archive/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Tour" })).toBeNull();
+
+  await pick("crm");
+  const panel = await screen.findByRole("complementary", { name: "HTTP step" });
+  const url = await within(panel).findByRole("textbox", { name: "URL" });
+  expect(url.matches(":disabled")).toBe(true);
+  expect(
+    within(panel).getByRole("textbox", { name: "Id" }).matches(":disabled"),
+  ).toBe(true);
+  // Its tabs still open what's on them.
+  fireEvent.click(within(panel).getByRole("tab", { name: "2xx" }));
+  expect(within(panel).getByRole("tab", { name: "2xx" }).ariaSelected).toBe(
+    "true",
+  );
+  for (const name of ["Workflow settings", "Runs", "Keys"])
+    expect(screen.getByRole("button", { name })).toBeTruthy();
+
+  // Every panel reads the same way: the workflow's settings, a connection
+  // and the response.
+  fireEvent.click(screen.getByRole("button", { name: "Workflow settings" }));
+  const settings = await screen.findByRole("complementary", {
+    name: "Workflow settings",
+  });
+  expect(
+    within(settings)
+      .getByRole("textbox", { name: "Input schema" })
+      .matches(":disabled"),
+  ).toBe(true);
+  fireEvent.click(await screen.findByTestId("rf__edge-user->orders"));
+  const connection = await screen.findByRole("complementary", {
+    name: "Connection",
+  });
+  expect(
+    (
+      await within(connection).findByRole("textbox", { name: "Condition" })
+    ).matches(":disabled"),
+  ).toBe(true);
+  fireEvent.click(screen.getByTestId("rf__node-#response"));
+  const response = await screen.findByRole("complementary", {
+    name: "Response",
+  });
+  expect(
+    (await within(response).findByLabelText("Add an answer")).matches(
+      ":disabled",
+    ),
+  ).toBe(true);
+
+  fireEvent.click(screen.getByRole("button", { name: "Keys" }));
+  const keys = await screen.findByRole("complementary", {
+    name: "Caller keys",
+  });
+  expect(
+    await within(keys).findByText(
+      "No key works: they went when it was archived.",
+    ),
+  ).toBeTruthy();
+  expect(within(keys).queryByRole("button", { name: /New key/ })).toBeNull();
+
+  fireEvent.click(restore);
+  expect(await screen.findByRole("button", { name: "Publish" })).toBeTruthy();
+  for (const name of changing)
+    expect(screen.getByRole("button", { name })).toBeTruthy();
+  expect(screen.queryByText(/Archived/)).toBeNull();
+  expect(screen.getByText(/^Not published/)).toBeTruthy();
+  expect(
+    await within(keys).findByText(
+      "No key works yet. Make one for each caller.",
+    ),
+  ).toBeTruthy();
+});
+
+// A workflow something live uses isn't archived: the dialog says what does,
+// and the editor goes on as it was.
+test("Archive says what uses it when the server refuses", async () => {
+  serveWorkflow();
+  const detail = "It's in use, so it can't be archived: Orders at revision 4.";
+  server.use(
+    http.post("/api/v1/workflows/wf-1/archive", () =>
+      HttpResponse.json(
+        { status: 409, code: "in_use", detail },
+        {
+          status: 409,
+          headers: { "Content-Type": "application/problem+json" },
+        },
+      ),
+    ),
+  );
+  open();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Archive Send to CRM" }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Archive Send to CRM?",
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+  expect(await within(dialog).findByText(detail)).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Restore", hidden: true }),
+  ).toBeNull();
+});
+
+// What's unsaved would be stranded by an archive, so it waits.
+test("Archive waits for what's unsaved", async () => {
+  serveWorkflow();
+  open();
+  await pick("crm");
+  await screen.findByRole("textbox", { name: "URL" });
+  const archive = screen.getByRole("button", { name: "Archive Send to CRM" });
+  expect(archive.matches(":disabled")).toBe(false);
+  type("URL", "https://crm.example.com/v2/contacts");
+  await screen.findByText("Revision 1 · Unsaved changes");
+  expect(archive.matches(":disabled")).toBe(true);
+});
+
+// A connection that isn't drawn has its Remove in the problem list, which
+// stays open to read, without it, on an archived workflow.
+test("an archived workflow's problems read, and offer nothing to change", async () => {
+  const { saves } = serveWorkflow(
+    { ...specExample, edges: [{ from: "gone", to: "crm" }] },
+    [
+      {
+        pointer: "/edges/0/from",
+        code: "unknown_node",
+        detail: "no such step",
+      },
+    ],
+  );
+  server.use(
+    http.get("/api/v1/workflows/wf-1", () => {
+      const start = workflowRevision("wf-1", "Send to CRM", {
+        ...specExample,
+        edges: [{ from: "gone", to: "crm" }],
+      });
+      return HttpResponse.json<WorkflowRevision>({
+        workflow: { ...start.workflow, archived_at: "2026-11-06T09:00:00Z" },
+        revision: {
+          ...start.revision,
+          problems: [
+            {
+              pointer: "/edges/0/from",
+              code: "unknown_node",
+              detail: "no such step",
+            },
+          ],
+        },
+      });
+    }),
+  );
+  open();
+  fireEvent.click(await screen.findByRole("button", { name: "1 problem" }));
+  const panel = await screen.findByRole("complementary", { name: "Problems" });
+  expect(
+    within(panel).getAllByText(/no such step|gone/i).length,
+  ).toBeGreaterThan(0);
+  expect(
+    within(panel).queryByRole("button", { name: "Remove connection" }),
+  ).toBeNull();
+  expect(saves).toHaveLength(0);
+});
+
+// An open Keys panel is asked again once the workflow's archived, and shows
+// its keys as the archive left them: revoked.
+test("an open Keys panel shows the keys revoked by the archive", async () => {
+  serveWorkflow();
+  let revoked = false;
+  const key = {
+    id: "k1",
+    name: "Billing",
+    prefix: "cnd_k1",
+    status: "active" as const,
+    provenance: { actor: "token" },
+    created_at: "2026-11-05T09:00:00Z",
+  };
+  server.use(
+    http.get("/api/v1/workflows/wf-1/keys", () =>
+      HttpResponse.json({
+        keys: [
+          revoked
+            ? { ...key, status: "revoked", revoked_at: "2026-11-06T09:00:00Z" }
+            : key,
+        ],
+      }),
+    ),
+    // Says it's revoked, then leaves the answer to serveWorkflow's.
+    http.post("/api/v1/workflows/wf-1/archive", () => {
+      revoked = true;
+    }),
+  );
+  open();
+  fireEvent.click(await screen.findByRole("button", { name: "Keys" }));
+  const keys = await screen.findByRole("complementary", {
+    name: "Caller keys",
+  });
+  expect(
+    await within(keys).findByRole("button", {
+      name: "Revoke Billing (cnd_k1…)",
+    }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Archive Send to CRM" }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Archive Send to CRM?",
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+  expect(await within(keys).findByText(/revoked/)).toBeTruthy();
+  expect(
+    within(keys).queryByRole("button", { name: /Revoke Billing/ }),
+  ).toBeNull();
 });

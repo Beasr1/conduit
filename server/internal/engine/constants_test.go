@@ -69,6 +69,29 @@ func TestCompile_Constants(t *testing.T) {
 	}
 }
 
+// An archived constant is there, so it's no unknown one, and no expression
+// may read it (plan 15), while one in use reads as ever.
+func TestCompile_ArchivedConstants(t *testing.T) {
+	t.Parallel()
+	known := map[string]bool{"gone": false, "kept": true}
+	d := workflow.Definition{Nodes: []workflow.Node{{ID: "pick", Kind: workflow.NodeKindTransform, Expr: "$const.gone & $const.kept"}}}
+	_, err := Compile(&d, known)
+	var ps workflow.Problems
+	if !errors.As(err, &ps) {
+		t.Fatalf("Compile() = %v, want problems", err)
+	}
+	var got []string
+	for _, p := range ps {
+		if strings.HasSuffix(p.Code, "_constant") {
+			got = append(got, p.Pointer+" "+p.Code+" "+p.Detail)
+		}
+	}
+	want := []string{"/nodes/0/expr archived_constant it reads $const.gone, which is archived: restore it on the Constants page, or read another"}
+	if !slices.Equal(got, want) {
+		t.Errorf("problems:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
 // A run sends what a constant holds where its request reads one.
 func TestRun_SendsConstants(t *testing.T) {
 	t.Parallel()

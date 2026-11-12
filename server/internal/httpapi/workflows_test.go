@@ -193,6 +193,12 @@ func TestEveryBodyIsChecked(t *testing.T) {
 		"POST /serve/{slug}":                        true, // the run's input, any JSON
 		"POST /v1/constants/{name}/undo":            true, // none
 		"POST /v1/workflows/{id}/keys/{key}/revoke": true, // none
+		"POST /v1/workflows/{id}/archive":           true, // none
+		"POST /v1/workflows/{id}/restore":           true, // none
+		"POST /v1/upstreams/{id}/archive":           true, // none
+		"POST /v1/upstreams/{id}/restore":           true, // none
+		"POST /v1/constants/{name}/archive":         true, // none
+		"POST /v1/constants/{name}/restore":         true, // none
 	}
 	var rs routes
 	gen.HandlerWithOptions(nil, gen.StdHTTPServerOptions{BaseRouter: &rs})

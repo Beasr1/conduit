@@ -6,20 +6,12 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 import { useShallow } from "zustand/react/shallow";
 
+import { ArchiveDialog } from "@/components/archive-dialog";
+import { Fields, ReadOnly, useReadOnly } from "@/components/read-only";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { SampleInput } from "@/components/upstream-samples";
 import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -48,7 +40,8 @@ import {
   without,
 } from "@/features/editor/upstreams";
 import {
-  useDeleteUpstream,
+  useArchiveUpstream,
+  useRestoreUpstream,
   useSaveUpstream,
   useUpstreamUsers,
 } from "@/features/editor/hooks/use-upstreams";
@@ -82,7 +75,7 @@ const ParameterProblems = createContext<ProblemError[]>([]);
 // with a sample the preview gives it, then its request, responses and
 // samples in the tabs a step has, previewed and checked as they're typed.
 // Save version makes the next version; the workflows that use it are
-// offered it on their steps.
+// offered it on their steps. An archived one opens read-only (plan 15).
 export function UpstreamPage({ version }: { version: UpstreamVersion }) {
   const [store] = useState(() => {
     const uses = { upstream: version.upstream.id, version: version.version };
@@ -96,14 +89,18 @@ export function UpstreamPage({ version }: { version: UpstreamVersion }) {
   });
   return (
     <EditorContext value={store}>
-      <Checked>
-        <div className="mx-auto flex max-w-3xl flex-col gap-6">
-          <Header version={version} />
-          <UsedBy id={version.upstream.id} />
-          <Parameters />
-          <Blocks />
-        </div>
-      </Checked>
+      <ReadOnly value={version.upstream.archived_at !== undefined}>
+        <Checked>
+          <div className="mx-auto flex max-w-3xl flex-col gap-6">
+            <Header version={version} />
+            <UsedBy id={version.upstream.id} />
+            <Fields>
+              <Parameters />
+              <Blocks />
+            </Fields>
+          </div>
+        </Checked>
+      </ReadOnly>
     </EditorContext>
   );
 }
@@ -162,9 +159,17 @@ function Checked({ children }: { children: ReactNode }) {
   );
 }
 
+const when = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
 // Header names the upstream and its version, says what's unsaved, saves
-// the next version, and deletes it.
+// the next version, and archives it; or, archived, restores it.
 function Header({ version }: { version: UpstreamVersion }) {
+  const archived = version.upstream.archived_at;
+  const archive = useArchiveUpstream(version.upstream.id);
+  const restore = useRestoreUpstream(version.upstream.id);
   const editor = useEditorStore();
   const draft = useEditor((s) => s.draft);
   const parameters = useEditor((s) => s.upstreamEdit?.parameters ?? NONE);
@@ -207,6 +212,7 @@ function Header({ version }: { version: UpstreamVersion }) {
       <span className="text-destructive">Not saved. {save.error.message}</span>,
     );
   else if (dirty) status.push("Unsaved changes");
+  if (archived) status.push(`Archived ${when.format(new Date(archived))}`);
 
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -221,90 +227,48 @@ function Header({ version }: { version: UpstreamVersion }) {
           ))}
         </p>
       </div>
-      <div className="flex gap-2">
-        <DeleteUpstream upstream={version.upstream} />
-        <Button
-          disabled={!dirty || save.isPending}
-          onClick={() => void saveVersion()}
-        >
-          Save version {version.version + 1}
+      {archived ? (
+        <Button disabled={restore.isPending} onClick={() => restore.mutate()}>
+          {restore.isPending ? "Restoring…" : "Restore"}
         </Button>
-      </div>
+      ) : (
+        <div className="flex gap-2">
+          <ArchiveDialog
+            name={version.upstream.name}
+            says="Nothing can use it any more. Every version stays, to read, and Restore brings it back."
+            archive={archive}
+            disabled={dirty}
+          />
+          <Button
+            disabled={!dirty || save.isPending}
+            onClick={() => void saveVersion()}
+          >
+            Save version {version.version + 1}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
-// DeleteUpstream deletes the upstream, once asked again, and goes back to
-// the library. While a saved revision pins it, the server refuses, and the
-// dialog says which revisions do (plan 07).
-function DeleteUpstream({
-  upstream,
-}: {
-  upstream: UpstreamVersion["upstream"];
-}) {
-  const [open, setOpen] = useState(false);
-  const del = useDeleteUpstream();
-  const navigate = useNavigate();
-  const failed = !del.isError
-    ? undefined
-    : del.error instanceof ApiError && del.error.problem?.detail
-      ? del.error.problem.detail
-      : `Not deleted. ${del.error.message}`;
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) del.reset();
-      }}
-    >
-      <DialogTrigger render={<Button variant="outline" />}>
-        Delete
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete {upstream.name}?</DialogTitle>
-          <DialogDescription>
-            It goes for good, with every version.
-          </DialogDescription>
-        </DialogHeader>
-        {failed && <p className="text-sm text-destructive">{failed}</p>}
-        <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>
-            Cancel
-          </DialogClose>
-          <Button
-            variant="destructive"
-            disabled={del.isPending || failed !== undefined}
-            onClick={() =>
-              del.mutate(upstream.id, {
-                onSuccess: () => void navigate(routes.upstreams()),
-              })
-            }
-          >
-            Delete
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// UsedBy lists the workflows whose latest revision uses the upstream, and
-// at which versions.
+// UsedBy lists what archiving the upstream is refused for: each revision in
+// use that uses it, directly or through what it pins, and at which versions.
 function UsedBy({ id }: { id: string }) {
   const users = useUpstreamUsers(id);
+  const archived = useReadOnly();
   if (!users.data) return null;
   const workflows = users.data.workflows;
   return (
     <section aria-label="Used by" className="flex flex-col gap-1 text-sm">
       <h2 className="font-medium">Used by</h2>
       {workflows.length === 0 ? (
-        <p className="text-muted-foreground">No workflow uses it yet.</p>
+        <p className="text-muted-foreground">
+          {archived ? "No workflow uses it." : "No workflow uses it yet."}
+        </p>
       ) : (
         <ul className="flex flex-col gap-0.5">
           {workflows.map((w) => (
-            <li key={w.workflow_id}>
+            <li key={`${w.workflow_id}@${w.revision}`}>
               <Link
                 to={routes.workflow(w.workflow_id)}
                 className="underline-offset-4 hover:underline"

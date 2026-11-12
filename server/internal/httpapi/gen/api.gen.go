@@ -276,7 +276,10 @@ type CallerKeyList struct {
 
 // Constant defines model for Constant.
 type Constant struct {
-	CreatedAt time.Time `json:"created_at"`
+	// ArchivedAt When it was archived. Absent unless it's archived (plan 15).
+	ArchivedAt time.Time  `json:"archived_at,omitempty,omitzero"`
+	ArchivedBy Provenance `json:"archived_by,omitempty,omitzero"`
+	CreatedAt  time.Time  `json:"created_at"`
 
 	// HasPrevious Whether undo has a value to put back.
 	HasPrevious bool `json:"has_previous"`
@@ -319,7 +322,7 @@ type ConstantUsers struct {
 type ConstantWorkflowUse struct {
 	Name string `json:"name"`
 
-	// Revision The workflow's latest revision, which reads the constant.
+	// Revision A latest or published revision of the workflow, which reads the constant, directly or through what it pins.
 	Revision   int    `json:"revision"`
 	WorkflowID string `json:"workflow_id"`
 }
@@ -784,9 +787,12 @@ type UpstreamList struct {
 
 // UpstreamSummary defines model for UpstreamSummary.
 type UpstreamSummary struct {
-	CreatedAt     time.Time `json:"created_at"`
-	ID            string    `json:"id"`
-	LatestVersion int       `json:"latest_version"`
+	// ArchivedAt When it was archived. Absent unless it's archived (plan 15).
+	ArchivedAt    time.Time  `json:"archived_at,omitempty,omitzero"`
+	ArchivedBy    Provenance `json:"archived_by,omitempty,omitzero"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ID            string     `json:"id"`
+	LatestVersion int        `json:"latest_version"`
 
 	// Name Unique in the library.
 	Name string `json:"name"`
@@ -799,10 +805,10 @@ type UpstreamUse struct {
 	// Published Whether that revision is the one the workflow serves.
 	Published bool `json:"published"`
 
-	// Revision The workflow's latest revision, which uses the upstream.
+	// Revision A latest or published revision of the workflow, which uses the upstream, directly or through what it pins.
 	Revision int `json:"revision"`
 
-	// Versions The versions its steps pin, oldest first.
+	// Versions The versions it reaches, oldest first.
 	Versions   []int  `json:"versions"`
 	WorkflowID string `json:"workflow_id"`
 }
@@ -843,10 +849,13 @@ type WayPreview struct {
 
 // Workflow defines model for Workflow.
 type Workflow struct {
-	CreatedAt      time.Time `json:"created_at"`
-	ID             string    `json:"id"`
-	LatestRevision int       `json:"latest_revision"`
-	Name           string    `json:"name"`
+	// ArchivedAt When it was archived. Absent unless it's archived (plan 15).
+	ArchivedAt     time.Time  `json:"archived_at,omitempty,omitzero"`
+	ArchivedBy     Provenance `json:"archived_by,omitempty,omitzero"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ID             string     `json:"id"`
+	LatestRevision int        `json:"latest_revision"`
+	Name           string     `json:"name"`
 
 	// PublishedRevision Absent until a revision is published.
 	PublishedRevision int `json:"published_revision,omitempty,omitzero"`
@@ -889,6 +898,12 @@ type Busy = Problem
 // ServeWorkflowJSONBody defines parameters for ServeWorkflow.
 type ServeWorkflowJSONBody = json.RawMessage
 
+// ListConstantsParams defines parameters for ListConstants.
+type ListConstantsParams struct {
+	// Archived List what's archived instead of what's in use (plan 15).
+	Archived bool `form:"archived,omitempty" json:"archived,omitempty,omitzero"`
+}
+
 // ListRunsParams defines parameters for ListRuns.
 type ListRunsParams struct {
 	// WorkflowID Only this workflow's runs.
@@ -917,6 +932,9 @@ type ListUpstreamsParams struct {
 
 	// Before Return upstreams older than this id, for the next page.
 	Before string `form:"before,omitempty" json:"before,omitempty,omitzero"`
+
+	// Archived List what's archived instead of what's in use (plan 15).
+	Archived bool `form:"archived,omitempty" json:"archived,omitempty,omitzero"`
 }
 
 // SaveUpstreamParams defines parameters for SaveUpstream.
@@ -931,6 +949,9 @@ type ListWorkflowsParams struct {
 
 	// Before Return workflows older than this id, for the next page.
 	Before string `form:"before,omitempty" json:"before,omitempty,omitzero"`
+
+	// Archived List what's archived instead of what's in use (plan 15).
+	Archived bool `form:"archived,omitempty" json:"archived,omitempty,omitzero"`
 }
 
 // SaveDraftParams defines parameters for SaveDraft.
@@ -997,20 +1018,23 @@ type ServerInterface interface {
 	ServeWorkflow(w http.ResponseWriter, r *http.Request, slug string)
 	// ListConstants List the constants, by name
 	// (GET /v1/constants)
-	ListConstants(w http.ResponseWriter, r *http.Request)
+	ListConstants(w http.ResponseWriter, r *http.Request, params ListConstantsParams)
 	// CreateConstant Make a constant
 	// (POST /v1/constants)
 	CreateConstant(w http.ResponseWriter, r *http.Request)
-	// DeleteConstant Delete a constant nothing reads
-	// (DELETE /v1/constants/{name})
-	DeleteConstant(w http.ResponseWriter, r *http.Request, name ConstantName)
 	// SetConstant Change a constant's value, keeping the one before
 	// (PUT /v1/constants/{name})
 	SetConstant(w http.ResponseWriter, r *http.Request, name ConstantName)
+	// ArchiveConstant Take a constant out of use
+	// (POST /v1/constants/{name}/archive)
+	ArchiveConstant(w http.ResponseWriter, r *http.Request, name ConstantName)
+	// RestoreConstant Bring an archived constant back as it was
+	// (POST /v1/constants/{name}/restore)
+	RestoreConstant(w http.ResponseWriter, r *http.Request, name ConstantName)
 	// UndoConstant Put a constant's previous value back
 	// (POST /v1/constants/{name}/undo)
 	UndoConstant(w http.ResponseWriter, r *http.Request, name ConstantName)
-	// ListConstantUsers List the workflows and upstreams whose latest revision or version reads a constant
+	// ListConstantUsers List what archiving a constant is refused for
 	// (GET /v1/constants/{name}/users)
 	ListConstantUsers(w http.ResponseWriter, r *http.Request, name ConstantName)
 	// PreviewDefinition Preview what a step would read and send, or whether a connection is taken, over the samples
@@ -1040,16 +1064,19 @@ type ServerInterface interface {
 	// ValidateUpstream Check an upstream's definition without saving it
 	// (POST /v1/upstreams/validate)
 	ValidateUpstream(w http.ResponseWriter, r *http.Request)
-	// DeleteUpstream Delete an upstream no revision pins
-	// (DELETE /v1/upstreams/{id})
-	DeleteUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID)
 	// GetUpstream Get an upstream at its latest version
 	// (GET /v1/upstreams/{id})
 	GetUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID)
 	// SaveUpstream Save the next version
 	// (PUT /v1/upstreams/{id})
 	SaveUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID, params SaveUpstreamParams)
-	// ListUpstreamUsers List the workflows whose latest revision uses an upstream, and the versions each pins
+	// ArchiveUpstream Take an upstream out of use
+	// (POST /v1/upstreams/{id}/archive)
+	ArchiveUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID)
+	// RestoreUpstream Bring an archived upstream back as it was
+	// (POST /v1/upstreams/{id}/restore)
+	RestoreUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID)
+	// ListUpstreamUsers List what archiving an upstream is refused for
 	// (GET /v1/upstreams/{id}/users)
 	ListUpstreamUsers(w http.ResponseWriter, r *http.Request, id UpstreamID)
 	// GetUpstreamVersion Get one version of an upstream
@@ -1067,6 +1094,9 @@ type ServerInterface interface {
 	// GetWorkflow Get a workflow and its latest revision
 	// (GET /v1/workflows/{id})
 	GetWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID)
+	// ArchiveWorkflow Take a workflow out of use
+	// (POST /v1/workflows/{id}/archive)
+	ArchiveWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID)
 	// SaveDraft Save the next revision
 	// (PUT /v1/workflows/{id}/draft)
 	SaveDraft(w http.ResponseWriter, r *http.Request, id WorkflowID, params SaveDraftParams)
@@ -1085,6 +1115,9 @@ type ServerInterface interface {
 	// PublishWorkflow Make a revision the one served
 	// (POST /v1/workflows/{id}/publish)
 	PublishWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID)
+	// RestoreWorkflow Bring an archived workflow back as it was
+	// (POST /v1/workflows/{id}/restore)
+	RestoreWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID)
 	// ListRevisions List a workflow's revisions, newest first
 	// (GET /v1/workflows/{id}/revisions)
 	ListRevisions(w http.ResponseWriter, r *http.Request, id WorkflowID)
@@ -1162,8 +1195,27 @@ func (siw *ServerInterfaceWrapper) ServeWorkflow(w http.ResponseWriter, r *http.
 // ListConstants operation middleware
 func (siw *ServerInterfaceWrapper) ListConstants(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListConstantsParams
+
+	// ------------- Optional query parameter "archived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "archived", r.URL.Query(), &params.Archived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "archived"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "archived", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListConstants(w, r)
+		siw.Handler.ListConstants(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1178,32 +1230,6 @@ func (siw *ServerInterfaceWrapper) CreateConstant(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateConstant(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// DeleteConstant operation middleware
-func (siw *ServerInterfaceWrapper) DeleteConstant(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "name" -------------
-	var name ConstantName
-
-	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteConstant(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1230,6 +1256,58 @@ func (siw *ServerInterfaceWrapper) SetConstant(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetConstant(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ArchiveConstant operation middleware
+func (siw *ServerInterfaceWrapper) ArchiveConstant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ConstantName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ArchiveConstant(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestoreConstant operation middleware
+func (siw *ServerInterfaceWrapper) RestoreConstant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ConstantName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreConstant(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1524,6 +1602,19 @@ func (siw *ServerInterfaceWrapper) ListUpstreams(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// ------------- Optional query parameter "archived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "archived", r.URL.Query(), &params.Archived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "archived"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "archived", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListUpstreams(w, r, params)
 	}))
@@ -1554,32 +1645,6 @@ func (siw *ServerInterfaceWrapper) ValidateUpstream(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ValidateUpstream(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// DeleteUpstream operation middleware
-func (siw *ServerInterfaceWrapper) DeleteUpstream(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id UpstreamID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteUpstream(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1656,6 +1721,58 @@ func (siw *ServerInterfaceWrapper) SaveUpstream(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SaveUpstream(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ArchiveUpstream operation middleware
+func (siw *ServerInterfaceWrapper) ArchiveUpstream(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UpstreamID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ArchiveUpstream(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestoreUpstream operation middleware
+func (siw *ServerInterfaceWrapper) RestoreUpstream(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UpstreamID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreUpstream(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1775,6 +1892,19 @@ func (siw *ServerInterfaceWrapper) ListWorkflows(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// ------------- Optional query parameter "archived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "archived", r.URL.Query(), &params.Archived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "archived"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "archived", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListWorkflows(w, r, params)
 	}))
@@ -1817,6 +1947,32 @@ func (siw *ServerInterfaceWrapper) GetWorkflow(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetWorkflow(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ArchiveWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) ArchiveWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ArchiveWorkflow(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2015,6 +2171,32 @@ func (siw *ServerInterfaceWrapper) PublishWorkflow(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PublishWorkflow(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestoreWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) RestoreWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreWorkflow(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2242,6 +2424,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{id}/revisions", wrapper.ListRevisions)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{id}/revisions/{revision}", wrapper.GetRevision)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/publish", wrapper.PublishWorkflow)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/archive", wrapper.ArchiveWorkflow)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/restore", wrapper.RestoreWorkflow)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/validate", wrapper.ValidateDefinition)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/preview", wrapper.PreviewDefinition)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/runs", wrapper.StartRun)
@@ -2252,15 +2436,17 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams", wrapper.ListUpstreams)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams", wrapper.CreateUpstream)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams/validate", wrapper.ValidateUpstream)
-	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/upstreams/{id}", wrapper.DeleteUpstream)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}", wrapper.GetUpstream)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/upstreams/{id}", wrapper.SaveUpstream)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams/{id}/archive", wrapper.ArchiveUpstream)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams/{id}/restore", wrapper.RestoreUpstream)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}/users", wrapper.ListUpstreamUsers)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}/versions/{version}", wrapper.GetUpstreamVersion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/constants", wrapper.ListConstants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/constants", wrapper.CreateConstant)
-	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/constants/{name}", wrapper.DeleteConstant)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/constants/{name}", wrapper.SetConstant)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/constants/{name}/archive", wrapper.ArchiveConstant)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/constants/{name}/restore", wrapper.RestoreConstant)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/constants/{name}/undo", wrapper.UndoConstant)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/constants/{name}/users", wrapper.ListConstantUsers)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs", wrapper.ListRuns)
@@ -2481,6 +2667,7 @@ func (response ServeWorkflow508ApplicationProblemPlusJSONResponse) VisitServeWor
 }
 
 type ListConstantsRequestObject struct {
+	Params ListConstantsParams
 }
 
 type ListConstantsResponseObject interface {
@@ -2591,66 +2778,6 @@ func (response CreateConstant422ApplicationProblemPlusJSONResponse) VisitCreateC
 	return err
 }
 
-type DeleteConstantRequestObject struct {
-	Name ConstantName `json:"name"`
-}
-
-type DeleteConstantResponseObject interface {
-	VisitDeleteConstantResponse(w http.ResponseWriter) error
-}
-
-type DeleteConstant204Response struct {
-}
-
-func (response DeleteConstant204Response) VisitDeleteConstantResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type DeleteConstant401ApplicationProblemPlusJSONResponse struct {
-	ProblemApplicationProblemPlusJSONResponse
-}
-
-func (response DeleteConstant401ApplicationProblemPlusJSONResponse) VisitDeleteConstantResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type DeleteConstant404ApplicationProblemPlusJSONResponse Problem
-
-func (response DeleteConstant404ApplicationProblemPlusJSONResponse) VisitDeleteConstantResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type DeleteConstant409ApplicationProblemPlusJSONResponse Problem
-
-func (response DeleteConstant409ApplicationProblemPlusJSONResponse) VisitDeleteConstantResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(409)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type SetConstantRequestObject struct {
 	Name ConstantName `json:"name"`
 	Body *SetConstantJSONRequestBody
@@ -2704,6 +2831,20 @@ func (response SetConstant404ApplicationProblemPlusJSONResponse) VisitSetConstan
 	return err
 }
 
+type SetConstant409ApplicationProblemPlusJSONResponse Problem
+
+func (response SetConstant409ApplicationProblemPlusJSONResponse) VisitSetConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SetConstant422ApplicationProblemPlusJSONResponse Problem
 
 func (response SetConstant422ApplicationProblemPlusJSONResponse) VisitSetConstantResponse(w http.ResponseWriter) error {
@@ -2714,6 +2855,124 @@ func (response SetConstant422ApplicationProblemPlusJSONResponse) VisitSetConstan
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveConstantRequestObject struct {
+	Name ConstantName `json:"name"`
+}
+
+type ArchiveConstantResponseObject interface {
+	VisitArchiveConstantResponse(w http.ResponseWriter) error
+}
+
+type ArchiveConstant200JSONResponse Constant
+
+func (response ArchiveConstant200JSONResponse) VisitArchiveConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveConstant401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ArchiveConstant401ApplicationProblemPlusJSONResponse) VisitArchiveConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveConstant404ApplicationProblemPlusJSONResponse Problem
+
+func (response ArchiveConstant404ApplicationProblemPlusJSONResponse) VisitArchiveConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveConstant409ApplicationProblemPlusJSONResponse Problem
+
+func (response ArchiveConstant409ApplicationProblemPlusJSONResponse) VisitArchiveConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreConstantRequestObject struct {
+	Name ConstantName `json:"name"`
+}
+
+type RestoreConstantResponseObject interface {
+	VisitRestoreConstantResponse(w http.ResponseWriter) error
+}
+
+type RestoreConstant200JSONResponse Constant
+
+func (response RestoreConstant200JSONResponse) VisitRestoreConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreConstant401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RestoreConstant401ApplicationProblemPlusJSONResponse) VisitRestoreConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreConstant404ApplicationProblemPlusJSONResponse Problem
+
+func (response RestoreConstant404ApplicationProblemPlusJSONResponse) VisitRestoreConstantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3325,66 +3584,6 @@ func (response ValidateUpstream401ApplicationProblemPlusJSONResponse) VisitValid
 	return err
 }
 
-type DeleteUpstreamRequestObject struct {
-	ID UpstreamID `json:"id"`
-}
-
-type DeleteUpstreamResponseObject interface {
-	VisitDeleteUpstreamResponse(w http.ResponseWriter) error
-}
-
-type DeleteUpstream204Response struct {
-}
-
-func (response DeleteUpstream204Response) VisitDeleteUpstreamResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type DeleteUpstream401ApplicationProblemPlusJSONResponse struct {
-	ProblemApplicationProblemPlusJSONResponse
-}
-
-func (response DeleteUpstream401ApplicationProblemPlusJSONResponse) VisitDeleteUpstreamResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type DeleteUpstream404ApplicationProblemPlusJSONResponse Problem
-
-func (response DeleteUpstream404ApplicationProblemPlusJSONResponse) VisitDeleteUpstreamResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type DeleteUpstream409ApplicationProblemPlusJSONResponse Problem
-
-func (response DeleteUpstream409ApplicationProblemPlusJSONResponse) VisitDeleteUpstreamResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(409)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type GetUpstreamRequestObject struct {
 	ID UpstreamID `json:"id"`
 }
@@ -3507,6 +3706,20 @@ func (response SaveUpstream404ApplicationProblemPlusJSONResponse) VisitSaveUpstr
 	return err
 }
 
+type SaveUpstream409ApplicationProblemPlusJSONResponse Problem
+
+func (response SaveUpstream409ApplicationProblemPlusJSONResponse) VisitSaveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SaveUpstream412ApplicationProblemPlusJSONResponse Problem
 
 func (response SaveUpstream412ApplicationProblemPlusJSONResponse) VisitSaveUpstreamResponse(w http.ResponseWriter) error {
@@ -3545,6 +3758,124 @@ func (response SaveUpstream428ApplicationProblemPlusJSONResponse) VisitSaveUpstr
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(428)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveUpstreamRequestObject struct {
+	ID UpstreamID `json:"id"`
+}
+
+type ArchiveUpstreamResponseObject interface {
+	VisitArchiveUpstreamResponse(w http.ResponseWriter) error
+}
+
+type ArchiveUpstream200JSONResponse UpstreamSummary
+
+func (response ArchiveUpstream200JSONResponse) VisitArchiveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveUpstream401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ArchiveUpstream401ApplicationProblemPlusJSONResponse) VisitArchiveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveUpstream404ApplicationProblemPlusJSONResponse Problem
+
+func (response ArchiveUpstream404ApplicationProblemPlusJSONResponse) VisitArchiveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveUpstream409ApplicationProblemPlusJSONResponse Problem
+
+func (response ArchiveUpstream409ApplicationProblemPlusJSONResponse) VisitArchiveUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreUpstreamRequestObject struct {
+	ID UpstreamID `json:"id"`
+}
+
+type RestoreUpstreamResponseObject interface {
+	VisitRestoreUpstreamResponse(w http.ResponseWriter) error
+}
+
+type RestoreUpstream200JSONResponse UpstreamSummary
+
+func (response RestoreUpstream200JSONResponse) VisitRestoreUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreUpstream401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RestoreUpstream401ApplicationProblemPlusJSONResponse) VisitRestoreUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreUpstream404ApplicationProblemPlusJSONResponse Problem
+
+func (response RestoreUpstream404ApplicationProblemPlusJSONResponse) VisitRestoreUpstreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3880,6 +4211,72 @@ func (response GetWorkflow404ApplicationProblemPlusJSONResponse) VisitGetWorkflo
 	return err
 }
 
+type ArchiveWorkflowRequestObject struct {
+	ID WorkflowID `json:"id"`
+}
+
+type ArchiveWorkflowResponseObject interface {
+	VisitArchiveWorkflowResponse(w http.ResponseWriter) error
+}
+
+type ArchiveWorkflow200JSONResponse Workflow
+
+func (response ArchiveWorkflow200JSONResponse) VisitArchiveWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveWorkflow401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ArchiveWorkflow401ApplicationProblemPlusJSONResponse) VisitArchiveWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveWorkflow404ApplicationProblemPlusJSONResponse Problem
+
+func (response ArchiveWorkflow404ApplicationProblemPlusJSONResponse) VisitArchiveWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveWorkflow409ApplicationProblemPlusJSONResponse Problem
+
+func (response ArchiveWorkflow409ApplicationProblemPlusJSONResponse) VisitArchiveWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SaveDraftRequestObject struct {
 	ID     WorkflowID `json:"id"`
 	Params SaveDraftParams
@@ -3938,6 +4335,20 @@ func (response SaveDraft404ApplicationProblemPlusJSONResponse) VisitSaveDraftRes
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveDraft409ApplicationProblemPlusJSONResponse Problem
+
+func (response SaveDraft409ApplicationProblemPlusJSONResponse) VisitSaveDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -4305,6 +4716,20 @@ func (response PublishWorkflow404ApplicationProblemPlusJSONResponse) VisitPublis
 	return err
 }
 
+type PublishWorkflow409ApplicationProblemPlusJSONResponse Problem
+
+func (response PublishWorkflow409ApplicationProblemPlusJSONResponse) VisitPublishWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type PublishWorkflow422ApplicationProblemPlusJSONResponse Problem
 
 func (response PublishWorkflow422ApplicationProblemPlusJSONResponse) VisitPublishWorkflowResponse(w http.ResponseWriter) error {
@@ -4315,6 +4740,58 @@ func (response PublishWorkflow422ApplicationProblemPlusJSONResponse) VisitPublis
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreWorkflowRequestObject struct {
+	ID WorkflowID `json:"id"`
+}
+
+type RestoreWorkflowResponseObject interface {
+	VisitRestoreWorkflowResponse(w http.ResponseWriter) error
+}
+
+type RestoreWorkflow200JSONResponse Workflow
+
+func (response RestoreWorkflow200JSONResponse) VisitRestoreWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreWorkflow401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response RestoreWorkflow401ApplicationProblemPlusJSONResponse) VisitRestoreWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreWorkflow404ApplicationProblemPlusJSONResponse Problem
+
+func (response RestoreWorkflow404ApplicationProblemPlusJSONResponse) VisitRestoreWorkflowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -4499,6 +4976,20 @@ func (response StartRun404ApplicationProblemPlusJSONResponse) VisitStartRunRespo
 	return err
 }
 
+type StartRun409ApplicationProblemPlusJSONResponse Problem
+
+func (response StartRun409ApplicationProblemPlusJSONResponse) VisitStartRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartRun422ApplicationProblemPlusJSONResponse Problem
 
 func (response StartRun422ApplicationProblemPlusJSONResponse) VisitStartRunResponse(w http.ResponseWriter) error {
@@ -4561,16 +5052,19 @@ type StrictServerInterface interface {
 	// CreateConstant Make a constant
 	// (POST /v1/constants)
 	CreateConstant(ctx context.Context, request CreateConstantRequestObject) (CreateConstantResponseObject, error)
-	// DeleteConstant Delete a constant nothing reads
-	// (DELETE /v1/constants/{name})
-	DeleteConstant(ctx context.Context, request DeleteConstantRequestObject) (DeleteConstantResponseObject, error)
 	// SetConstant Change a constant's value, keeping the one before
 	// (PUT /v1/constants/{name})
 	SetConstant(ctx context.Context, request SetConstantRequestObject) (SetConstantResponseObject, error)
+	// ArchiveConstant Take a constant out of use
+	// (POST /v1/constants/{name}/archive)
+	ArchiveConstant(ctx context.Context, request ArchiveConstantRequestObject) (ArchiveConstantResponseObject, error)
+	// RestoreConstant Bring an archived constant back as it was
+	// (POST /v1/constants/{name}/restore)
+	RestoreConstant(ctx context.Context, request RestoreConstantRequestObject) (RestoreConstantResponseObject, error)
 	// UndoConstant Put a constant's previous value back
 	// (POST /v1/constants/{name}/undo)
 	UndoConstant(ctx context.Context, request UndoConstantRequestObject) (UndoConstantResponseObject, error)
-	// ListConstantUsers List the workflows and upstreams whose latest revision or version reads a constant
+	// ListConstantUsers List what archiving a constant is refused for
 	// (GET /v1/constants/{name}/users)
 	ListConstantUsers(ctx context.Context, request ListConstantUsersRequestObject) (ListConstantUsersResponseObject, error)
 	// PreviewDefinition Preview what a step would read and send, or whether a connection is taken, over the samples
@@ -4600,16 +5094,19 @@ type StrictServerInterface interface {
 	// ValidateUpstream Check an upstream's definition without saving it
 	// (POST /v1/upstreams/validate)
 	ValidateUpstream(ctx context.Context, request ValidateUpstreamRequestObject) (ValidateUpstreamResponseObject, error)
-	// DeleteUpstream Delete an upstream no revision pins
-	// (DELETE /v1/upstreams/{id})
-	DeleteUpstream(ctx context.Context, request DeleteUpstreamRequestObject) (DeleteUpstreamResponseObject, error)
 	// GetUpstream Get an upstream at its latest version
 	// (GET /v1/upstreams/{id})
 	GetUpstream(ctx context.Context, request GetUpstreamRequestObject) (GetUpstreamResponseObject, error)
 	// SaveUpstream Save the next version
 	// (PUT /v1/upstreams/{id})
 	SaveUpstream(ctx context.Context, request SaveUpstreamRequestObject) (SaveUpstreamResponseObject, error)
-	// ListUpstreamUsers List the workflows whose latest revision uses an upstream, and the versions each pins
+	// ArchiveUpstream Take an upstream out of use
+	// (POST /v1/upstreams/{id}/archive)
+	ArchiveUpstream(ctx context.Context, request ArchiveUpstreamRequestObject) (ArchiveUpstreamResponseObject, error)
+	// RestoreUpstream Bring an archived upstream back as it was
+	// (POST /v1/upstreams/{id}/restore)
+	RestoreUpstream(ctx context.Context, request RestoreUpstreamRequestObject) (RestoreUpstreamResponseObject, error)
+	// ListUpstreamUsers List what archiving an upstream is refused for
 	// (GET /v1/upstreams/{id}/users)
 	ListUpstreamUsers(ctx context.Context, request ListUpstreamUsersRequestObject) (ListUpstreamUsersResponseObject, error)
 	// GetUpstreamVersion Get one version of an upstream
@@ -4627,6 +5124,9 @@ type StrictServerInterface interface {
 	// GetWorkflow Get a workflow and its latest revision
 	// (GET /v1/workflows/{id})
 	GetWorkflow(ctx context.Context, request GetWorkflowRequestObject) (GetWorkflowResponseObject, error)
+	// ArchiveWorkflow Take a workflow out of use
+	// (POST /v1/workflows/{id}/archive)
+	ArchiveWorkflow(ctx context.Context, request ArchiveWorkflowRequestObject) (ArchiveWorkflowResponseObject, error)
 	// SaveDraft Save the next revision
 	// (PUT /v1/workflows/{id}/draft)
 	SaveDraft(ctx context.Context, request SaveDraftRequestObject) (SaveDraftResponseObject, error)
@@ -4645,6 +5145,9 @@ type StrictServerInterface interface {
 	// PublishWorkflow Make a revision the one served
 	// (POST /v1/workflows/{id}/publish)
 	PublishWorkflow(ctx context.Context, request PublishWorkflowRequestObject) (PublishWorkflowResponseObject, error)
+	// RestoreWorkflow Bring an archived workflow back as it was
+	// (POST /v1/workflows/{id}/restore)
+	RestoreWorkflow(ctx context.Context, request RestoreWorkflowRequestObject) (RestoreWorkflowResponseObject, error)
 	// ListRevisions List a workflow's revisions, newest first
 	// (GET /v1/workflows/{id}/revisions)
 	ListRevisions(ctx context.Context, request ListRevisionsRequestObject) (ListRevisionsResponseObject, error)
@@ -4780,8 +5283,10 @@ func (sh *strictHandler) ServeWorkflow(w http.ResponseWriter, r *http.Request, s
 }
 
 // ListConstants operation middleware
-func (sh *strictHandler) ListConstants(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) ListConstants(w http.ResponseWriter, r *http.Request, params ListConstantsParams) {
 	var request ListConstantsRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListConstants(ctx, request.(ListConstantsRequestObject))
@@ -4834,32 +5339,6 @@ func (sh *strictHandler) CreateConstant(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// DeleteConstant operation middleware
-func (sh *strictHandler) DeleteConstant(w http.ResponseWriter, r *http.Request, name ConstantName) {
-	var request DeleteConstantRequestObject
-
-	request.Name = name
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.DeleteConstant(ctx, request.(DeleteConstantRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "DeleteConstant")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(DeleteConstantResponseObject); ok {
-		if err := validResponse.VisitDeleteConstantResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
 // SetConstant operation middleware
 func (sh *strictHandler) SetConstant(w http.ResponseWriter, r *http.Request, name ConstantName) {
 	var request SetConstantRequestObject
@@ -4886,6 +5365,58 @@ func (sh *strictHandler) SetConstant(w http.ResponseWriter, r *http.Request, nam
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetConstantResponseObject); ok {
 		if err := validResponse.VisitSetConstantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ArchiveConstant operation middleware
+func (sh *strictHandler) ArchiveConstant(w http.ResponseWriter, r *http.Request, name ConstantName) {
+	var request ArchiveConstantRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ArchiveConstant(ctx, request.(ArchiveConstantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ArchiveConstant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ArchiveConstantResponseObject); ok {
+		if err := validResponse.VisitArchiveConstantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestoreConstant operation middleware
+func (sh *strictHandler) RestoreConstant(w http.ResponseWriter, r *http.Request, name ConstantName) {
+	var request RestoreConstantRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestoreConstant(ctx, request.(RestoreConstantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestoreConstant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestoreConstantResponseObject); ok {
+		if err := validResponse.VisitRestoreConstantResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -5200,32 +5731,6 @@ func (sh *strictHandler) ValidateUpstream(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// DeleteUpstream operation middleware
-func (sh *strictHandler) DeleteUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID) {
-	var request DeleteUpstreamRequestObject
-
-	request.ID = id
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.DeleteUpstream(ctx, request.(DeleteUpstreamRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "DeleteUpstream")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(DeleteUpstreamResponseObject); ok {
-		if err := validResponse.VisitDeleteUpstreamResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
 // GetUpstream operation middleware
 func (sh *strictHandler) GetUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID) {
 	var request GetUpstreamRequestObject
@@ -5279,6 +5784,58 @@ func (sh *strictHandler) SaveUpstream(w http.ResponseWriter, r *http.Request, id
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SaveUpstreamResponseObject); ok {
 		if err := validResponse.VisitSaveUpstreamResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ArchiveUpstream operation middleware
+func (sh *strictHandler) ArchiveUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID) {
+	var request ArchiveUpstreamRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ArchiveUpstream(ctx, request.(ArchiveUpstreamRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ArchiveUpstream")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ArchiveUpstreamResponseObject); ok {
+		if err := validResponse.VisitArchiveUpstreamResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestoreUpstream operation middleware
+func (sh *strictHandler) RestoreUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID) {
+	var request RestoreUpstreamRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestoreUpstream(ctx, request.(RestoreUpstreamRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestoreUpstream")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestoreUpstreamResponseObject); ok {
+		if err := validResponse.VisitRestoreUpstreamResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -5446,6 +6003,32 @@ func (sh *strictHandler) GetWorkflow(w http.ResponseWriter, r *http.Request, id 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetWorkflowResponseObject); ok {
 		if err := validResponse.VisitGetWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ArchiveWorkflow operation middleware
+func (sh *strictHandler) ArchiveWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID) {
+	var request ArchiveWorkflowRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ArchiveWorkflow(ctx, request.(ArchiveWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ArchiveWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ArchiveWorkflowResponseObject); ok {
+		if err := validResponse.VisitArchiveWorkflowResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -5633,6 +6216,32 @@ func (sh *strictHandler) PublishWorkflow(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PublishWorkflowResponseObject); ok {
 		if err := validResponse.VisitPublishWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestoreWorkflow operation middleware
+func (sh *strictHandler) RestoreWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID) {
+	var request RestoreWorkflowRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestoreWorkflow(ctx, request.(RestoreWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestoreWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestoreWorkflowResponseObject); ok {
+		if err := validResponse.VisitRestoreWorkflowResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

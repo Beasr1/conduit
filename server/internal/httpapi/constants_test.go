@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
-	"github.com/Beasr1/conduit/server/internal/store"
 )
 
 // newConstant is a name no other test's constant has.
@@ -102,7 +101,6 @@ func TestConstants_Refused(t *testing.T) {
 		{"nothing to undo", http.MethodPost, "/v1/constants/" + name + "/undo", "", http.StatusConflict, "nothing_to_undo", ""},
 		{"change one that isn't there", http.MethodPut, "/v1/constants/missing_one", `{"value": "v"}`, http.StatusNotFound, "not_found", ""},
 		{"undo one that isn't there", http.MethodPost, "/v1/constants/missing_one/undo", "", http.StatusNotFound, "not_found", ""},
-		{"delete one that isn't there", http.MethodDelete, "/v1/constants/missing_one", "", http.StatusNotFound, "not_found", ""},
 		{"the users of one that isn't there", http.MethodGet, "/v1/constants/missing_one/users", "", http.StatusNotFound, "not_found", ""},
 	}
 	for _, tt := range tests {
@@ -121,47 +119,6 @@ func TestConstants_Refused(t *testing.T) {
 	r := call(t, http.MethodPost, "/v1/constants", `{"name": "`+name+`", "value": "w"}`)
 	if p := problemOf(t, r); p.Detail != "A constant already has that name." {
 		t.Errorf("a name taken says %q", p.Detail)
-	}
-}
-
-// A constant something reads stays: a saved revision, or an upstream's
-// version, can run again (plan 06).
-func TestConstants_Delete(t *testing.T) {
-	t.Parallel()
-	free := newConstant(t)
-	call(t, http.MethodPost, "/v1/constants", `{"name": "`+free+`", "value": "v"}`)
-	if r := call(t, http.MethodDelete, "/v1/constants/"+free, ""); r.status != http.StatusNoContent || len(r.body) != 0 {
-		t.Errorf("DELETE = %d %s", r.status, r.body)
-	}
-	if r := call(t, http.MethodDelete, "/v1/constants/"+free, ""); r.status != http.StatusNotFound {
-		t.Errorf("DELETE again = %d %s", r.status, r.body)
-	}
-
-	read := newConstant(t)
-	call(t, http.MethodPost, "/v1/constants", `{"name": "`+read+`", "value": "v"}`)
-	create(t, `{"nodes": [{"id": "crm", "kind": "http", "uses": {"upstream": "u", "version": 1}, "with": {"token": "$const.`+read+`"}}]}`)
-	u := makeUpstream(t, `{"request": {"method": "GET", "url": "https://crm.example.com/v1", "headers": {"Authorization": "Bearer {{ $const.`+read+` }}"}}}`)
-	r := call(t, http.MethodDelete, "/v1/constants/"+read, "")
-	want := "Saved revisions or upstream versions read it, and each can run again: Send to CRM at revision 1; the upstream " + u.Upstream.Name + " at version 1."
-	if p := problemOf(t, r); r.status != http.StatusConflict || p.Code != "constant_in_use" || p.Detail != want {
-		t.Errorf("DELETE of one a revision reads = %d %+v, want %q", r.status, p, want)
-	}
-
-	users := strict[gen.ConstantUsers](t, call(t, http.MethodGet, "/v1/constants/"+read+"/users", "").body)
-	if len(users.Workflows) != 1 || users.Workflows[0].Name != "Send to CRM" || users.Workflows[0].Revision != 1 ||
-		len(users.Upstreams) != 1 || users.Upstreams[0].UpstreamID != u.Upstream.ID || users.Upstreams[0].Version != 1 {
-		t.Errorf("users = %+v", users)
-	}
-}
-
-func TestReadBy(t *testing.T) {
-	t.Parallel()
-	got := readBy(&store.ConstantInUseError{
-		Workflows: []store.ConstantReader{{Name: "Orders", At: []int{2, 4}}, {Name: "Billing", At: []int{1}}},
-		Upstreams: []store.ConstantReader{{Name: "CRM", At: []int{1, 2, 5}}},
-	})
-	if want := "Orders at revisions 2 and 4; Billing at revision 1; the upstream CRM at versions 1, 2 and 5"; got != want {
-		t.Errorf("readBy() = %q, want %q", got, want)
 	}
 }
 

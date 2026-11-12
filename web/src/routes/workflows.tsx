@@ -1,3 +1,4 @@
+import { InUseTabs } from "@/components/in-use-tabs";
 import { CreateWorkflowDialog } from "@/features/workflows/components/create-workflow-dialog";
 import { WorkflowList } from "@/features/workflows/components/workflow-list";
 
@@ -8,7 +9,11 @@ export function Component() {
         <h1 className="font-heading text-xl font-semibold">Workflows</h1>
         <CreateWorkflowDialog />
       </div>
-      <WorkflowList />
+      <InUseTabs
+        of="Which workflows"
+        live={<WorkflowList />}
+        archived={<WorkflowList archived />}
+      />
     </div>
   );
 }

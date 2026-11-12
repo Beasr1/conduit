@@ -9,6 +9,7 @@ import {
 } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
 
+import { useReadOnly } from "@/components/read-only";
 import { Button } from "@/components/ui/button";
 import { AddNodeDialog } from "@/features/editor/components/add-node-dialog";
 import { nodeTypes } from "@/features/editor/components/nodes";
@@ -47,8 +48,9 @@ const MARGIN = 24;
 
 // Canvas draws the draft of workflow and turns what's done on it into edits
 // of the draft: a drag, a new edge, a deletion. React Flow keeps nothing of
-// its own.
+// its own. Read-only, nothing on it moves, and what's picked opens to read.
 export function Canvas({ workflow }: { workflow: string }) {
+  const readOnly = useReadOnly();
   const draft = useEditor((s) => s.draft);
   const moving = useEditor((s) => s.moving);
   const selected = useEditor((s) => s.selected);
@@ -216,6 +218,8 @@ export function Canvas({ workflow }: { workflow: string }) {
       // connection: one is drawn by dragging, or made with Connect to in the
       // panel of the response it leaves from.
       connectOnClick={false}
+      nodesDraggable={!readOnly}
+      nodesConnectable={!readOnly}
       // A node keyed with "#" has a missing or shared id, which an edge
       // can't name. An edge leaves from the output whose handle it's drawn
       // from, and an answer on the response takes lines from any number of
@@ -277,7 +281,7 @@ export function Canvas({ workflow }: { workflow: string }) {
           ),
         )
       }
-      deleteKeyCode={["Backspace", "Delete"]}
+      deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
       // A drag moves a step without picking it. Picking opens the step's
       // settings, which narrows the canvas under the drag.
       selectNodesOnDrag={false}
@@ -289,8 +293,12 @@ export function Canvas({ workflow }: { workflow: string }) {
       {/* nokey: Delete or Backspace on these buttons would otherwise delete
           what's selected on the canvas. */}
       <Panel position="top-left" className="nokey flex flex-wrap gap-2">
-        <AddNodeDialog kind="http" workflow={workflow} />
-        <AddNodeDialog kind="transform" workflow={workflow} />
+        {!readOnly && (
+          <>
+            <AddNodeDialog kind="http" workflow={workflow} />
+            <AddNodeDialog kind="transform" workflow={workflow} />
+          </>
+        )}
         <Button
           variant="outline"
           size="sm"
@@ -305,9 +313,11 @@ export function Canvas({ workflow }: { workflow: string }) {
         <Button variant="outline" size="sm" onClick={() => openPanel("keys")}>
           Keys
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => setTouring(true)}>
-          Tour
-        </Button>
+        {!readOnly && (
+          <Button variant="ghost" size="sm" onClick={() => setTouring(true)}>
+            Tour
+          </Button>
+        )}
       </Panel>
       <KeepPickedInView />
       <Tour open={touring} onClose={() => setTouring(false)} />

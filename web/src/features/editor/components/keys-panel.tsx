@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useReadOnly } from "@/components/read-only";
 import { Button } from "@/components/ui/button";
 import {
   NewKeyDialog,
@@ -92,6 +93,7 @@ function KeyList({
 // moves or changes once the list is asked again.
 export function KeysPanel({ workflow }: { workflow: string }) {
   const keys = useKeys(workflow);
+  const readOnly = useReadOnly();
   const [rotating, setRotating] = useState<CallerKey>();
   const [revoking, setRevoking] = useState<CallerKey>();
   const list = keys.data?.keys;
@@ -106,7 +108,7 @@ export function KeysPanel({ workflow }: { workflow: string }) {
         </span>
         .
       </p>
-      <NewKeyDialog workflow={workflow} />
+      {!readOnly && <NewKeyDialog workflow={workflow} />}
       {list === undefined ? (
         keys.isError ? (
           <p className="text-sm text-destructive">Couldn&apos;t load them.</p>
@@ -117,7 +119,9 @@ export function KeysPanel({ workflow }: { workflow: string }) {
         <KeyList keys={working} onRotate={setRotating} onRevoke={setRevoking} />
       ) : (
         <p className="text-sm text-muted-foreground">
-          No key works yet. Make one for each caller.
+          {readOnly
+            ? "No key works: they went when it was archived."
+            : "No key works yet. Make one for each caller."}
         </p>
       )}
       {stopped.length > 0 && (

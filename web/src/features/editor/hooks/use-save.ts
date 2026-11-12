@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import { callerKeys } from "@/features/editor/hooks/use-keys";
 import { strip } from "@/features/editor/upstreams";
 import type { components } from "@/gen/schema";
 import { api, ApiError, call } from "@/lib/api";
@@ -39,7 +40,7 @@ export function useSaveDraft(id: string) {
             revision,
           },
       );
-      void queryClient.invalidateQueries({ queryKey: workflowKeys.list() });
+      void queryClient.invalidateQueries({ queryKey: workflowKeys.lists() });
     },
     onError: (err) => {
       if (err instanceof ApiError && err.status === 412)
@@ -69,7 +70,41 @@ export function usePublish(id: string) {
         workflowKeys.detail(id),
         (old) => old && { ...old, workflow },
       );
-      void queryClient.invalidateQueries({ queryKey: workflowKeys.list() });
+      void queryClient.invalidateQueries({ queryKey: workflowKeys.lists() });
     },
   });
+}
+
+// useSetArchived is archiving a workflow or restoring it (plan 15), as the
+// answer is the workflow as it now stands. The editor stays open on it.
+function useSetArchived(
+  id: string,
+  path: "/v1/workflows/{id}/archive" | "/v1/workflows/{id}/restore",
+  quiet: boolean,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      call((signal) => api.POST(path, { params: { path: { id } }, signal })),
+    meta: { quiet },
+    onSuccess: (workflow) => {
+      queryClient.setQueryData<WorkflowRevision>(
+        workflowKeys.detail(id),
+        (old) => old && { ...old, workflow },
+      );
+      void queryClient.invalidateQueries({ queryKey: workflowKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: callerKeys.list(id) });
+    },
+  });
+}
+
+// useArchiveWorkflow takes a workflow out of use, which the server refuses
+// while something live uses it: the dialog says what.
+export function useArchiveWorkflow(id: string) {
+  return useSetArchived(id, "/v1/workflows/{id}/archive", true);
+}
+
+// useRestoreWorkflow brings an archived workflow back, without keys.
+export function useRestoreWorkflow(id: string) {
+  return useSetArchived(id, "/v1/workflows/{id}/restore", false);
 }

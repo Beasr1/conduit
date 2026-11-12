@@ -46,10 +46,19 @@ const keyColumns = `id::text AS id, workflow_id::text AS workflow_id, name, pref
 	provenance, created_at`
 
 // CreateKey stores a new active key of a workflow, named for its caller.
-// ErrConflict: an active key of the workflow has the name.
+// ErrConflict: an active key of the workflow has the name. ErrArchived: the
+// workflow is archived, and ErrNotFound: there's no such workflow.
 func (s *Store) CreateKey(ctx context.Context, workflowID, name string, k NewKey, p Provenance) (CallerKey, error) {
-	key, err := one[CallerKey](ctx, s.pool, `INSERT INTO caller_keys (workflow_id, name, prefix, hash, provenance)
-		VALUES ($1::uuid, $2, $3, $4, $5) RETURNING `+keyColumns, workflowID, name, k.Prefix, k.Hash, p)
+	var key CallerKey
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := notArchived(ctx, tx, workflowID); err != nil {
+			return err
+		}
+		var err error
+		key, err = one[CallerKey](ctx, tx, `INSERT INTO caller_keys (workflow_id, name, prefix, hash, provenance)
+			VALUES ($1::uuid, $2, $3, $4, $5) RETURNING `+keyColumns, workflowID, name, k.Prefix, k.Hash, p)
+		return err
+	})
 	if err != nil {
 		return CallerKey{}, fmt.Errorf("make a key of %s: %w", workflowID, translate(err))
 	}
@@ -73,9 +82,13 @@ func (s *Store) Keys(ctx context.Context, workflowID string) ([]CallerKey, error
 // RotateKey gives an active key's caller a new key with its name, k, and the
 // old key an expiry grace from now: until then both work. It returns the new
 // key and the old. ErrNotFound: the workflow has no such key;
-// ErrKeyNotActive: it was rotated or revoked already.
+// ErrKeyNotActive: it was rotated or revoked already; ErrArchived: the
+// workflow is archived.
 func (s *Store) RotateKey(ctx context.Context, workflowID, id string, grace time.Duration, k NewKey, p Provenance) (made, old CallerKey, err error) {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := notArchived(ctx, tx, workflowID); err != nil {
+			return err
+		}
 		// Locked, so of two rotations at once the second finds it rotated.
 		var active bool
 		if err := tx.QueryRow(ctx, `SELECT expires_at IS NULL AND revoked_at IS NULL FROM caller_keys

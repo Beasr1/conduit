@@ -2,7 +2,9 @@
 // per resource.
 export const workflowKeys = {
   all: ["workflows"] as const,
-  list: () => [...workflowKeys.all, "list"] as const,
+  lists: () => [...workflowKeys.all, "list"] as const,
+  // What's in use, or what's archived (plan 15).
+  list: (archived: boolean) => [...workflowKeys.lists(), archived] as const,
   detail: (id: string) => [...workflowKeys.all, "detail", id] as const,
   // A revision never changes, so it's cached for good.
   revision: (id: string, revision: number) =>
@@ -13,7 +15,9 @@ export const workflowKeys = {
 // for good.
 export const upstreamKeys = {
   all: ["upstreams"] as const,
-  list: () => [...upstreamKeys.all, "list"] as const,
+  lists: () => [...upstreamKeys.all, "list"] as const,
+  // What's in use, or what's archived (plan 15).
+  list: (archived: boolean) => [...upstreamKeys.lists(), archived] as const,
   detail: (id: string) => [...upstreamKeys.all, "detail", id] as const,
   version: (id: string, version: number) =>
     [...upstreamKeys.all, "version", id, version] as const,
@@ -24,6 +28,8 @@ export const upstreamKeys = {
 // offers them to expressions.
 export const constantKeys = {
   all: ["constants"] as const,
-  list: () => [...constantKeys.all, "list"] as const,
+  lists: () => [...constantKeys.all, "list"] as const,
+  // What's in use, or what's archived (plan 15).
+  list: (archived: boolean) => [...constantKeys.lists(), archived] as const,
   users: (name: string) => [...constantKeys.all, "users", name] as const,
 };

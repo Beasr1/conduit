@@ -73,9 +73,6 @@ func (a *api) CreateKey(ctx context.Context, req gen.CreateKeyRequestObject) (ge
 			errors: []gen.ProblemError{{Pointer: "/name", Code: "invalid_name", Detail: "a name is 1 to 200 characters"}},
 		}
 	}
-	if _, err := a.store.Workflow(ctx, req.ID); err != nil {
-		return nil, err
-	}
 	value, k := mintKey()
 	key, err := a.store.CreateKey(ctx, req.ID, name, k, provenance(ctx))
 	if errors.Is(err, store.ErrConflict) {

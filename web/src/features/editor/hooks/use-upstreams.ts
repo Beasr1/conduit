@@ -201,7 +201,8 @@ export function useVersionsOf(d: Definition | undefined): {
   };
 }
 
-// useUpstreamUsers is the workflows whose latest revision uses an upstream.
+// useUpstreamUsers is the revisions in use that use an upstream, directly or
+// through what they pin: what archiving it is refused for (plan 15).
 export function useUpstreamUsers(id: string) {
   return useQuery({
     queryKey: upstreamKeys.users(id),
@@ -243,34 +244,42 @@ export function useSaveUpstream() {
       const id = saved.upstream.id;
       queryClient.setQueryData(upstreamKeys.version(id, saved.version), saved);
       queryClient.setQueryData(upstreamKeys.detail(id), saved);
-      void queryClient.invalidateQueries({ queryKey: upstreamKeys.list() });
+      void queryClient.invalidateQueries({ queryKey: upstreamKeys.lists() });
     },
   });
 }
 
-// useDeleteUpstream deletes an upstream with every version, which the
-// server refuses while a saved revision pins one (plan 07).
-export function useDeleteUpstream() {
+// useSetArchived is archiving an upstream or restoring it (plan 15), as the
+// answer is the upstream as it now stands. Its page stays open on it.
+function useSetArchived(
+  id: string,
+  path: "/v1/upstreams/{id}/archive" | "/v1/upstreams/{id}/restore",
+  quiet: boolean,
+) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      call((signal) =>
-        api.DELETE("/v1/upstreams/{id}", {
-          params: { path: { id } },
-          signal,
-        }),
-      ),
-    // The page says why it couldn't.
-    meta: { quiet: true },
-    onSuccess: (_, id) => {
-      queryClient.removeQueries({ queryKey: upstreamKeys.detail(id) });
-      queryClient.removeQueries({ queryKey: upstreamKeys.users(id) });
-      queryClient.removeQueries({
-        queryKey: [...upstreamKeys.all, "version", id],
-      });
-      void queryClient.invalidateQueries({ queryKey: upstreamKeys.list() });
+    mutationFn: () =>
+      call((signal) => api.POST(path, { params: { path: { id } }, signal })),
+    meta: { quiet },
+    onSuccess: (upstream) => {
+      queryClient.setQueryData<UpstreamVersion>(
+        upstreamKeys.detail(id),
+        (old) => old && { ...old, upstream },
+      );
+      void queryClient.invalidateQueries({ queryKey: upstreamKeys.lists() });
     },
   });
+}
+
+// useArchiveUpstream takes an upstream out of use, which the server refuses
+// while something live uses it: the dialog says what.
+export function useArchiveUpstream(id: string) {
+  return useSetArchived(id, "/v1/upstreams/{id}/archive", true);
+}
+
+// useRestoreUpstream brings an archived upstream back.
+export function useRestoreUpstream(id: string) {
+  return useSetArchived(id, "/v1/upstreams/{id}/restore", false);
 }
 
 // fetchLatest gets an upstream at its latest version.

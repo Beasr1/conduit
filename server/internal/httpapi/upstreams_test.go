@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
-	"github.com/Beasr1/conduit/server/internal/store"
 )
 
 // usersAPI is a whole upstream: one parameter, read by its URL.
@@ -408,35 +407,4 @@ func problemPointers(ps []gen.ProblemError) string {
 		out = append(out, p.Pointer+" "+p.Code)
 	}
 	return strings.Join(out, "\n")
-}
-
-// Delete takes an upstream no saved revision pins, with every version, and
-// refuses one a revision does, saying which (plan 07).
-func TestUpstreams_Delete(t *testing.T) {
-	t.Parallel()
-	path := "/v1/upstreams/" + makeUpstream(t, usersAPI).Upstream.ID
-	if r := call(t, http.MethodDelete, path, ""); r.status != http.StatusNoContent || len(r.body) != 0 {
-		t.Errorf("DELETE = %d %s", r.status, r.body)
-	}
-	for _, method := range []string{http.MethodGet, http.MethodDelete} {
-		if r := call(t, method, path, ""); r.status != http.StatusNotFound || problemOf(t, r).Code != "not_found" {
-			t.Errorf("%s after the delete = %d %s", method, r.status, r.body)
-		}
-	}
-
-	used := makeUpstream(t, usersAPI).Upstream.ID
-	create(t, `{"nodes": [{"id": "user", "kind": "http", "uses": {"upstream": "`+used+`", "version": 1}, "with": {"user_id": "input.id"}}]}`)
-	r := call(t, http.MethodDelete, "/v1/upstreams/"+used, "")
-	if p := problemOf(t, r); r.status != http.StatusConflict || p.Code != "upstream_in_use" ||
-		p.Detail != "Saved revisions pin it, and each must keep running: Send to CRM at revision 1." {
-		t.Errorf("DELETE of one a revision pins = %d %+v", r.status, p)
-	}
-}
-
-func TestPinnedBy(t *testing.T) {
-	t.Parallel()
-	got := pinnedBy([]store.UpstreamPin{{Name: "Orders", Revisions: []int{2, 4}}, {Name: "Billing", Revisions: []int{1}}, {Name: "Leads", Revisions: []int{1, 3, 8}}})
-	if want := "Orders at revisions 2 and 4; Billing at revision 1; Leads at revisions 1, 3 and 8"; got != want {
-		t.Errorf("pinnedBy() = %q, want %q", got, want)
-	}
 }

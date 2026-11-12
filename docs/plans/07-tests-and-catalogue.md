@@ -695,6 +695,13 @@ Checks: 37 mutations of the server's keys (store, migration, runner, API)
 and 28 of the editor's, each caught; 8 browser tests, the keys one among
 them.
 
+Left for later (the README's queue, your call, 2026-11-06):
+- A checksum in each key, as GitHub's tokens carry (sources.md), so a
+  secret scanner can turn away a look-alike without asking the server.
+  Conduit's keys have none.
+- Extending a rotated key's expiry. Once set, revoking the key cuts it
+  short, but nothing makes it longer.
+
 ## Open questions (decide when 07 starts)
 
 - At Publish, live tests: run again, require the revision's last live

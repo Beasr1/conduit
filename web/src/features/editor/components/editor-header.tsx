@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useBlocker } from "react-router";
 
+import { ArchiveDialog } from "@/components/archive-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,7 +28,12 @@ import {
   CheckingContext,
   useProblems,
 } from "@/features/editor/hooks/use-problems";
-import { usePublish, useSaveDraft } from "@/features/editor/hooks/use-save";
+import {
+  useArchiveWorkflow,
+  usePublish,
+  useRestoreWorkflow,
+  useSaveDraft,
+} from "@/features/editor/hooks/use-save";
 import { useEditor, useEditorStore } from "@/features/editor/store";
 import type { components } from "@/gen/schema";
 import { ApiError } from "@/lib/api";
@@ -38,6 +44,11 @@ type Workflow = components["schemas"]["Workflow"];
 
 const everywhere = () => true;
 
+const when = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
 // changed says whether a draft differs from the one last saved or opened.
 function changed(draft: Definition, saved: Definition): boolean {
   return draft !== saved && JSON.stringify(draft) !== JSON.stringify(saved);
@@ -46,7 +57,8 @@ function changed(draft: Definition, saved: Definition): boolean {
 // EditorHeader names the workflow, says where the draft and the served
 // revision stand, and saves and publishes. A save builds on the revision the
 // draft started from, sent as If-Match. The editor stays as it is after a
-// save, and the next one builds on the new revision.
+// save, and the next one builds on the new revision. Archived, it's read, and
+// Restore stands where Save, Run and Publish were (plan 15).
 export function EditorHeader({
   workflow,
   opened,
@@ -62,8 +74,11 @@ export function EditorHeader({
   const check = useContext(CheckContext);
   const { failed: unchecked } = useContext(CheckingContext);
   const problems = useProblems(everywhere).length;
+  const archived = workflow.archived_at;
   const save = useSaveDraft(workflow.id);
   const publish = usePublish(workflow.id);
+  const archive = useArchiveWorkflow(workflow.id);
+  const restore = useRestoreWorkflow(workflow.id);
   // The revision the draft builds on, and the draft as it was saved or
   // opened, which unsaved changes are measured against.
   const [base, setBase] = useState(opened.revision);
@@ -173,6 +188,7 @@ export function EditorHeader({
       </span>,
     );
   if (unchecked) status.push("Couldn't check for problems");
+  if (archived) status.push(`Archived ${when.format(new Date(archived))}`);
 
   const served = new URL(`/serve/${workflow.slug}`, window.location.origin)
     .href;
@@ -189,46 +205,70 @@ export function EditorHeader({
           ))}
         </p>
         <p className="text-sm text-muted-foreground">
-          {workflow.published_revision === undefined
-            ? "Not published. Publishing serves it at "
-            : `Revision ${workflow.published_revision} is served at `}
+          {archived
+            ? "Nothing is served at "
+            : workflow.published_revision === undefined
+              ? "Not published. Publishing serves it at "
+              : `Revision ${workflow.published_revision} is served at `}
           <span className="font-mono break-all">{served}</span>
         </p>
       </div>
       {/* nokey: Delete or Backspace on these buttons would otherwise delete
           what's selected on the canvas. */}
-      <div className="nokey flex items-center gap-2">
+      <div className="nokey flex flex-wrap items-center gap-2">
         {problems > 0 && (
           <Button variant="outline" onClick={() => openPanel("problems")}>
             <CircleAlertIcon aria-hidden className="text-destructive" />
             {problems === 1 ? "1 problem" : `${problems} problems`}
           </Button>
         )}
-        {newer && (
-          <Button variant="outline" onClick={onReload}>
-            Load newer revision
+        {archived ? (
+          <Button disabled={restore.isPending} onClick={() => restore.mutate()}>
+            {restore.isPending ? "Restoring…" : "Restore"}
           </Button>
+        ) : (
+          <>
+            {/* Kept apart from Save and Publish, and off while there's
+                something to save, which archiving would strand. */}
+            <div className="mr-4">
+              <ArchiveDialog
+                name={workflow.name}
+                says="It stops being served at once, and its keys are revoked. Its revisions and runs stay, to read, and Restore brings it back, with no keys."
+                archive={archive}
+                disabled={dirty}
+              />
+            </div>
+            {newer && (
+              <Button variant="outline" onClick={onReload}>
+                Load newer revision
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              disabled={!dirty || save.isPending || newer}
+              onClick={() => void saveDraft(base)}
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+            <RunButton
+              workflow={workflow.id}
+              disabled={save.isPending || newer}
+              revision={async () =>
+                dirty ? (await saveDraft(base))?.revision : base
+              }
+            />
+            <Button
+              disabled={live || save.isPending || publish.isPending || newer}
+              onClick={() => void publishDraft()}
+            >
+              {publish.isPending
+                ? "Publishing…"
+                : live
+                  ? "Published"
+                  : "Publish"}
+            </Button>
+          </>
         )}
-        <Button
-          variant="outline"
-          disabled={!dirty || save.isPending || newer}
-          onClick={() => void saveDraft(base)}
-        >
-          {save.isPending ? "Saving…" : "Save"}
-        </Button>
-        <RunButton
-          workflow={workflow.id}
-          disabled={save.isPending || newer}
-          revision={async () =>
-            dirty ? (await saveDraft(base))?.revision : base
-          }
-        />
-        <Button
-          disabled={live || save.isPending || publish.isPending || newer}
-          onClick={() => void publishDraft()}
-        >
-          {publish.isPending ? "Publishing…" : live ? "Published" : "Publish"}
-        </Button>
       </div>
       <RunBar moved={(revision) => dirty || revision !== base} />
 

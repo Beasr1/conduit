@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"strconv"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/Beasr1/conduit/server/internal/httpapi/gen"
@@ -43,14 +41,16 @@ func constantProblems(name *string, value string) error {
 	}
 }
 
-func (a *api) ListConstants(ctx context.Context, _ gen.ListConstantsRequestObject) (gen.ListConstantsResponseObject, error) {
+func (a *api) ListConstants(ctx context.Context, req gen.ListConstantsRequestObject) (gen.ListConstantsResponseObject, error) {
 	cs, err := a.store.Constants(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := gen.ListConstants200JSONResponse{Constants: make([]gen.Constant, 0, len(cs))}
 	for _, c := range cs {
-		out.Constants = append(out.Constants, constantOut(c))
+		if (c.ArchivedAt != nil) == req.Params.Archived {
+			out.Constants = append(out.Constants, constantOut(c))
+		}
 	}
 	return out, nil
 }
@@ -61,6 +61,9 @@ func (a *api) CreateConstant(ctx context.Context, req gen.CreateConstantRequestO
 		return nil, err
 	}
 	c, err := a.store.CreateConstant(ctx, b.Name, b.Value, b.Secret, provenance(ctx))
+	if errors.Is(err, store.ErrArchivedName) {
+		return nil, &problem{status: http.StatusConflict, code: "conflict", detail: "An archived constant has that name: restore it, or pick another."}
+	}
 	if errors.Is(err, store.ErrConflict) {
 		return nil, &problem{status: http.StatusConflict, code: "conflict", detail: "A constant already has that name."}
 	}
@@ -95,20 +98,6 @@ func (a *api) UndoConstant(ctx context.Context, req gen.UndoConstantRequestObjec
 	return gen.UndoConstant200JSONResponse(constantOut(c)), nil
 }
 
-func (a *api) DeleteConstant(ctx context.Context, req gen.DeleteConstantRequestObject) (gen.DeleteConstantResponseObject, error) {
-	var inUse *store.ConstantInUseError
-	switch err := a.store.DeleteConstant(ctx, req.Name); {
-	case errors.As(err, &inUse):
-		return nil, &problem{
-			status: http.StatusConflict, code: "constant_in_use",
-			detail: "Saved revisions or upstream versions read it, and each can run again: " + readBy(inUse) + ".",
-		}
-	case err != nil:
-		return nil, noConstant(err)
-	}
-	return gen.DeleteConstant204Response{}, nil
-}
-
 func (a *api) ListConstantUsers(ctx context.Context, req gen.ListConstantUsersRequestObject) (gen.ListConstantUsersResponseObject, error) {
 	us, err := a.store.ConstantUsers(ctx, req.Name)
 	if err != nil {
@@ -118,37 +107,16 @@ func (a *api) ListConstantUsers(ctx context.Context, req gen.ListConstantUsersRe
 		Workflows: make([]gen.ConstantWorkflowUse, 0, len(us.Workflows)),
 		Upstreams: make([]gen.ConstantUpstreamUse, 0, len(us.Upstreams)),
 	}
-	// Each reader's one revision or version: its latest.
 	for _, w := range us.Workflows {
-		out.Workflows = append(out.Workflows, gen.ConstantWorkflowUse{WorkflowID: w.ID, Name: w.Name, Revision: w.At[0]})
+		for _, revision := range w.At {
+			out.Workflows = append(out.Workflows, gen.ConstantWorkflowUse{WorkflowID: w.ID, Name: w.Name, Revision: revision})
+		}
 	}
+	// Each upstream's one version: its latest.
 	for _, u := range us.Upstreams {
 		out.Upstreams = append(out.Upstreams, gen.ConstantUpstreamUse{UpstreamID: u.ID, Name: u.Name, Version: u.At[0]})
 	}
 	return out, nil
-}
-
-// readBy names what reads a constant, and at which revisions or versions:
-// "Orders at revisions 2 and 4; the upstream CRM at version 1".
-func readBy(e *store.ConstantInUseError) string {
-	at := func(noun string, ns []int) string {
-		said := make([]string, len(ns))
-		for i, n := range ns {
-			said[i] = strconv.Itoa(n)
-		}
-		if len(said) > 1 {
-			noun += "s"
-		}
-		return noun + " " + and(said)
-	}
-	var said []string
-	for _, w := range e.Workflows {
-		said = append(said, w.Name+" at "+at("revision", w.At))
-	}
-	for _, u := range e.Upstreams {
-		said = append(said, "the upstream "+u.Name+" at "+at("version", u.At))
-	}
-	return strings.Join(said, "; ")
 }
 
 // standIns is each constant's value for a preview: a plain one's own, and
@@ -178,6 +146,7 @@ func constantOut(c store.Constant) gen.Constant {
 		Name: c.Name, Secret: c.Secret, HasPrevious: c.HasPrevious,
 		Provenance: provenanceOut(c.Provenance), UpdatedAt: c.UpdatedAt.UTC(), CreatedAt: c.CreatedAt.UTC(),
 	}
+	out.ArchivedAt, out.ArchivedBy = archiveOut(c.ArchivedAt, c.ArchivedBy)
 	if !c.Secret {
 		out.Value = c.Value
 	}

@@ -1,3 +1,4 @@
+import { useReadOnly } from "@/components/read-only";
 import { Button } from "@/components/ui/button";
 import { removeEdges } from "@/features/editor/edits";
 import { handlesOf, RESPONSE, toFlow } from "@/features/editor/flow";
@@ -152,6 +153,7 @@ function Entry({ found: { place, code, message } }: { found: Found }) {
   const setRequestTab = useEditor((s) => s.setRequestTab);
   const openPanel = useEditor((s) => s.openPanel);
   const edit = useEditor((s) => s.edit);
+  const readOnly = useReadOnly();
   const text = (
     <>
       <span className="font-medium">
@@ -169,13 +171,15 @@ function Entry({ found: { place, code, message } }: { found: Found }) {
     return (
       <div className="flex items-start justify-between gap-2 px-2 py-1.5">
         <div className="flex flex-col gap-0.5 text-sm">{text}</div>
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() => edit((d) => removeEdges(d, [place.index]))}
-        >
-          Remove connection
-        </Button>
+        {!readOnly && (
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => edit((d) => removeEdges(d, [place.index]))}
+          >
+            Remove connection
+          </Button>
+        )}
       </div>
     );
 

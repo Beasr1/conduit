@@ -19,7 +19,7 @@ export function useCreateConstant() {
     // The form says what went wrong, on its fields.
     meta: { quiet: true },
     onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: constantKeys.list() }),
+      void queryClient.invalidateQueries({ queryKey: constantKeys.lists() }),
   });
 }
 
@@ -37,7 +37,7 @@ export function useSetConstant(name: string) {
       ),
     meta: { quiet: true },
     onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: constantKeys.list() }),
+      void queryClient.invalidateQueries({ queryKey: constantKeys.lists() }),
   });
 }
 
@@ -53,33 +53,47 @@ export function useUndoConstant(name: string) {
         }),
       ),
     onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: constantKeys.list() }),
+      void queryClient.invalidateQueries({ queryKey: constantKeys.lists() }),
   });
 }
 
-// useDeleteConstant deletes a constant, which the server refuses while a
-// saved revision or an upstream version reads it (plan 06).
-export function useDeleteConstant(name: string) {
+// useArchiveConstant takes a constant out of use, which the server refuses
+// while something live reads it: the dialog says what (plan 15).
+export function useArchiveConstant(name: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () =>
       call((signal) =>
-        api.DELETE("/v1/constants/{name}", {
+        api.POST("/v1/constants/{name}/archive", {
           params: { path: { name } },
           signal,
         }),
       ),
-    // The dialog says why it couldn't.
     meta: { quiet: true },
-    onSuccess: () => {
-      queryClient.removeQueries({ queryKey: constantKeys.users(name) });
-      void queryClient.invalidateQueries({ queryKey: constantKeys.list() });
-    },
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: constantKeys.lists() }),
   });
 }
 
-// useConstantUsers is what reads a constant now: the workflows' latest
-// revisions and the upstreams' latest versions.
+// useRestoreConstant brings an archived constant back.
+export function useRestoreConstant(name: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      call((signal) =>
+        api.POST("/v1/constants/{name}/restore", {
+          params: { path: { name } },
+          signal,
+        }),
+      ),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: constantKeys.lists() }),
+  });
+}
+
+// useConstantUsers is what reads a constant now, what archiving it is
+// refused for (plan 15): the latest and published revisions of workflows,
+// directly or through what they pin, and upstreams' latest versions.
 export function useConstantUsers(name: string) {
   return useQuery({
     queryKey: constantKeys.users(name),

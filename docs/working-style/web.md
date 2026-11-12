@@ -286,6 +286,14 @@ the API is `/api` on the page's own origin.
   once, so every stop stayed at the first. It's offered once per browser,
   remembered in local storage, read and written in `try`, and Tour in the
   toolbar opens it again.
+- What's archived opens read-only (plan 15), told by the `ReadOnly` context
+  (`components/read-only.tsx`). `Fields` goes once around a panel: a disabled
+  fieldset stops each button, input and select in it. A tab is a `div`
+  (`nativeButton={false}`) so it goes on working there, and `Checkbox` reads
+  `ReadOnly` itself, as Base UI's is a span the fieldset doesn't reach.
+  A field disabled there keeps its text at full strength (`index.css`), as
+  it's there to read; its buttons stay dimmed. A list has what's archived on a tab (`InUseTabs`), and `ArchiveDialog`
+  asks again and says what uses it when the server refuses.
 - A dialog that shows a key once, in the Keys panel (plan 07), forgets it
   once it has closed, in `onOpenChangeComplete`, however it was closed:
   setting `open` itself, as Done does, doesn't call `onOpenChange`

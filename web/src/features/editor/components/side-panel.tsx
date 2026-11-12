@@ -1,6 +1,7 @@
 import { XIcon } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 
+import { Fields } from "@/components/read-only";
 import { Button } from "@/components/ui/button";
 import { ConnectionForm } from "@/features/editor/components/connection-form";
 import { JsonField } from "@/features/editor/components/json-field";
@@ -49,7 +50,7 @@ export function SidePanel({ workflow }: { workflow: string }) {
   if (panel === "settings") {
     title = "Workflow settings";
     body = (
-      <>
+      <Fields>
         <JsonField
           id="workflow-input-schema"
           label="Input schema"
@@ -62,7 +63,7 @@ export function SidePanel({ workflow }: { workflow: string }) {
           field="sample_input"
           description="A made-up input, as JSON, that previews read as the run's input. It's saved in every revision, so make it up or redact it. Runs ignore it."
         />
-      </>
+      </Fields>
     );
     close = closePanel;
   } else if (panel === "problems") {
@@ -79,7 +80,11 @@ export function SidePanel({ workflow }: { workflow: string }) {
     close = closePanel;
   } else if (node === RESPONSE || answering) {
     title = "Response";
-    body = <ResponseForm />;
+    body = (
+      <Fields>
+        <ResponseForm />
+      </Fields>
+    );
     close =
       answering && edge !== undefined
         ? () => pick("edges", [{ id: edge, selected: false }])
@@ -88,13 +93,21 @@ export function SidePanel({ workflow }: { workflow: string }) {
     const index = flow.nodes.find((n) => n.id === node)?.data.index;
     if (index === undefined) return null;
     title = stepTitles[draft.nodes[index]?.kind ?? ""] ?? "Step";
-    body = <StepSettings index={index} />;
+    body = (
+      <Fields>
+        <StepSettings index={index} />
+      </Fields>
+    );
     close = () => pick("nodes", [{ id: node, selected: false }]);
   } else if (edge !== undefined) {
     const index = flow.edges.find((e) => e.id === edge)?.data?.index;
     if (index === undefined) return null;
     title = "Connection";
-    body = <ConnectionForm key={`edge-${index}`} index={index} />;
+    body = (
+      <Fields>
+        <ConnectionForm key={`edge-${index}`} index={index} />
+      </Fields>
+    );
     close = () => pick("edges", [{ id: edge, selected: false }]);
   } else {
     return null;

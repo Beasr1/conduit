@@ -17,7 +17,9 @@ const created = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
-export function WorkflowList() {
+// WorkflowList lists the workflows in use, newest first, or those archived,
+// each with when it was (plan 15).
+export function WorkflowList({ archived = false }: { archived?: boolean }) {
   const {
     data,
     isPending,
@@ -25,7 +27,7 @@ export function WorkflowList() {
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-  } = useWorkflows();
+  } = useWorkflows(archived);
 
   if (isPending)
     return <p className="text-sm text-muted-foreground">Loading workflows…</p>;
@@ -36,7 +38,9 @@ export function WorkflowList() {
   if (workflows.length === 0)
     return (
       <p className="text-sm text-muted-foreground">
-        No workflows yet. Create one to start.
+        {archived
+          ? "Nothing archived. Archive a workflow nothing uses from its page."
+          : "No workflows yet. Create one to start."}
       </p>
     );
 
@@ -49,7 +53,7 @@ export function WorkflowList() {
             <TableHead>Slug</TableHead>
             <TableHead>Revision</TableHead>
             <TableHead>Published</TableHead>
-            <TableHead>Created</TableHead>
+            <TableHead>{archived ? "Archived" : "Created"}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -66,7 +70,9 @@ export function WorkflowList() {
               <TableCell className="font-mono">{w.slug}</TableCell>
               <TableCell>{w.latest_revision}</TableCell>
               <TableCell>{w.published_revision ?? "—"}</TableCell>
-              <TableCell>{created.format(new Date(w.created_at))}</TableCell>
+              <TableCell>
+                {created.format(new Date(w.archived_at ?? w.created_at))}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

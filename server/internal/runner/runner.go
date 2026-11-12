@@ -131,12 +131,16 @@ type Outcome struct {
 
 // Start runs a revision of a workflow in the background and returns the run
 // as recorded: still running. Revision 0 means the latest. The run outlives
-// the request that started it; Stop cancels it.
+// the request that started it; Stop cancels it. An archived workflow is
+// store.ErrArchived.
 func (r *Runner) Start(ctx context.Context, workflowID string, revision int, input json.RawMessage) (store.Run, error) {
 	ctx = traced(ctx)
 	w, err := r.store.Workflow(ctx, workflowID)
 	if err != nil {
 		return store.Run{}, err
+	}
+	if w.ArchivedAt != nil {
+		return store.Run{}, fmt.Errorf("run workflow %s: %w", w.ID, store.ErrArchived)
 	}
 	if revision == 0 {
 		revision = w.LatestRevision

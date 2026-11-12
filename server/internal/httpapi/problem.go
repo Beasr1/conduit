@@ -37,6 +37,7 @@ var statuses = []struct {
 }{
 	{store.ErrNotFound, http.StatusNotFound, "not_found", "There's no such workflow, revision or run."},
 	{store.ErrConflict, http.StatusConflict, "conflict", "That slug is taken."},
+	{store.ErrArchived, http.StatusConflict, "archived", "It's archived, so nothing changes it. Restore it first."},
 	{
 		store.ErrRevisionMismatch, http.StatusPreconditionFailed, "revision_mismatch",
 		"A newer revision was saved first. Fetch it, apply your change to it, and save with its ETag.",

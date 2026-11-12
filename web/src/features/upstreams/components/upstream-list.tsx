@@ -17,8 +17,9 @@ const created = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
-// UpstreamList lists the library, newest first, a page at a time.
-export function UpstreamList() {
+// UpstreamList lists the library, newest first, a page at a time: what's in
+// use, or what's archived, with when it was (plan 15).
+export function UpstreamList({ archived = false }: { archived?: boolean }) {
   const {
     data,
     isPending,
@@ -26,7 +27,7 @@ export function UpstreamList() {
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-  } = useUpstreams();
+  } = useUpstreams(archived);
 
   if (isPending)
     return <p className="text-sm text-muted-foreground">Loading upstreams…</p>;
@@ -37,8 +38,9 @@ export function UpstreamList() {
   if (upstreams.length === 0)
     return (
       <p className="text-sm text-muted-foreground">
-        No upstreams yet. Make one, or save a step&apos;s request as one in the
-        editor.
+        {archived
+          ? "Nothing archived. Archive an upstream nothing uses from its page."
+          : "No upstreams yet. Make one, or save a step's request as one in the editor."}
       </p>
     );
 
@@ -49,7 +51,7 @@ export function UpstreamList() {
           <TableRow>
             <TableHead>Name</TableHead>
             <TableHead>Version</TableHead>
-            <TableHead>Created</TableHead>
+            <TableHead>{archived ? "Archived" : "Created"}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -64,7 +66,9 @@ export function UpstreamList() {
                 </Link>
               </TableCell>
               <TableCell>{u.latest_version}</TableCell>
-              <TableCell>{created.format(new Date(u.created_at))}</TableCell>
+              <TableCell>
+                {created.format(new Date(u.archived_at ?? u.created_at))}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
