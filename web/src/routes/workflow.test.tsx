@@ -52,6 +52,10 @@ function serveWorkflow(
     ),
     // A step's fields offer the constants (plan 06): none here.
     http.get("/api/v1/constants", () => HttpResponse.json({ constants: [] })),
+    // Nothing has happened to what it uses (plan 16).
+    http.get("/api/v1/workflows/wf-1/changes", () =>
+      HttpResponse.json({ changes: [] }),
+    ),
     // A step's Preview tab asks as soon as the step is picked.
     http.post("/api/v1/preview", () =>
       HttpResponse.json<Preview>({
@@ -737,4 +741,41 @@ test("an open Keys panel shows the keys revoked by the archive", async () => {
   expect(
     within(keys).queryByRole("button", { name: /Revoke Billing/ }),
   ).toBeNull();
+});
+
+// A save may take a step up to what a change offered, so the changes are
+// asked for again (plan 16).
+test("a save asks for the workflow's changes again", async () => {
+  const { saves } = serveWorkflow();
+  server.use(
+    http.get("/api/v1/workflows/wf-1/changes", ({ request }) => {
+      const history = new URL(request.url).searchParams.has("history");
+      const offered = {
+        id: "c1",
+        kind: "upstream_version",
+        subject: "upstream",
+        subject_id: "u-1",
+        detail: { name: "Users API", version: 2 },
+        provenance: { actor: "token" },
+        created_at: "2026-11-12T09:00:00Z",
+      };
+      const taken = saves.length > 0;
+      return HttpResponse.json({
+        changes:
+          history === taken
+            ? [{ ...offered, state: taken ? "done" : "active" }]
+            : [],
+      });
+    }),
+  );
+  open();
+  expect(
+    await screen.findByRole("button", { name: "Changes, 1 active" }),
+  ).toBeTruthy();
+  await pick("crm");
+  await screen.findByRole("textbox", { name: "URL" });
+  type("URL", "https://crm.example.com/v2/contacts");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByText("Revision 2 · Saved")).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Changes" })).toBeTruthy();
 });

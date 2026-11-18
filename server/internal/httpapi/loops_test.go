@@ -38,7 +38,7 @@ func servedAt(t *testing.T, slug, url string) (store.Workflow, string) {
 	if _, err := db.CreateKey(t.Context(), w.ID, "itself", k, store.Provenance{Actor: "token"}); err != nil {
 		t.Fatal(err)
 	}
-	if w, err = db.Publish(t.Context(), w.ID, 1, storetest.NoCheck); err != nil {
+	if w, err = db.Publish(t.Context(), w.ID, 1, store.Provenance{Actor: "token"}, storetest.NoCheck); err != nil {
 		t.Fatal(err)
 	}
 	return w, key

@@ -4,7 +4,7 @@ No-code API orchestration. Users compose upstream API calls into a DAG,
 using a graph editor or a page-by-page builder, and map data between steps
 with JSONata. A Go engine runs it, fanning out in parallel.
 
-**Status: plans 12, 13, 14 and 15 are built, on plan 04's graph
+**Status: plans 12, 13, 14, 15 and 16 are built, on plan 04's graph
 editor: Publish waits until every way a run can go reaches an answer and
 every step's failures are decided, every error is answered in one shape,
 the response picks its answer top to bottom, and the editor says only what
@@ -21,7 +21,9 @@ Plan 07's caller keys are built (2026-11-05): `/serve` takes only a key
 of its workflow, one per caller, shown once, rotated with an expiry or
 revoked. Plan 15 is built (2026-11-07): nothing is deleted; a workflow, an
 upstream or a constant nothing live uses is archived, read-only, its name
-kept, and restored.**
+kept, and restored. Plan 16 is built (2026-11-12): each workflow has a
+changes list, what happens to what it uses, active until it's dealt with
+or dismissed, and kept for good.**
 The web app signs in with a session cookie, which sign-out or 30 minutes
 unused ends, lists workflows and creates them, and edits, checks, saves
 and publishes one in graph mode, previewing what each step reads and sends
@@ -75,11 +77,18 @@ list has what's archived on a tab beside it. Archive is refused while a
 live revision or version reaches the thing, through what it pins, naming
 them; archiving a workflow revokes its keys; what's archived opens
 read-only with Restore; and using one is a problem, so a draft saves and
-a revision that reaches one neither runs nor publishes. What was built,
-and why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
+a revision that reaches one neither runs nor publishes. A Changes button
+in the editor opens the workflow's list: a constant it reads changed, a
+newer version of an upstream or revision of a workflow it uses, a key
+made, rotated or revoked, the workflow archived or restored. Each is
+recorded in the transaction that makes it, and none holds a constant's
+value. A newer version stays active until a save takes it up, a rotation
+until the old key stops, a constant's change until it's dismissed, and the
+workflow list counts each workflow's active ones. What was built, and
+why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
 13-minimal-editor.md, 14-the-response-picks.md, 06-hardening.md,
-07-tests-and-catalogue.md and 15-archive.md; the bigger picture is
-docs/plans/README.md.
+07-tests-and-catalogue.md, 15-archive.md and 16-changes.md; the bigger
+picture is docs/plans/README.md.
 
 ## Read before working
 
@@ -134,7 +143,7 @@ just dev-server     API server on http://127.0.0.1:8080, after db-up and migrate
 just dev-web        web app on http://127.0.0.1:5173; /api is proxied to the server
 just upstream       the test upstream on http://127.0.0.1:8090, to try runs against
 just check          the gate: format, lint, race tests, coverage floors, typecheck, the browser test on a build, stale generated code
-just e2e            the browser tests: plan 04's Done flow, plan 06's constants, plan 07's library and caller keys, plan 15's archive, in Chromium, against their own database, server and test upstream
+just e2e            the browser tests: plan 04's Done flow, plan 06's constants, plan 07's library and caller keys, plan 15's archive, plan 16's changes, in Chromium, against their own database, server and test upstream
 just fmt            apply formatting: gofumpt + goimports, Prettier
 just test           Go and web tests
 just gen            regenerate the HTTP layer, the workflow types and web/src/gen from schema/
@@ -199,6 +208,10 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`, and
   409 `archived`. A new way to change a workflow, an upstream or a constant
   checks it, in its transaction (plan 15). Publish and Archive share one
   advisory lock, and Publish's check runs inside it on one connection.
+- A change to what a workflow uses is recorded where it's made, in the
+  same transaction, by `record` in `internal/store/changes.go`, and put on
+  the list of each workflow it touches (plan 16). A new way to change a
+  constant, an upstream, a published revision or a key records it there.
 - A script's click reaches a disabled button, which a person's doesn't, so
   jsdom can't show a disabled control stays shut; `just e2e` can.
 - The page's CSP (nginx) refuses inline styles and eval, and jsdom has no

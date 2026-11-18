@@ -105,7 +105,7 @@ func (a *api) RotateKey(ctx context.Context, req gen.RotateKeyRequestObject) (ge
 }
 
 func (a *api) RevokeKey(ctx context.Context, req gen.RevokeKeyRequestObject) (gen.RevokeKeyResponseObject, error) {
-	key, err := a.store.RevokeKey(ctx, req.ID, req.Key)
+	key, err := a.store.RevokeKey(ctx, req.ID, req.Key, provenance(ctx))
 	if err != nil {
 		return nil, noKey(err)
 	}

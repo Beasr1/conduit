@@ -152,11 +152,11 @@ func TestSaveRevision_ConcurrentSavesOnOneBase(t *testing.T) {
 func TestPublish(t *testing.T) {
 	t.Parallel()
 	w := create(t)
-	got, err := db.Publish(t.Context(), w.ID, 1, storetest.NoCheck)
+	got, err := db.Publish(t.Context(), w.ID, 1, person, storetest.NoCheck)
 	if err != nil || got.PublishedRevision == nil || *got.PublishedRevision != 1 {
 		t.Fatalf("Publish(1) = %+v, %v", got, err)
 	}
-	if _, err := db.Publish(t.Context(), w.ID, 2, storetest.NoCheck); !errors.Is(err, store.ErrNotFound) {
+	if _, err := db.Publish(t.Context(), w.ID, 2, person, storetest.NoCheck); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("publish a revision that doesn't exist: error = %v, want ErrNotFound", err)
 	}
 }

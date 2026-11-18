@@ -45,6 +45,7 @@ export function workflow(id: string, name: string): Workflow {
     name,
     latest_revision: 1,
     created_at: "2026-10-28T09:00:00Z",
+    active_changes: 0,
   };
 }
 

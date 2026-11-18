@@ -151,6 +151,7 @@ func archivedName(ctx context.Context, q querier, query, name string) error {
 // ArchiveWorkflow takes workflow id out of use and revokes its keys, so its
 // URL stops answering at once. It's refused with an *InUseError while a
 // live workflow uses it. Archiving one archived already changes nothing.
+// It's recorded on its own list (plan 16).
 func (s *Store) ArchiveWorkflow(ctx context.Context, id string, p Provenance) (Workflow, error) {
 	var w Workflow
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -172,8 +173,12 @@ func (s *Store) ArchiveWorkflow(ctx context.Context, id string, p Provenance) (W
 			return &InUseError{Workflows: users}
 		}
 		// A key past its expiry stays expired, as RevokeKey leaves it.
-		if _, err := tx.Exec(ctx, `UPDATE caller_keys SET revoked_at = now()
-			WHERE workflow_id = $1::uuid AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())`, id); err != nil {
+		revoked, err := tx.Exec(ctx, `UPDATE caller_keys SET revoked_at = now()
+			WHERE workflow_id = $1::uuid AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())`, id)
+		if err != nil {
+			return err
+		}
+		if err := record(ctx, tx, "workflow_archived", "workflow", id, ChangeDetail{Name: w.Name, Keys: revoked.RowsAffected()}, p, id); err != nil {
 			return err
 		}
 		w, err = one[Workflow](ctx, tx, `UPDATE workflows SET archived_at = now(), archived_by = $2
@@ -186,11 +191,23 @@ func (s *Store) ArchiveWorkflow(ctx context.Context, id string, p Provenance) (W
 	return w, nil
 }
 
-// RestoreWorkflow brings workflow id back as it was, without keys. It's
+// RestoreWorkflow brings workflow id back as it was, without keys, by p. It's
 // never refused: if what it uses is archived too, its problems say so.
-func (s *Store) RestoreWorkflow(ctx context.Context, id string) (Workflow, error) {
-	w, err := one[Workflow](ctx, s.pool, `UPDATE workflows SET archived_at = NULL, archived_by = NULL
-		WHERE id = $1::uuid RETURNING `+workflowColumns, id)
+// It's recorded on its own list (plan 16).
+func (s *Store) RestoreWorkflow(ctx context.Context, id string, p Provenance) (Workflow, error) {
+	var w Workflow
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		if w, err = one[Workflow](ctx, tx, `SELECT `+workflowColumns+` FROM workflows WHERE id = $1::uuid FOR UPDATE`, id); err != nil || w.ArchivedAt == nil {
+			return err
+		}
+		if err := record(ctx, tx, "workflow_restored", "workflow", id, ChangeDetail{Name: w.Name}, p, id); err != nil {
+			return err
+		}
+		w, err = one[Workflow](ctx, tx, `UPDATE workflows SET archived_at = NULL, archived_by = NULL
+			WHERE id = $1::uuid RETURNING `+workflowColumns, id)
+		return err
+	})
 	if err != nil {
 		return Workflow{}, fmt.Errorf("restore workflow %s: %w", id, translate(err))
 	}
@@ -220,6 +237,9 @@ func (s *Store) ArchiveUpstream(ctx context.Context, id string, p Provenance) (U
 		if len(uses) > 0 {
 			return &InUseError{Workflows: byWorkflow(uses)}
 		}
+		if err := record(ctx, tx, "upstream_archived", "upstream", id, ChangeDetail{Name: u.Name}, p); err != nil {
+			return err
+		}
 		u, err = one[Upstream](ctx, tx, `UPDATE upstreams SET archived_at = now(), archived_by = $2
 			WHERE id = $1::uuid RETURNING `+upstreamColumns, id, p)
 		return err
@@ -244,10 +264,22 @@ func byWorkflow(uses []UpstreamUse) []LiveUse {
 	return out
 }
 
-// RestoreUpstream brings upstream id back as it was.
-func (s *Store) RestoreUpstream(ctx context.Context, id string) (Upstream, error) {
-	u, err := one[Upstream](ctx, s.pool, `UPDATE upstreams SET archived_at = NULL, archived_by = NULL
-		WHERE id = $1::uuid RETURNING `+upstreamColumns, id)
+// RestoreUpstream brings upstream id back as it was, by p, recorded (plan
+// 16).
+func (s *Store) RestoreUpstream(ctx context.Context, id string, p Provenance) (Upstream, error) {
+	var u Upstream
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		if u, err = one[Upstream](ctx, tx, `SELECT `+upstreamColumns+` FROM upstreams WHERE id = $1::uuid FOR UPDATE`, id); err != nil || u.ArchivedAt == nil {
+			return err
+		}
+		if err := record(ctx, tx, "upstream_restored", "upstream", id, ChangeDetail{Name: u.Name}, p); err != nil {
+			return err
+		}
+		u, err = one[Upstream](ctx, tx, `UPDATE upstreams SET archived_at = NULL, archived_by = NULL
+			WHERE id = $1::uuid RETURNING `+upstreamColumns, id)
+		return err
+	})
 	if err != nil {
 		return Upstream{}, fmt.Errorf("restore upstream %s: %w", id, translate(err))
 	}
@@ -276,6 +308,9 @@ func (s *Store) ArchiveConstant(ctx context.Context, name string, p Provenance) 
 			if len(users.Workflows)+len(users.Upstreams) > 0 {
 				return &InUseError{Workflows: users.Workflows, Upstreams: users.Upstreams}
 			}
+			if err := record(ctx, tx, "constant_archived", "constant", name, ChangeDetail{Name: name}, p); err != nil {
+				return err
+			}
 			if c, err = one[sealed](ctx, tx, `UPDATE constants SET archived_at = now(), archived_by = $2
 				WHERE name = $1 RETURNING `+constantColumns, name, p); err != nil {
 				return err
@@ -291,12 +326,28 @@ func (s *Store) ArchiveConstant(ctx context.Context, name string, p Provenance) 
 }
 
 // RestoreConstant brings a constant back as it was, with its value and the
-// one before it.
-func (s *Store) RestoreConstant(ctx context.Context, name string) (Constant, error) {
-	c, err := one[sealed](ctx, s.pool, `UPDATE constants SET archived_at = NULL, archived_by = NULL
-		WHERE name = $1 RETURNING `+constantColumns, name)
+// one before it, by p, recorded (plan 16).
+func (s *Store) RestoreConstant(ctx context.Context, name string, p Provenance) (Constant, error) {
+	var out Constant
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		c, err := one[sealed](ctx, tx, `SELECT `+constantColumns+` FROM constants WHERE name = $1 FOR UPDATE`, name)
+		if err != nil {
+			return err
+		}
+		if c.ArchivedAt != nil {
+			if err := record(ctx, tx, "constant_restored", "constant", name, ChangeDetail{Name: name}, p); err != nil {
+				return err
+			}
+			if c, err = one[sealed](ctx, tx, `UPDATE constants SET archived_at = NULL, archived_by = NULL
+				WHERE name = $1 RETURNING `+constantColumns, name); err != nil {
+				return err
+			}
+		}
+		out, err = s.open(c)
+		return err
+	})
 	if err != nil {
 		return Constant{}, fmt.Errorf("restore constant %s: %w", name, translate(err))
 	}
-	return s.open(c)
+	return out, nil
 }

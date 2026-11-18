@@ -36,6 +36,10 @@ export function answerEditor() {
     http.get("/api/v1/constants", () =>
       HttpResponse.json<ConstantList>({ constants: [] }),
     ),
+    // And the workflow's changes (plan 16).
+    http.get("/api/v1/workflows/:id/changes", () =>
+      HttpResponse.json({ changes: [] }),
+    ),
     http.post("/api/v1/preview", () =>
       HttpResponse.json<Preview>({
         reads: { input: null, nodes: {} },

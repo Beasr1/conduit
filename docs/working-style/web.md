@@ -294,6 +294,12 @@ the API is `/api` on the page's own origin.
   A field disabled there keeps its text at full strength (`index.css`), as
   it's there to read; its buttons stay dimmed. A list has what's archived on a tab (`InUseTabs`), and `ArchiveDialog`
   asks again and says what uses it when the server refuses.
+- The Changes panel (plan 16) says each change in a line (`wordsOf` in
+  `features/editor/changes.ts`), an expression in the code font, and what
+  still waits only while it does. One about something a step uses opens
+  the step, where it's taken up. Its button counts the active ones from
+  the active list, which a save, a key's change, an archive or a dismissal
+  asks for again (`changeKeys`).
 - A dialog that shows a key once, in the Keys panel (plan 07), forgets it
   once it has closed, in `onOpenChangeComplete`, however it was closed:
   setting `open` itself, as Done does, doesn't call `onOpenChange`

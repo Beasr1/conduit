@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useReadOnly } from "@/components/read-only";
 import { Button } from "@/components/ui/button";
 import { AddNodeDialog } from "@/features/editor/components/add-node-dialog";
+import { ChangesButton } from "@/features/editor/components/changes-panel";
 import { nodeTypes } from "@/features/editor/components/nodes";
 import { ProblemMark } from "@/features/editor/components/problem-mark";
 import { Tour } from "@/features/editor/components/tour";
@@ -313,6 +314,7 @@ export function Canvas({ workflow }: { workflow: string }) {
         <Button variant="outline" size="sm" onClick={() => openPanel("keys")}>
           Keys
         </Button>
+        <ChangesButton workflow={workflow} />
         {!readOnly && (
           <Button variant="ghost" size="sm" onClick={() => setTouring(true)}>
             Tour

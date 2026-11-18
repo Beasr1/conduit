@@ -119,3 +119,23 @@ test("the page lists what's in use, with what's archived on a tab", async () => 
   expect(await screen.findByRole("link", { name: "Retired" })).toBeTruthy();
   expect(asked).toEqual([null, "true"]);
 });
+
+// Each workflow in use says how many of its changes are active (plan 16).
+test("the list says how many changes wait on each workflow", async () => {
+  server.use(
+    http.get("/api/v1/workflows", () =>
+      HttpResponse.json<WorkflowList>({
+        workflows: [
+          { ...workflow("wf-1", "Busy"), active_changes: 3 },
+          workflow("wf-2", "Quiet"),
+        ],
+      }),
+    ),
+  );
+  renderAt(<WorkflowList />, { path: "/workflows" });
+  const busy = (await screen.findByRole("link", { name: "Busy" })).closest(
+    "tr",
+  )!;
+  expect(busy.textContent).toContain("3");
+  expect(screen.getByRole("columnheader", { name: "Changes" })).toBeTruthy();
+});

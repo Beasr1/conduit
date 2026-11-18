@@ -148,7 +148,8 @@ func (s *Store) Constants(ctx context.Context) ([]Constant, error) {
 // UndoConstant. secret makes a plain constant secret, for good: false
 // leaves it as it is. A value equal to the one it has changes nothing, so
 // the previous value stays the one to go back to. An archived constant is
-// ErrArchived.
+// ErrArchived. A change goes on the list of each workflow that reads the
+// constant now (plan 16).
 func (s *Store) SetConstant(ctx context.Context, name, value string, secret bool, p Provenance) (Constant, error) {
 	var out Constant
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -175,8 +176,10 @@ func (s *Store) SetConstant(ctx context.Context, name, value string, secret bool
 			if err != nil {
 				return err
 			}
-			out, err = s.open(c)
-			return err
+			if out, err = s.open(c); err != nil {
+				return err
+			}
+			return changed(ctx, tx, name, "made_secret", p)
 		}
 		v, err := s.seal(name, value)
 		if err != nil {
@@ -188,8 +191,10 @@ func (s *Store) SetConstant(ctx context.Context, name, value string, secret bool
 		if err != nil {
 			return err
 		}
-		out, err = s.open(c)
-		return err
+		if out, err = s.open(c); err != nil {
+			return err
+		}
+		return changed(ctx, tx, name, "set", p)
 	})
 	if err != nil {
 		return Constant{}, fmt.Errorf("set constant %s: %w", name, translate(err))
@@ -219,13 +224,25 @@ func (s *Store) UndoConstant(ctx context.Context, name string, p Provenance) (Co
 		if err != nil {
 			return err
 		}
-		out, err = s.open(c)
-		return err
+		if out, err = s.open(c); err != nil {
+			return err
+		}
+		return changed(ctx, tx, name, "undone", p)
 	})
 	if err != nil {
 		return Constant{}, fmt.Errorf("undo constant %s: %w", name, translate(err))
 	}
 	return out, nil
+}
+
+// changed records that constant name changed, how, by p, on the list of
+// each workflow that reads it now.
+func changed(ctx context.Context, tx pgx.Tx, name, how string, p Provenance) error {
+	users, err := readersOf(ctx, tx, name)
+	if err != nil {
+		return err
+	}
+	return record(ctx, tx, "constant_changed", "constant", name, ChangeDetail{Name: name, How: how}, p, ids(users.Workflows)...)
 }
 
 // readPattern matches a definition that reads constant name as

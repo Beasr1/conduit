@@ -102,15 +102,17 @@ func (s *Store) UpstreamVersion(ctx context.Context, id string, version int) (Up
 // the latest version, or the save fails with ErrVersionMismatch: someone
 // else saved in between, and this save would silently undo their change.
 // A def that's base's, by value, makes no version: base is the answer, as
-// it was. An archived upstream is ErrArchived.
+// it was. An archived upstream is ErrArchived. A new version goes on the list
+// of each workflow that pins an older one (plan 16).
 func (s *Store) SaveUpstreamVersion(ctx context.Context, id string, base int, def json.RawMessage, p Provenance) (UpstreamVersion, error) {
 	var v UpstreamVersion
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var latest int
 		var archived bool
+		var name string
 		// FOR UPDATE: two saves on the same base queue here, and the second
 		// sees the first's version.
-		if err := tx.QueryRow(ctx, `SELECT latest_version, archived_at IS NOT NULL FROM upstreams WHERE id = $1::uuid FOR UPDATE`, id).Scan(&latest, &archived); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT latest_version, archived_at IS NOT NULL, name FROM upstreams WHERE id = $1::uuid FOR UPDATE`, id).Scan(&latest, &archived, &name); err != nil {
 			return err
 		}
 		if archived {
@@ -131,8 +133,14 @@ func (s *Store) SaveUpstreamVersion(ctx context.Context, id string, base int, de
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE upstreams SET latest_version = $2 WHERE id = $1::uuid`, id, latest+1)
-		return err
+		if _, err := tx.Exec(ctx, `UPDATE upstreams SET latest_version = $2 WHERE id = $1::uuid`, id, latest+1); err != nil {
+			return err
+		}
+		to, err := pinners(ctx, tx, "upstream", id, latest+1)
+		if err != nil {
+			return err
+		}
+		return record(ctx, tx, "upstream_version", "upstream", id, ChangeDetail{Name: name, Version: latest + 1}, p, to...)
 	})
 	if err != nil {
 		return UpstreamVersion{}, fmt.Errorf("save upstream %s on version %d: %w", id, base, translate(err))

@@ -925,6 +925,7 @@ test("Add HTTP step offers published workflows but this one, and the step uses t
             latest_revision: 1,
             published_revision: 1,
             created_at: at,
+            active_changes: 0,
           },
           {
             id: "w-draft",
@@ -932,6 +933,7 @@ test("Add HTTP step offers published workflows but this one, and the step uses t
             name: "Not served",
             latest_revision: 1,
             created_at: at,
+            active_changes: 0,
           },
           {
             id: "wf-1",
@@ -940,6 +942,7 @@ test("Add HTTP step offers published workflows but this one, and the step uses t
             latest_revision: 3,
             published_revision: 3,
             created_at: at,
+            active_changes: 0,
           },
         ],
       }),

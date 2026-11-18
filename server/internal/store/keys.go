@@ -47,7 +47,8 @@ const keyColumns = `id::text AS id, workflow_id::text AS workflow_id, name, pref
 
 // CreateKey stores a new active key of a workflow, named for its caller.
 // ErrConflict: an active key of the workflow has the name. ErrArchived: the
-// workflow is archived, and ErrNotFound: there's no such workflow.
+// workflow is archived, and ErrNotFound: there's no such workflow. It's
+// recorded on the workflow's list (plan 16).
 func (s *Store) CreateKey(ctx context.Context, workflowID, name string, k NewKey, p Provenance) (CallerKey, error) {
 	var key CallerKey
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -57,7 +58,10 @@ func (s *Store) CreateKey(ctx context.Context, workflowID, name string, k NewKey
 		var err error
 		key, err = one[CallerKey](ctx, tx, `INSERT INTO caller_keys (workflow_id, name, prefix, hash, provenance)
 			VALUES ($1::uuid, $2, $3, $4, $5) RETURNING `+keyColumns, workflowID, name, k.Prefix, k.Hash, p)
-		return err
+		if err != nil {
+			return err
+		}
+		return record(ctx, tx, "key_made", "key", key.ID, ChangeDetail{Name: name, Prefix: key.Prefix}, p, workflowID)
 	})
 	if err != nil {
 		return CallerKey{}, fmt.Errorf("make a key of %s: %w", workflowID, translate(err))
@@ -83,7 +87,8 @@ func (s *Store) Keys(ctx context.Context, workflowID string) ([]CallerKey, error
 // old key an expiry grace from now: until then both work. It returns the new
 // key and the old. ErrNotFound: the workflow has no such key;
 // ErrKeyNotActive: it was rotated or revoked already; ErrArchived: the
-// workflow is archived.
+// workflow is archived. It's recorded on the workflow's list, active while
+// the old key works (plan 16).
 func (s *Store) RotateKey(ctx context.Context, workflowID, id string, grace time.Duration, k NewKey, p Provenance) (made, old CallerKey, err error) {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := notArchived(ctx, tx, workflowID); err != nil {
@@ -107,7 +112,11 @@ func (s *Store) RotateKey(ctx context.Context, workflowID, id string, grace time
 		}
 		made, err = one[CallerKey](ctx, tx, `INSERT INTO caller_keys (workflow_id, name, prefix, hash, provenance)
 			VALUES ($1::uuid, $2, $3, $4, $5) RETURNING `+keyColumns, workflowID, old.Name, k.Prefix, k.Hash, p)
-		return err
+		if err != nil {
+			return err
+		}
+		return record(ctx, tx, "key_rotated", "key", old.ID,
+			ChangeDetail{Name: old.Name, Prefix: old.Prefix, ExpiresAt: old.ExpiresAt}, p, workflowID)
 	})
 	if err != nil {
 		return CallerKey{}, CallerKey{}, fmt.Errorf("rotate key %s of %s: %w", id, workflowID, translate(err))
@@ -115,12 +124,28 @@ func (s *Store) RotateKey(ctx context.Context, workflowID, id string, grace time
 	return made, old, nil
 }
 
-// RevokeKey stops a key of a workflow at once. One revoked already, or past
-// its expiry, stays as it is. ErrNotFound: the workflow has no such key.
-func (s *Store) RevokeKey(ctx context.Context, workflowID, id string) (CallerKey, error) {
-	key, err := one[CallerKey](ctx, s.pool, `UPDATE caller_keys
-		SET revoked_at = COALESCE(revoked_at, CASE WHEN expires_at IS NULL OR expires_at > now() THEN now() END)
-		WHERE id = $1::uuid AND workflow_id = $2::uuid RETURNING `+keyColumns, id, workflowID)
+// RevokeKey stops a key of a workflow at once, by p, recorded on the
+// workflow's list (plan 16). One revoked already, or past its expiry, stays
+// as it is. ErrNotFound: the workflow has no such key.
+func (s *Store) RevokeKey(ctx context.Context, workflowID, id string, p Provenance) (CallerKey, error) {
+	var key CallerKey
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var works bool
+		if err := tx.QueryRow(ctx, `SELECT revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()) FROM caller_keys
+			WHERE id = $1::uuid AND workflow_id = $2::uuid FOR UPDATE`, id, workflowID).Scan(&works); err != nil {
+			return err
+		}
+		if works {
+			if _, err := tx.Exec(ctx, `UPDATE caller_keys SET revoked_at = now() WHERE id = $1::uuid`, id); err != nil {
+				return err
+			}
+		}
+		var err error
+		if key, err = one[CallerKey](ctx, tx, `SELECT `+keyColumns+` FROM caller_keys WHERE id = $1::uuid`, id); err != nil || !works {
+			return err
+		}
+		return record(ctx, tx, "key_revoked", "key", id, ChangeDetail{Name: key.Name, Prefix: key.Prefix}, p, workflowID)
+	})
 	if err != nil {
 		return CallerKey{}, fmt.Errorf("revoke key %s of %s: %w", id, workflowID, translate(err))
 	}

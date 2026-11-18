@@ -70,7 +70,7 @@ func saveWorkflow(t *testing.T, base, def string) store.Workflow {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w, err = db.Publish(ctx, w.ID, 1, storetest.NoCheck); err != nil {
+	if w, err = db.Publish(ctx, w.ID, 1, store.Provenance{Actor: "token"}, storetest.NoCheck); err != nil {
 		t.Fatal(err)
 	}
 	return w

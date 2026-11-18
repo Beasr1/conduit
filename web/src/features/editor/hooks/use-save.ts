@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import { changeKeys } from "@/features/editor/hooks/use-changes";
 import { callerKeys } from "@/features/editor/hooks/use-keys";
 import { strip } from "@/features/editor/upstreams";
 import type { components } from "@/gen/schema";
@@ -41,6 +42,8 @@ export function useSaveDraft(id: string) {
           },
       );
       void queryClient.invalidateQueries({ queryKey: workflowKeys.lists() });
+      // It may take a step up to a newer version a change offered.
+      void queryClient.invalidateQueries({ queryKey: changeKeys.of(id) });
     },
     onError: (err) => {
       if (err instanceof ApiError && err.status === 412)
@@ -94,6 +97,7 @@ function useSetArchived(
       );
       void queryClient.invalidateQueries({ queryKey: workflowKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: callerKeys.list(id) });
+      void queryClient.invalidateQueries({ queryKey: changeKeys.of(id) });
     },
   });
 }

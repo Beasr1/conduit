@@ -22,6 +22,7 @@ lives as a row in 00-roadmap.md.
 | 13 | 13-minimal-editor.md | the editor says only what a field is: two rows of tabs on a step, bare lines and card, a short tour and one-line hints | accepted 2026-11-01; built with 12's editor parts, its panels from 110–436 words down to 14–82, the tour checked in Chromium: **done** (2026-11-02) |
 | 14 | 14-the-response-picks.md | one exit, with nothing to add: an answer takes lines from any number of steps, and a run gives the first, top to bottom, that one reached | accepted and built 2026-11-02 |
 | 15 | 15-archive.md | nothing deleted: a workflow, an upstream or a constant nothing live uses is archived, read-only, and restored | accepted 2026-11-06, **built** 2026-11-07 |
+| 16 | 16-changes.md | a changes list on each workflow: what happens to what it uses, active until dealt with or dismissed, then kept in its history | accepted and **built** 2026-11-12 |
 
 ## Queue (your order, 2026-11-05)
 
@@ -36,7 +37,8 @@ Picked, each planned in its own plan when it starts:
    at once: a workflow says what's newer, and Used by takes you there).
    What's still to come, or waits on you, is active; what has happened
    leaves the active list, once done or dealt with, and stays in the
-   workflow's history, never deleted (your note, 2026-11-05).
+   workflow's history, never deleted (your note, 2026-11-05). Built
+   2026-11-12 (16).
 4. Fields marked to be masked in run records, so a person's details aren't
    kept in plain text: a mask type per field, all of it, or most of it
    with the start kept for debugging, `784**********`.

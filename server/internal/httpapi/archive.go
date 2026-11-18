@@ -25,7 +25,7 @@ func (a *api) ArchiveWorkflow(ctx context.Context, req gen.ArchiveWorkflowReques
 }
 
 func (a *api) RestoreWorkflow(ctx context.Context, req gen.RestoreWorkflowRequestObject) (gen.RestoreWorkflowResponseObject, error) {
-	w, err := a.store.RestoreWorkflow(ctx, req.ID)
+	w, err := a.store.RestoreWorkflow(ctx, req.ID, provenance(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func (a *api) ArchiveUpstream(ctx context.Context, req gen.ArchiveUpstreamReques
 }
 
 func (a *api) RestoreUpstream(ctx context.Context, req gen.RestoreUpstreamRequestObject) (gen.RestoreUpstreamResponseObject, error) {
-	u, err := a.store.RestoreUpstream(ctx, req.ID)
+	u, err := a.store.RestoreUpstream(ctx, req.ID, provenance(ctx))
 	if err != nil {
 		return nil, noUpstream(err)
 	}
@@ -57,7 +57,7 @@ func (a *api) ArchiveConstant(ctx context.Context, req gen.ArchiveConstantReques
 }
 
 func (a *api) RestoreConstant(ctx context.Context, req gen.RestoreConstantRequestObject) (gen.RestoreConstantResponseObject, error) {
-	c, err := a.store.RestoreConstant(ctx, req.Name)
+	c, err := a.store.RestoreConstant(ctx, req.Name, provenance(ctx))
 	if err != nil {
 		return nil, noConstant(err)
 	}
@@ -97,8 +97,8 @@ func usedBy(e *store.InUseError) string {
 	return strings.Join(said, "; ")
 }
 
-// archiveOut is when something was archived, and by what, as the API sends
-// them: zero values, left out, unless it's archived.
+// archiveOut is when something was archived, or dismissed, and by what, as
+// the API sends them: zero values, left out, unless it was.
 func archiveOut(at *time.Time, by *store.Provenance) (time.Time, gen.Provenance) {
 	if at == nil {
 		return time.Time{}, gen.Provenance{}

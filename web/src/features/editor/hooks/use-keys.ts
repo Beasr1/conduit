@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { components } from "@/gen/schema";
+import { changeKeys } from "@/features/editor/hooks/use-changes";
 import { api, call } from "@/lib/api";
 
 type RotateKey = components["schemas"]["RotateKey"];
@@ -29,7 +30,17 @@ export function useKeys(workflow: string) {
 }
 
 // Each change answers with what it made or changed, the key's value too,
-// the only time it's sent; the list is asked again.
+// the only time it's sent; the list is asked again, and the workflow's
+// changes, which record it (plan 16).
+
+// asked asks again for a workflow's keys and its changes.
+function asked(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workflow: string,
+) {
+  void queryClient.invalidateQueries({ queryKey: callerKeys.list(workflow) });
+  void queryClient.invalidateQueries({ queryKey: changeKeys.of(workflow) });
+}
 
 // useCreateKey makes a key for a caller.
 export function useCreateKey(workflow: string) {
@@ -45,10 +56,7 @@ export function useCreateKey(workflow: string) {
       ),
     // The form says what went wrong, under the name.
     meta: { quiet: true },
-    onSuccess: () =>
-      void queryClient.invalidateQueries({
-        queryKey: callerKeys.list(workflow),
-      }),
+    onSuccess: () => asked(queryClient, workflow),
   });
 }
 
@@ -67,10 +75,7 @@ export function useRotateKey(workflow: string, key: string) {
     // The dialog says what went wrong.
     meta: { quiet: true },
     // Refused too, as it was rotated or revoked elsewhere.
-    onSettled: () =>
-      void queryClient.invalidateQueries({
-        queryKey: callerKeys.list(workflow),
-      }),
+    onSettled: () => asked(queryClient, workflow),
   });
 }
 
@@ -85,9 +90,6 @@ export function useRevokeKey(workflow: string, key: string) {
           signal,
         }),
       ),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({
-        queryKey: callerKeys.list(workflow),
-      }),
+    onSuccess: () => asked(queryClient, workflow),
   });
 }

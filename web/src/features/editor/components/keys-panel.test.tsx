@@ -402,3 +402,55 @@ test("Revoke asks again, and stops the key", async () => {
     ).toMatch(/revoked /),
   );
 });
+
+// A key's change asks for the workflow's changes again, which record it
+// (plan 16): revoking a rotated key ends its active rotation.
+test("revoking a rotated key asks for the changes again", async () => {
+  const list = answer();
+  renderEditor(specExample);
+  const rotation = {
+    id: "c1",
+    kind: "key_rotated",
+    subject: "key",
+    subject_id: "m1",
+    detail: { name: "Mobile app", prefix: "cnd_m1", expires_at: later },
+    provenance: { actor: "token" },
+    created_at: at,
+    state: "active",
+  };
+  // After the editor's own answers, so these come first.
+  server.use(
+    http.get("/api/v1/workflows/wf-1/changes", ({ request }) => {
+      const history = new URL(request.url).searchParams.has("history");
+      const stopped = list.find((k) => k.id === "m1")?.status === "revoked";
+      return HttpResponse.json({
+        changes:
+          history === stopped
+            ? [{ ...rotation, state: stopped ? "done" : "active" }]
+            : [],
+      });
+    }),
+    http.post<{ key: string }>(
+      "/api/v1/workflows/wf-1/keys/:key/revoke",
+      ({ params }) => {
+        const i = list.findIndex((k) => k.id === params.key);
+        list[i] = { ...list[i]!, status: "revoked", revoked_at: later };
+        return HttpResponse.json<CallerKey>(list[i]);
+      },
+    ),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Changes, 1 active" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Keys" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Revoke Mobile app (cnd_m1…)" }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Revoke Mobile app?",
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Revoke" }));
+  expect(
+    await screen.findByRole("button", { name: "Changes", hidden: true }),
+  ).toBeTruthy();
+});

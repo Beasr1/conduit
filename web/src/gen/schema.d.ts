@@ -294,6 +294,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workflows/{id}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List what has happened to what a workflow uses, newest first
+         * @description The workflow's changes list (plan 16). Without history, the active ones, what's still to come or waits on someone; with history=true, the rest, each saying whether it was dealt with or dismissed. A change is recorded as it happens and kept for good, and none holds a constant's value.
+         */
+        get: operations["listChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/changes/{change}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+                change: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move an active change to the workflow's history
+         * @description It stays in the history, saying it was dismissed, when and by what. Dismissing one that isn't active changes nothing.
+         */
+        post: operations["dismissChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workflows/{id}/keys": {
         parameters: {
             query?: never;
@@ -474,6 +519,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/upstreams/{id}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List what has happened to an upstream, newest first - its new versions, its archive and its restore
+         * @description Its changes as recorded (plan 16), kept for good. Nothing live uses something archived, so this is where its archive and restore are seen.
+         */
+        get: operations["listUpstreamChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/upstreams/{id}/users": {
         parameters: {
             query?: never;
@@ -625,6 +692,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/constants/{name}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List what has happened to a constant, newest first - its changes of value, its archive and its restore
+         * @description Its changes as recorded (plan 16), kept for good. Nothing live uses something archived, so this is where its archive and restore are seen.
+         */
+        get: operations["listConstantChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/constants/{name}/users": {
         parameters: {
             query?: never;
@@ -750,6 +839,8 @@ export interface components {
              */
             archived_at?: string;
             archived_by?: components["schemas"]["Provenance"];
+            /** @description How many of its changes are active (plan 16). */
+            active_changes: number;
         };
         WorkflowList: {
             workflows: components["schemas"]["Workflow"][];
@@ -1099,6 +1190,90 @@ export interface components {
             output_truncated?: boolean;
             /** @description What each node did, in the order they ended. Only from GET /v1/runs/{id}. */
             nodes?: components["schemas"]["NodeRun"][];
+        };
+        /** @description What a line about a change says, each kind with the fields it needs. None holds a constant's value. */
+        ChangeDetail: {
+            /** @description The name of what it happened to. */
+            name?: string;
+            /** @description An upstream's new version. */
+            version?: number;
+            /** @description The revision a workflow published. */
+            revision?: number;
+            /**
+             * @description How a constant changed - a new value, Undo, or made secret.
+             * @enum {string}
+             */
+            how?: "set" | "undone" | "made_secret";
+            /** @description A key's first characters; a rotated key's old one's. */
+            prefix?: string;
+            /**
+             * Format: date-time
+             * @description When a rotated key's old value stops working.
+             */
+            expires_at?: string;
+            /** @description How many keys an archive revoked. */
+            keys?: number;
+        };
+        /** @description Something that happened, as recorded (plan 16). */
+        ChangeRecord: {
+            id: string;
+            /**
+             * @description What happened.
+             * @enum {string}
+             */
+            kind: "constant_changed" | "constant_archived" | "constant_restored" | "upstream_version" | "upstream_archived" | "upstream_restored" | "workflow_published" | "workflow_archived" | "workflow_restored" | "key_made" | "key_rotated" | "key_revoked";
+            /**
+             * @description What it happened to.
+             * @enum {string}
+             */
+            subject: "workflow" | "upstream" | "constant" | "key";
+            /** @description Its id, or a constant's name. */
+            subject_id: string;
+            detail: components["schemas"]["ChangeDetail"];
+            provenance: components["schemas"]["Provenance"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        ChangeRecordList: {
+            changes: components["schemas"]["ChangeRecord"][];
+            /** @description Pass as `before` for the next page. Absent on the last page. */
+            next?: string;
+        };
+        /** @description A change on a workflow's list (plan 16), as it stands now. */
+        Change: {
+            id: string;
+            /**
+             * @description What happened.
+             * @enum {string}
+             */
+            kind: "constant_changed" | "constant_archived" | "constant_restored" | "upstream_version" | "upstream_archived" | "upstream_restored" | "workflow_published" | "workflow_archived" | "workflow_restored" | "key_made" | "key_rotated" | "key_revoked";
+            /**
+             * @description What it happened to.
+             * @enum {string}
+             */
+            subject: "workflow" | "upstream" | "constant" | "key";
+            /** @description Its id, or a constant's name. */
+            subject_id: string;
+            detail: components["schemas"]["ChangeDetail"];
+            provenance: components["schemas"]["Provenance"];
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * @description active, still to come or waiting on someone; dismissed; done, dealt with, or nothing ever waited on it.
+             * @enum {string}
+             */
+            state: "active" | "dismissed" | "done";
+            /**
+             * Format: date-time
+             * @description When it was dismissed. Absent unless it was.
+             */
+            dismissed_at?: string;
+            dismissed_by?: components["schemas"]["Provenance"];
+        };
+        ChangeList: {
+            changes: components["schemas"]["Change"][];
+            /** @description Pass as `before` for the next page. Absent on the last page. */
+            next?: string;
         };
         RunList: {
             runs: components["schemas"]["RunSummary"][];
@@ -1840,6 +2015,61 @@ export interface operations {
             508: components["responses"]["Problem"];
         };
     };
+    listChanges: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description Return changes older than this id, for the next page. */
+                before?: string;
+                /** @description List the changes that are no longer active instead of those that are. */
+                history?: boolean;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    dismissChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WorkflowID"];
+                change: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dismissed, or as it was. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Change"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
     listKeys: {
         parameters: {
             query?: never;
@@ -2141,6 +2371,34 @@ export interface operations {
             404: components["responses"]["Problem"];
         };
     };
+    listUpstreamChanges: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description Return changes older than this id, for the next page. */
+                before?: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["UpstreamID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRecordList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
     listUpstreamUsers: {
         parameters: {
             query?: never;
@@ -2344,6 +2602,34 @@ export interface operations {
             401: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    listConstantChanges: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description Return changes older than this id, for the next page. */
+                before?: string;
+            };
+            header?: never;
+            path: {
+                name: components["parameters"]["ConstantName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRecordList"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     listConstantUsers: {

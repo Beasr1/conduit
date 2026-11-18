@@ -21,22 +21,208 @@ import (
 
 // Defines values for CallerKeyStatus.
 const (
-	Active   CallerKeyStatus = "active"
-	Expired  CallerKeyStatus = "expired"
-	Expiring CallerKeyStatus = "expiring"
-	Revoked  CallerKeyStatus = "revoked"
+	CallerKeyStatusActive   CallerKeyStatus = "active"
+	CallerKeyStatusExpired  CallerKeyStatus = "expired"
+	CallerKeyStatusExpiring CallerKeyStatus = "expiring"
+	CallerKeyStatusRevoked  CallerKeyStatus = "revoked"
 )
 
 // Valid indicates whether the value is a known member of the CallerKeyStatus enum.
 func (e CallerKeyStatus) Valid() bool {
 	switch e {
-	case Active:
+	case CallerKeyStatusActive:
 		return true
-	case Expired:
+	case CallerKeyStatusExpired:
 		return true
-	case Expiring:
+	case CallerKeyStatusExpiring:
 		return true
-	case Revoked:
+	case CallerKeyStatusRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChangeKind.
+const (
+	ChangeKindConstantArchived  ChangeKind = "constant_archived"
+	ChangeKindConstantChanged   ChangeKind = "constant_changed"
+	ChangeKindConstantRestored  ChangeKind = "constant_restored"
+	ChangeKindKeyMade           ChangeKind = "key_made"
+	ChangeKindKeyRevoked        ChangeKind = "key_revoked"
+	ChangeKindKeyRotated        ChangeKind = "key_rotated"
+	ChangeKindUpstreamArchived  ChangeKind = "upstream_archived"
+	ChangeKindUpstreamRestored  ChangeKind = "upstream_restored"
+	ChangeKindUpstreamVersion   ChangeKind = "upstream_version"
+	ChangeKindWorkflowArchived  ChangeKind = "workflow_archived"
+	ChangeKindWorkflowPublished ChangeKind = "workflow_published"
+	ChangeKindWorkflowRestored  ChangeKind = "workflow_restored"
+)
+
+// Valid indicates whether the value is a known member of the ChangeKind enum.
+func (e ChangeKind) Valid() bool {
+	switch e {
+	case ChangeKindConstantArchived:
+		return true
+	case ChangeKindConstantChanged:
+		return true
+	case ChangeKindConstantRestored:
+		return true
+	case ChangeKindKeyMade:
+		return true
+	case ChangeKindKeyRevoked:
+		return true
+	case ChangeKindKeyRotated:
+		return true
+	case ChangeKindUpstreamArchived:
+		return true
+	case ChangeKindUpstreamRestored:
+		return true
+	case ChangeKindUpstreamVersion:
+		return true
+	case ChangeKindWorkflowArchived:
+		return true
+	case ChangeKindWorkflowPublished:
+		return true
+	case ChangeKindWorkflowRestored:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChangeState.
+const (
+	ChangeStateActive    ChangeState = "active"
+	ChangeStateDismissed ChangeState = "dismissed"
+	ChangeStateDone      ChangeState = "done"
+)
+
+// Valid indicates whether the value is a known member of the ChangeState enum.
+func (e ChangeState) Valid() bool {
+	switch e {
+	case ChangeStateActive:
+		return true
+	case ChangeStateDismissed:
+		return true
+	case ChangeStateDone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChangeSubject.
+const (
+	ChangeSubjectConstant ChangeSubject = "constant"
+	ChangeSubjectKey      ChangeSubject = "key"
+	ChangeSubjectUpstream ChangeSubject = "upstream"
+	ChangeSubjectWorkflow ChangeSubject = "workflow"
+)
+
+// Valid indicates whether the value is a known member of the ChangeSubject enum.
+func (e ChangeSubject) Valid() bool {
+	switch e {
+	case ChangeSubjectConstant:
+		return true
+	case ChangeSubjectKey:
+		return true
+	case ChangeSubjectUpstream:
+		return true
+	case ChangeSubjectWorkflow:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChangeDetailHow.
+const (
+	MadeSecret ChangeDetailHow = "made_secret"
+	Set        ChangeDetailHow = "set"
+	Undone     ChangeDetailHow = "undone"
+)
+
+// Valid indicates whether the value is a known member of the ChangeDetailHow enum.
+func (e ChangeDetailHow) Valid() bool {
+	switch e {
+	case MadeSecret:
+		return true
+	case Set:
+		return true
+	case Undone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChangeRecordKind.
+const (
+	ChangeRecordKindConstantArchived  ChangeRecordKind = "constant_archived"
+	ChangeRecordKindConstantChanged   ChangeRecordKind = "constant_changed"
+	ChangeRecordKindConstantRestored  ChangeRecordKind = "constant_restored"
+	ChangeRecordKindKeyMade           ChangeRecordKind = "key_made"
+	ChangeRecordKindKeyRevoked        ChangeRecordKind = "key_revoked"
+	ChangeRecordKindKeyRotated        ChangeRecordKind = "key_rotated"
+	ChangeRecordKindUpstreamArchived  ChangeRecordKind = "upstream_archived"
+	ChangeRecordKindUpstreamRestored  ChangeRecordKind = "upstream_restored"
+	ChangeRecordKindUpstreamVersion   ChangeRecordKind = "upstream_version"
+	ChangeRecordKindWorkflowArchived  ChangeRecordKind = "workflow_archived"
+	ChangeRecordKindWorkflowPublished ChangeRecordKind = "workflow_published"
+	ChangeRecordKindWorkflowRestored  ChangeRecordKind = "workflow_restored"
+)
+
+// Valid indicates whether the value is a known member of the ChangeRecordKind enum.
+func (e ChangeRecordKind) Valid() bool {
+	switch e {
+	case ChangeRecordKindConstantArchived:
+		return true
+	case ChangeRecordKindConstantChanged:
+		return true
+	case ChangeRecordKindConstantRestored:
+		return true
+	case ChangeRecordKindKeyMade:
+		return true
+	case ChangeRecordKindKeyRevoked:
+		return true
+	case ChangeRecordKindKeyRotated:
+		return true
+	case ChangeRecordKindUpstreamArchived:
+		return true
+	case ChangeRecordKindUpstreamRestored:
+		return true
+	case ChangeRecordKindUpstreamVersion:
+		return true
+	case ChangeRecordKindWorkflowArchived:
+		return true
+	case ChangeRecordKindWorkflowPublished:
+		return true
+	case ChangeRecordKindWorkflowRestored:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChangeRecordSubject.
+const (
+	ChangeRecordSubjectConstant ChangeRecordSubject = "constant"
+	ChangeRecordSubjectKey      ChangeRecordSubject = "key"
+	ChangeRecordSubjectUpstream ChangeRecordSubject = "upstream"
+	ChangeRecordSubjectWorkflow ChangeRecordSubject = "workflow"
+)
+
+// Valid indicates whether the value is a known member of the ChangeRecordSubject enum.
+func (e ChangeRecordSubject) Valid() bool {
+	switch e {
+	case ChangeRecordSubjectConstant:
+		return true
+	case ChangeRecordSubjectKey:
+		return true
+	case ChangeRecordSubjectUpstream:
+		return true
+	case ChangeRecordSubjectWorkflow:
 		return true
 	default:
 		return false
@@ -272,6 +458,109 @@ type CallerKeyStatus string
 // CallerKeyList defines model for CallerKeyList.
 type CallerKeyList struct {
 	Keys []CallerKey `json:"keys"`
+}
+
+// Change A change on a workflow's list (plan 16), as it stands now.
+type Change struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Detail What a line about a change says, each kind with the fields it needs. None holds a constant's value.
+	Detail ChangeDetail `json:"detail"`
+
+	// DismissedAt When it was dismissed. Absent unless it was.
+	DismissedAt time.Time  `json:"dismissed_at,omitempty,omitzero"`
+	DismissedBy Provenance `json:"dismissed_by,omitempty,omitzero"`
+	ID          string     `json:"id"`
+
+	// Kind What happened.
+	Kind       ChangeKind `json:"kind"`
+	Provenance Provenance `json:"provenance"`
+
+	// State active, still to come or waiting on someone; dismissed; done, dealt with, or nothing ever waited on it.
+	State ChangeState `json:"state"`
+
+	// Subject What it happened to.
+	Subject ChangeSubject `json:"subject"`
+
+	// SubjectID Its id, or a constant's name.
+	SubjectID string `json:"subject_id"`
+}
+
+// ChangeKind What happened.
+type ChangeKind string
+
+// ChangeState active, still to come or waiting on someone; dismissed; done, dealt with, or nothing ever waited on it.
+type ChangeState string
+
+// ChangeSubject What it happened to.
+type ChangeSubject string
+
+// ChangeDetail What a line about a change says, each kind with the fields it needs. None holds a constant's value.
+type ChangeDetail struct {
+	// ExpiresAt When a rotated key's old value stops working.
+	ExpiresAt time.Time `json:"expires_at,omitempty,omitzero"`
+
+	// How How a constant changed - a new value, Undo, or made secret.
+	How ChangeDetailHow `json:"how,omitempty,omitzero"`
+
+	// Keys How many keys an archive revoked.
+	Keys int `json:"keys,omitempty,omitzero"`
+
+	// Name The name of what it happened to.
+	Name string `json:"name,omitempty,omitzero"`
+
+	// Prefix A key's first characters; a rotated key's old one's.
+	Prefix string `json:"prefix,omitempty,omitzero"`
+
+	// Revision The revision a workflow published.
+	Revision int `json:"revision,omitempty,omitzero"`
+
+	// Version An upstream's new version.
+	Version int `json:"version,omitempty,omitzero"`
+}
+
+// ChangeDetailHow How a constant changed - a new value, Undo, or made secret.
+type ChangeDetailHow string
+
+// ChangeList defines model for ChangeList.
+type ChangeList struct {
+	Changes []Change `json:"changes"`
+
+	// Next Pass as `before` for the next page. Absent on the last page.
+	Next string `json:"next,omitempty,omitzero"`
+}
+
+// ChangeRecord Something that happened, as recorded (plan 16).
+type ChangeRecord struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Detail What a line about a change says, each kind with the fields it needs. None holds a constant's value.
+	Detail ChangeDetail `json:"detail"`
+	ID     string       `json:"id"`
+
+	// Kind What happened.
+	Kind       ChangeRecordKind `json:"kind"`
+	Provenance Provenance       `json:"provenance"`
+
+	// Subject What it happened to.
+	Subject ChangeRecordSubject `json:"subject"`
+
+	// SubjectID Its id, or a constant's name.
+	SubjectID string `json:"subject_id"`
+}
+
+// ChangeRecordKind What happened.
+type ChangeRecordKind string
+
+// ChangeRecordSubject What it happened to.
+type ChangeRecordSubject string
+
+// ChangeRecordList defines model for ChangeRecordList.
+type ChangeRecordList struct {
+	Changes []ChangeRecord `json:"changes"`
+
+	// Next Pass as `before` for the next page. Absent on the last page.
+	Next string `json:"next,omitempty,omitzero"`
 }
 
 // Constant defines model for Constant.
@@ -849,6 +1138,9 @@ type WayPreview struct {
 
 // Workflow defines model for Workflow.
 type Workflow struct {
+	// ActiveChanges How many of its changes are active (plan 16).
+	ActiveChanges int `json:"active_changes"`
+
 	// ArchivedAt When it was archived. Absent unless it's archived (plan 15).
 	ArchivedAt     time.Time  `json:"archived_at,omitempty,omitzero"`
 	ArchivedBy     Provenance `json:"archived_by,omitempty,omitzero"`
@@ -904,6 +1196,14 @@ type ListConstantsParams struct {
 	Archived bool `form:"archived,omitempty" json:"archived,omitempty,omitzero"`
 }
 
+// ListConstantChangesParams defines parameters for ListConstantChanges.
+type ListConstantChangesParams struct {
+	Limit int `form:"limit,omitempty" json:"limit,omitempty,omitzero"`
+
+	// Before Return changes older than this id, for the next page.
+	Before string `form:"before,omitempty" json:"before,omitempty,omitzero"`
+}
+
 // ListRunsParams defines parameters for ListRuns.
 type ListRunsParams struct {
 	// WorkflowID Only this workflow's runs.
@@ -943,6 +1243,14 @@ type SaveUpstreamParams struct {
 	IfMatch string `json:"If-Match,omitempty,omitzero"`
 }
 
+// ListUpstreamChangesParams defines parameters for ListUpstreamChanges.
+type ListUpstreamChangesParams struct {
+	Limit int `form:"limit,omitempty" json:"limit,omitempty,omitzero"`
+
+	// Before Return changes older than this id, for the next page.
+	Before string `form:"before,omitempty" json:"before,omitempty,omitzero"`
+}
+
 // ListWorkflowsParams defines parameters for ListWorkflows.
 type ListWorkflowsParams struct {
 	Limit int `form:"limit,omitempty" json:"limit,omitempty,omitzero"`
@@ -952,6 +1260,17 @@ type ListWorkflowsParams struct {
 
 	// Archived List what's archived instead of what's in use (plan 15).
 	Archived bool `form:"archived,omitempty" json:"archived,omitempty,omitzero"`
+}
+
+// ListChangesParams defines parameters for ListChanges.
+type ListChangesParams struct {
+	Limit int `form:"limit,omitempty" json:"limit,omitempty,omitzero"`
+
+	// Before Return changes older than this id, for the next page.
+	Before string `form:"before,omitempty" json:"before,omitempty,omitzero"`
+
+	// History List the changes that are no longer active instead of those that are.
+	History bool `form:"history,omitempty" json:"history,omitempty,omitzero"`
 }
 
 // SaveDraftParams defines parameters for SaveDraft.
@@ -1028,6 +1347,9 @@ type ServerInterface interface {
 	// ArchiveConstant Take a constant out of use
 	// (POST /v1/constants/{name}/archive)
 	ArchiveConstant(w http.ResponseWriter, r *http.Request, name ConstantName)
+	// ListConstantChanges List what has happened to a constant, newest first - its changes of value, its archive and its restore
+	// (GET /v1/constants/{name}/changes)
+	ListConstantChanges(w http.ResponseWriter, r *http.Request, name ConstantName, params ListConstantChangesParams)
 	// RestoreConstant Bring an archived constant back as it was
 	// (POST /v1/constants/{name}/restore)
 	RestoreConstant(w http.ResponseWriter, r *http.Request, name ConstantName)
@@ -1073,6 +1395,9 @@ type ServerInterface interface {
 	// ArchiveUpstream Take an upstream out of use
 	// (POST /v1/upstreams/{id}/archive)
 	ArchiveUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID)
+	// ListUpstreamChanges List what has happened to an upstream, newest first - its new versions, its archive and its restore
+	// (GET /v1/upstreams/{id}/changes)
+	ListUpstreamChanges(w http.ResponseWriter, r *http.Request, id UpstreamID, params ListUpstreamChangesParams)
 	// RestoreUpstream Bring an archived upstream back as it was
 	// (POST /v1/upstreams/{id}/restore)
 	RestoreUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID)
@@ -1097,6 +1422,12 @@ type ServerInterface interface {
 	// ArchiveWorkflow Take a workflow out of use
 	// (POST /v1/workflows/{id}/archive)
 	ArchiveWorkflow(w http.ResponseWriter, r *http.Request, id WorkflowID)
+	// ListChanges List what has happened to what a workflow uses, newest first
+	// (GET /v1/workflows/{id}/changes)
+	ListChanges(w http.ResponseWriter, r *http.Request, id WorkflowID, params ListChangesParams)
+	// DismissChange Move an active change to the workflow's history
+	// (POST /v1/workflows/{id}/changes/{change}/dismiss)
+	DismissChange(w http.ResponseWriter, r *http.Request, id WorkflowID, change string)
 	// SaveDraft Save the next revision
 	// (PUT /v1/workflows/{id}/draft)
 	SaveDraft(w http.ResponseWriter, r *http.Request, id WorkflowID, params SaveDraftParams)
@@ -1282,6 +1613,61 @@ func (siw *ServerInterfaceWrapper) ArchiveConstant(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArchiveConstant(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListConstantChanges operation middleware
+func (siw *ServerInterfaceWrapper) ListConstantChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ConstantName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListConstantChangesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConstantChanges(w, r, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1756,6 +2142,61 @@ func (siw *ServerInterfaceWrapper) ArchiveUpstream(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListUpstreamChanges operation middleware
+func (siw *ServerInterfaceWrapper) ListUpstreamChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UpstreamID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListUpstreamChangesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUpstreamChanges(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RestoreUpstream operation middleware
 func (siw *ServerInterfaceWrapper) RestoreUpstream(w http.ResponseWriter, r *http.Request) {
 
@@ -1973,6 +2414,109 @@ func (siw *ServerInterfaceWrapper) ArchiveWorkflow(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArchiveWorkflow(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListChanges operation middleware
+func (siw *ServerInterfaceWrapper) ListChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListChangesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "history" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "history", r.URL.Query(), &params.History, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "history"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "history", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListChanges(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DismissChange operation middleware
+func (siw *ServerInterfaceWrapper) DismissChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id WorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "change" -------------
+	var change string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "change", r.PathValue("change"), &change, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "change", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DismissChange(w, r, id, change)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2429,6 +2973,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/validate", wrapper.ValidateDefinition)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/preview", wrapper.PreviewDefinition)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/runs", wrapper.StartRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{id}/changes", wrapper.ListChanges)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/changes/{change}/dismiss", wrapper.DismissChange)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/workflows/{id}/keys", wrapper.ListKeys)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/keys", wrapper.CreateKey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/workflows/{id}/keys/{key}/rotate", wrapper.RotateKey)
@@ -2440,6 +2986,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/upstreams/{id}", wrapper.SaveUpstream)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams/{id}/archive", wrapper.ArchiveUpstream)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/upstreams/{id}/restore", wrapper.RestoreUpstream)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}/changes", wrapper.ListUpstreamChanges)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}/users", wrapper.ListUpstreamUsers)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/upstreams/{id}/versions/{version}", wrapper.GetUpstreamVersion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/constants", wrapper.ListConstants)
@@ -2448,6 +2995,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/constants/{name}/archive", wrapper.ArchiveConstant)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/constants/{name}/restore", wrapper.RestoreConstant)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/constants/{name}/undo", wrapper.UndoConstant)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/constants/{name}/changes", wrapper.ListConstantChanges)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/constants/{name}/users", wrapper.ListConstantUsers)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs", wrapper.ListRuns)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/runs/{id}", wrapper.GetRun)
@@ -2921,6 +3469,59 @@ func (response ArchiveConstant409ApplicationProblemPlusJSONResponse) VisitArchiv
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConstantChangesRequestObject struct {
+	Name   ConstantName `json:"name"`
+	Params ListConstantChangesParams
+}
+
+type ListConstantChangesResponseObject interface {
+	VisitListConstantChangesResponse(w http.ResponseWriter) error
+}
+
+type ListConstantChanges200JSONResponse ChangeRecordList
+
+func (response ListConstantChanges200JSONResponse) VisitListConstantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConstantChanges401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListConstantChanges401ApplicationProblemPlusJSONResponse) VisitListConstantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConstantChanges404ApplicationProblemPlusJSONResponse Problem
+
+func (response ListConstantChanges404ApplicationProblemPlusJSONResponse) VisitListConstantChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3828,6 +4429,59 @@ func (response ArchiveUpstream409ApplicationProblemPlusJSONResponse) VisitArchiv
 	return err
 }
 
+type ListUpstreamChangesRequestObject struct {
+	ID     UpstreamID `json:"id"`
+	Params ListUpstreamChangesParams
+}
+
+type ListUpstreamChangesResponseObject interface {
+	VisitListUpstreamChangesResponse(w http.ResponseWriter) error
+}
+
+type ListUpstreamChanges200JSONResponse ChangeRecordList
+
+func (response ListUpstreamChanges200JSONResponse) VisitListUpstreamChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUpstreamChanges401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListUpstreamChanges401ApplicationProblemPlusJSONResponse) VisitListUpstreamChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUpstreamChanges404ApplicationProblemPlusJSONResponse Problem
+
+func (response ListUpstreamChanges404ApplicationProblemPlusJSONResponse) VisitListUpstreamChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RestoreUpstreamRequestObject struct {
 	ID UpstreamID `json:"id"`
 }
@@ -4273,6 +4927,112 @@ func (response ArchiveWorkflow409ApplicationProblemPlusJSONResponse) VisitArchiv
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListChangesRequestObject struct {
+	ID     WorkflowID `json:"id"`
+	Params ListChangesParams
+}
+
+type ListChangesResponseObject interface {
+	VisitListChangesResponse(w http.ResponseWriter) error
+}
+
+type ListChanges200JSONResponse ChangeList
+
+func (response ListChanges200JSONResponse) VisitListChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListChanges401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response ListChanges401ApplicationProblemPlusJSONResponse) VisitListChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListChanges404ApplicationProblemPlusJSONResponse Problem
+
+func (response ListChanges404ApplicationProblemPlusJSONResponse) VisitListChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DismissChangeRequestObject struct {
+	ID     WorkflowID `json:"id"`
+	Change string     `json:"change"`
+}
+
+type DismissChangeResponseObject interface {
+	VisitDismissChangeResponse(w http.ResponseWriter) error
+}
+
+type DismissChange200JSONResponse Change
+
+func (response DismissChange200JSONResponse) VisitDismissChangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DismissChange401ApplicationProblemPlusJSONResponse struct {
+	ProblemApplicationProblemPlusJSONResponse
+}
+
+func (response DismissChange401ApplicationProblemPlusJSONResponse) VisitDismissChangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DismissChange404ApplicationProblemPlusJSONResponse Problem
+
+func (response DismissChange404ApplicationProblemPlusJSONResponse) VisitDismissChangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -5058,6 +5818,9 @@ type StrictServerInterface interface {
 	// ArchiveConstant Take a constant out of use
 	// (POST /v1/constants/{name}/archive)
 	ArchiveConstant(ctx context.Context, request ArchiveConstantRequestObject) (ArchiveConstantResponseObject, error)
+	// ListConstantChanges List what has happened to a constant, newest first - its changes of value, its archive and its restore
+	// (GET /v1/constants/{name}/changes)
+	ListConstantChanges(ctx context.Context, request ListConstantChangesRequestObject) (ListConstantChangesResponseObject, error)
 	// RestoreConstant Bring an archived constant back as it was
 	// (POST /v1/constants/{name}/restore)
 	RestoreConstant(ctx context.Context, request RestoreConstantRequestObject) (RestoreConstantResponseObject, error)
@@ -5103,6 +5866,9 @@ type StrictServerInterface interface {
 	// ArchiveUpstream Take an upstream out of use
 	// (POST /v1/upstreams/{id}/archive)
 	ArchiveUpstream(ctx context.Context, request ArchiveUpstreamRequestObject) (ArchiveUpstreamResponseObject, error)
+	// ListUpstreamChanges List what has happened to an upstream, newest first - its new versions, its archive and its restore
+	// (GET /v1/upstreams/{id}/changes)
+	ListUpstreamChanges(ctx context.Context, request ListUpstreamChangesRequestObject) (ListUpstreamChangesResponseObject, error)
 	// RestoreUpstream Bring an archived upstream back as it was
 	// (POST /v1/upstreams/{id}/restore)
 	RestoreUpstream(ctx context.Context, request RestoreUpstreamRequestObject) (RestoreUpstreamResponseObject, error)
@@ -5127,6 +5893,12 @@ type StrictServerInterface interface {
 	// ArchiveWorkflow Take a workflow out of use
 	// (POST /v1/workflows/{id}/archive)
 	ArchiveWorkflow(ctx context.Context, request ArchiveWorkflowRequestObject) (ArchiveWorkflowResponseObject, error)
+	// ListChanges List what has happened to what a workflow uses, newest first
+	// (GET /v1/workflows/{id}/changes)
+	ListChanges(ctx context.Context, request ListChangesRequestObject) (ListChangesResponseObject, error)
+	// DismissChange Move an active change to the workflow's history
+	// (POST /v1/workflows/{id}/changes/{change}/dismiss)
+	DismissChange(ctx context.Context, request DismissChangeRequestObject) (DismissChangeResponseObject, error)
 	// SaveDraft Save the next revision
 	// (PUT /v1/workflows/{id}/draft)
 	SaveDraft(ctx context.Context, request SaveDraftRequestObject) (SaveDraftResponseObject, error)
@@ -5391,6 +6163,33 @@ func (sh *strictHandler) ArchiveConstant(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArchiveConstantResponseObject); ok {
 		if err := validResponse.VisitArchiveConstantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListConstantChanges operation middleware
+func (sh *strictHandler) ListConstantChanges(w http.ResponseWriter, r *http.Request, name ConstantName, params ListConstantChangesParams) {
+	var request ListConstantChangesRequestObject
+
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConstantChanges(ctx, request.(ListConstantChangesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConstantChanges")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConstantChangesResponseObject); ok {
+		if err := validResponse.VisitListConstantChangesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -5817,6 +6616,33 @@ func (sh *strictHandler) ArchiveUpstream(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// ListUpstreamChanges operation middleware
+func (sh *strictHandler) ListUpstreamChanges(w http.ResponseWriter, r *http.Request, id UpstreamID, params ListUpstreamChangesParams) {
+	var request ListUpstreamChangesRequestObject
+
+	request.ID = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUpstreamChanges(ctx, request.(ListUpstreamChangesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUpstreamChanges")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUpstreamChangesResponseObject); ok {
+		if err := validResponse.VisitListUpstreamChangesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RestoreUpstream operation middleware
 func (sh *strictHandler) RestoreUpstream(w http.ResponseWriter, r *http.Request, id UpstreamID) {
 	var request RestoreUpstreamRequestObject
@@ -6029,6 +6855,60 @@ func (sh *strictHandler) ArchiveWorkflow(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArchiveWorkflowResponseObject); ok {
 		if err := validResponse.VisitArchiveWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListChanges operation middleware
+func (sh *strictHandler) ListChanges(w http.ResponseWriter, r *http.Request, id WorkflowID, params ListChangesParams) {
+	var request ListChangesRequestObject
+
+	request.ID = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListChanges(ctx, request.(ListChangesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListChanges")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListChangesResponseObject); ok {
+		if err := validResponse.VisitListChangesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DismissChange operation middleware
+func (sh *strictHandler) DismissChange(w http.ResponseWriter, r *http.Request, id WorkflowID, change string) {
+	var request DismissChangeRequestObject
+
+	request.ID = id
+	request.Change = change
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DismissChange(ctx, request.(DismissChangeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DismissChange")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DismissChangeResponseObject); ok {
+		if err := validResponse.VisitDismissChangeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

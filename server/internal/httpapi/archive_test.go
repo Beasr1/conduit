@@ -256,7 +256,7 @@ func TestArchive_StopsServing(t *testing.T) {
 		t.Errorf("serve archived = %d %+v", r.status, p)
 	}
 	keys := strict[gen.CallerKeyList](t, call(t, http.MethodGet, id+"/keys", "").body)
-	if len(keys.Keys) != 1 || keys.Keys[0].Status != gen.Revoked {
+	if len(keys.Keys) != 1 || keys.Keys[0].Status != gen.CallerKeyStatusRevoked {
 		t.Errorf("its keys = %+v", keys)
 	}
 

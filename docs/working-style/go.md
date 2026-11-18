@@ -201,6 +201,10 @@ server/
   Archive and Publish share one advisory transaction lock, the store's only
   one, and Publish's check runs inside it, on that connection: reading from
   the pool while holding it could leave every connection waiting.
+- A change to what a workflow uses is written in the transaction that
+  makes it (`record`), with an entry for each workflow it touches, worked
+  out then (plan 16). Whether an entry is active is worked out as it's
+  read, in SQL (`changeState`), never stored, so nothing runs on a clock.
 - A run is recorded as it goes: each node when it ends, the run when it
   ends. Header and query values with secret-looking names are stored as
   `[redacted]`, and bodies over 256 KiB as a string of their first

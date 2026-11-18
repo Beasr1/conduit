@@ -155,7 +155,7 @@ func TestKeys_MadeListedAndNamedByItsRuns(t *testing.T) {
 	id := wr.Workflow.ID
 	made := makeKey(t, id, "CRM sync")
 	if !keyShape.MatchString(made.Value) || made.Key.Prefix != made.Value[:8] || made.Key.Name != "CRM sync" ||
-		made.Key.Status != gen.Active || made.Key.Provenance.Actor != "token" {
+		made.Key.Status != gen.CallerKeyStatusActive || made.Key.Provenance.Actor != "token" {
 		t.Errorf("made %+v", made)
 	}
 	if again := makeKey(t, id, "Mobile app"); again.Value == made.Value || again.Key.Prefix == "" {
@@ -228,8 +228,8 @@ func TestKeys_Rotate(t *testing.T) {
 		t.Fatalf("rotate = %d %s", r.status, r.body)
 	}
 	second := strict[gen.RotatedKey](t, r.body)
-	if !keyShape.MatchString(second.Value) || second.Key.Name != "Mobile app" || second.Key.Status != gen.Active ||
-		second.Old.ID != first.Key.ID || second.Old.Status != gen.Expiring {
+	if !keyShape.MatchString(second.Value) || second.Key.Name != "Mobile app" || second.Key.Status != gen.CallerKeyStatusActive ||
+		second.Old.ID != first.Key.ID || second.Old.Status != gen.CallerKeyStatusExpiring {
 		t.Errorf("rotated %+v", second)
 	}
 	if left := second.Old.ExpiresAt.Sub(second.Old.CreatedAt); left < 59*time.Minute || left > 61*time.Minute {
@@ -260,7 +260,7 @@ func TestKeys_Rotate(t *testing.T) {
 	// Rotated now, the old one stops at once.
 	r = rotate(t, id, second.Key.ID, "now")
 	third := strict[gen.RotatedKey](t, r.body)
-	if r.status != http.StatusOK || third.Old.Status != gen.Expired {
+	if r.status != http.StatusOK || third.Old.Status != gen.CallerKeyStatusExpired {
 		t.Fatalf("rotate now = %d %s", r.status, r.body)
 	}
 	if r := serveWith(t, slug, second.Value, `{"user_id": "7"}`); r.status != http.StatusUnauthorized {
@@ -296,7 +296,7 @@ func TestKeys_Revoke(t *testing.T) {
 		return strict[gen.CallerKey](t, r.body)
 	}
 	revoked := revoke()
-	if revoked.Status != gen.Revoked || revoked.RevokedAt.IsZero() {
+	if revoked.Status != gen.CallerKeyStatusRevoked || revoked.RevokedAt.IsZero() {
 		t.Errorf("revoked %+v", revoked)
 	}
 	if r := serveWith(t, wr.Workflow.Slug, made.Value, `{"user_id": "7"}`); r.status != http.StatusUnauthorized {
@@ -309,7 +309,7 @@ func TestKeys_Revoke(t *testing.T) {
 		t.Errorf("rotate a revoked key = %d %s", r.status, r.body)
 	}
 	keys := strict[gen.CallerKeyList](t, call(t, http.MethodGet, "/v1/workflows/"+id+"/keys", "").body).Keys
-	if len(keys) != 1 || keys[0].Status != gen.Revoked {
+	if len(keys) != 1 || keys[0].Status != gen.CallerKeyStatusRevoked {
 		t.Errorf("keys = %+v; want the revoked one", keys)
 	}
 	// Its name is free again.

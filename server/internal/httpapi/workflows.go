@@ -154,7 +154,7 @@ func (a *api) GetRevision(ctx context.Context, req gen.GetRevisionRequestObject)
 }
 
 func (a *api) PublishWorkflow(ctx context.Context, req gen.PublishWorkflowRequestObject) (gen.PublishWorkflowResponseObject, error) {
-	w, err := a.store.Publish(ctx, req.ID, req.Body.Revision, func(d *workflow.Definition, deps workflow.Deps) error {
+	w, err := a.store.Publish(ctx, req.ID, req.Body.Revision, provenance(ctx), func(d *workflow.Definition, deps workflow.Deps) error {
 		if ps := problemsIn(d, deps, req.ID); len(ps) > 0 {
 			return invalidDefinition(ps, "Revision %d has problems, so it can't be published.", req.Body.Revision)
 		}
@@ -323,6 +323,7 @@ func workflowOut(w store.Workflow) gen.Workflow {
 		out.PublishedRevision = *w.PublishedRevision
 	}
 	out.ArchivedAt, out.ArchivedBy = archiveOut(w.ArchivedAt, w.ArchivedBy)
+	out.ActiveChanges = w.ActiveChanges
 	return out
 }
 

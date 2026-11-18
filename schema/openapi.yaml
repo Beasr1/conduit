@@ -405,6 +405,67 @@ paths:
         "508":
           $ref: "#/components/responses/Problem"
 
+  /v1/workflows/{id}/changes:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    get:
+      operationId: listChanges
+      summary: List what has happened to what a workflow uses, newest first
+      description: The workflow's changes list (plan 16). Without history, the active ones, what's still to come or waits on someone; with history=true, the rest, each saying whether it was dealt with or dismissed. A change is recorded as it happens and kept for good, and none holds a constant's value.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: before
+          in: query
+          description: Return changes older than this id, for the next page.
+          schema:
+            type: string
+        - name: history
+          in: query
+          description: List the changes that are no longer active instead of those that are.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: A page of changes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangeList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
+  /v1/workflows/{id}/changes/{change}/dismiss:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+      - name: change
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: dismissChange
+      summary: Move an active change to the workflow's history
+      description: It stays in the history, saying it was dismissed, when and by what. Dismissing one that isn't active changes nothing.
+      responses:
+        "200":
+          description: Dismissed, or as it was.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Change"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
   /v1/workflows/{id}/keys:
     parameters:
       - $ref: "#/components/parameters/WorkflowID"
@@ -680,6 +741,38 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
 
+  /v1/upstreams/{id}/changes:
+    parameters:
+      - $ref: "#/components/parameters/UpstreamID"
+    get:
+      operationId: listUpstreamChanges
+      summary: List what has happened to an upstream, newest first - its new versions, its archive and its restore
+      description: Its changes as recorded (plan 16), kept for good. Nothing live uses something archived, so this is where its archive and restore are seen.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: before
+          in: query
+          description: Return changes older than this id, for the next page.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of changes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangeRecordList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
   /v1/upstreams/{id}/users:
     parameters:
       - $ref: "#/components/parameters/UpstreamID"
@@ -858,6 +951,38 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
         "409":
+          $ref: "#/components/responses/Problem"
+
+  /v1/constants/{name}/changes:
+    parameters:
+      - $ref: "#/components/parameters/ConstantName"
+    get:
+      operationId: listConstantChanges
+      summary: List what has happened to a constant, newest first - its changes of value, its archive and its restore
+      description: Its changes as recorded (plan 16), kept for good. Nothing live uses something archived, so this is where its archive and restore are seen.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: before
+          in: query
+          description: Return changes older than this id, for the next page.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of changes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangeRecordList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
           $ref: "#/components/responses/Problem"
 
   /v1/constants/{name}/users:
@@ -1088,7 +1213,7 @@ components:
 
     Workflow:
       type: object
-      required: [id, slug, name, latest_revision, created_at]
+      required: [id, slug, name, latest_revision, created_at, active_changes]
       properties:
         id:
           type: string
@@ -1111,6 +1236,9 @@ components:
           description: When it was archived. Absent unless it's archived (plan 15).
         archived_by:
           $ref: "#/components/schemas/Provenance"
+        active_changes:
+          type: integer
+          description: How many of its changes are active (plan 16).
 
     WorkflowList:
       type: object
@@ -1762,6 +1890,120 @@ components:
               description: What each node did, in the order they ended. Only from GET /v1/runs/{id}.
               items:
                 $ref: "#/components/schemas/NodeRun"
+
+    ChangeDetail:
+      type: object
+      description: What a line about a change says, each kind with the fields it needs. None holds a constant's value.
+      properties:
+        name:
+          type: string
+          description: The name of what it happened to.
+        version:
+          type: integer
+          description: An upstream's new version.
+        revision:
+          type: integer
+          description: The revision a workflow published.
+        how:
+          type: string
+          enum: [set, undone, made_secret]
+          description: How a constant changed - a new value, Undo, or made secret.
+        prefix:
+          type: string
+          description: A key's first characters; a rotated key's old one's.
+        expires_at:
+          type: string
+          format: date-time
+          description: When a rotated key's old value stops working.
+        keys:
+          type: integer
+          description: How many keys an archive revoked.
+
+    ChangeRecord:
+      type: object
+      description: Something that happened, as recorded (plan 16).
+      required: [id, kind, subject, subject_id, detail, provenance, created_at]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [constant_changed, constant_archived, constant_restored, upstream_version, upstream_archived, upstream_restored, workflow_published, workflow_archived, workflow_restored, key_made, key_rotated, key_revoked]
+          description: What happened.
+        subject:
+          type: string
+          enum: [workflow, upstream, constant, key]
+          description: What it happened to.
+        subject_id:
+          type: string
+          description: Its id, or a constant's name.
+        detail:
+          $ref: "#/components/schemas/ChangeDetail"
+        provenance:
+          $ref: "#/components/schemas/Provenance"
+        created_at:
+          type: string
+          format: date-time
+
+    ChangeRecordList:
+      type: object
+      required: [changes]
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangeRecord"
+        next:
+          type: string
+          description: Pass as `before` for the next page. Absent on the last page.
+
+    Change:
+      type: object
+      description: A change on a workflow's list (plan 16), as it stands now.
+      required: [id, kind, subject, subject_id, detail, provenance, created_at, state]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [constant_changed, constant_archived, constant_restored, upstream_version, upstream_archived, upstream_restored, workflow_published, workflow_archived, workflow_restored, key_made, key_rotated, key_revoked]
+          description: What happened.
+        subject:
+          type: string
+          enum: [workflow, upstream, constant, key]
+          description: What it happened to.
+        subject_id:
+          type: string
+          description: Its id, or a constant's name.
+        detail:
+          $ref: "#/components/schemas/ChangeDetail"
+        provenance:
+          $ref: "#/components/schemas/Provenance"
+        created_at:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum: [active, dismissed, done]
+          description: active, still to come or waiting on someone; dismissed; done, dealt with, or nothing ever waited on it.
+        dismissed_at:
+          type: string
+          format: date-time
+          description: When it was dismissed. Absent unless it was.
+        dismissed_by:
+          $ref: "#/components/schemas/Provenance"
+
+    ChangeList:
+      type: object
+      required: [changes]
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Change"
+        next:
+          type: string
+          description: Pass as `before` for the next page. Absent on the last page.
 
     RunList:
       type: object

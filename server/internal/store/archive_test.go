@@ -53,7 +53,7 @@ func saved(t *testing.T, name string, defs ...json.RawMessage) store.Workflow {
 
 func publish(t *testing.T, id string, revision int) {
 	t.Helper()
-	if _, err := db.Publish(t.Context(), id, revision, storetest.NoCheck); err != nil {
+	if _, err := db.Publish(t.Context(), id, revision, person, storetest.NoCheck); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -94,14 +94,14 @@ func TestArchiveWorkflow(t *testing.T) {
 		t.Errorf("Workflow() = %+v, %v", read, err)
 	}
 
-	back, err := db.RestoreWorkflow(ctx, w.ID)
+	back, err := db.RestoreWorkflow(ctx, w.ID, person)
 	if err != nil || back.ArchivedAt != nil || back.ArchivedBy != nil || back.PublishedRevision == nil || *back.PublishedRevision != 1 {
 		t.Errorf("RestoreWorkflow() = %+v, %v", back, err)
 	}
 	if !listed(false) || listed(true) {
 		t.Errorf("restored: listed in use %t, archived %t", listed(false), listed(true))
 	}
-	if same, err := db.RestoreWorkflow(ctx, w.ID); err != nil || same.ArchivedAt != nil {
+	if same, err := db.RestoreWorkflow(ctx, w.ID, person); err != nil || same.ArchivedAt != nil {
 		t.Errorf("restoring it again = %+v, %v", same, err)
 	}
 
@@ -109,7 +109,7 @@ func TestArchiveWorkflow(t *testing.T) {
 		if _, err := db.ArchiveWorkflow(ctx, id, person); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("ArchiveWorkflow(%q) = %v, want ErrNotFound", id, err)
 		}
-		if _, err := db.RestoreWorkflow(ctx, id); !errors.Is(err, store.ErrNotFound) {
+		if _, err := db.RestoreWorkflow(ctx, id, person); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("RestoreWorkflow(%q) = %v, want ErrNotFound", id, err)
 		}
 	}
@@ -147,7 +147,7 @@ func TestArchiveUpstream(t *testing.T) {
 	if _, err := db.UpstreamVersion(ctx, u.ID, 1); err != nil {
 		t.Errorf("its version 1 = %v", err)
 	}
-	back, err := db.RestoreUpstream(ctx, u.ID)
+	back, err := db.RestoreUpstream(ctx, u.ID, person)
 	if err != nil || back.ArchivedAt != nil || back.ArchivedBy != nil {
 		t.Errorf("RestoreUpstream() = %+v, %v", back, err)
 	}
@@ -158,7 +158,7 @@ func TestArchiveUpstream(t *testing.T) {
 		if _, err := db.ArchiveUpstream(ctx, id, person); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("ArchiveUpstream(%q) = %v, want ErrNotFound", id, err)
 		}
-		if _, err := db.RestoreUpstream(ctx, id); !errors.Is(err, store.ErrNotFound) {
+		if _, err := db.RestoreUpstream(ctx, id, person); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("RestoreUpstream(%q) = %v, want ErrNotFound", id, err)
 		}
 	}
@@ -193,7 +193,7 @@ func TestArchiveConstant(t *testing.T) {
 	if i < 0 || all[i].Value != "second" || all[i].ArchivedAt == nil {
 		t.Errorf("Constants() holds %d: %+v", i, all)
 	}
-	back, err := db.RestoreConstant(ctx, name)
+	back, err := db.RestoreConstant(ctx, name, person)
 	if err != nil || back.ArchivedAt != nil || back.ArchivedBy != nil || back.Value != "second" || !back.HasPrevious {
 		t.Errorf("RestoreConstant() = %+v, %v", back, err)
 	}
@@ -205,7 +205,7 @@ func TestArchiveConstant(t *testing.T) {
 	if _, err := db.ArchiveConstant(ctx, missing, person); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("ArchiveConstant(missing) = %v, want ErrNotFound", err)
 	}
-	if _, err := db.RestoreConstant(ctx, missing); !errors.Is(err, store.ErrNotFound) {
+	if _, err := db.RestoreConstant(ctx, missing, person); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("RestoreConstant(missing) = %v, want ErrNotFound", err)
 	}
 }
@@ -488,7 +488,7 @@ func TestArchived_RefusesChanges(t *testing.T) {
 		change func() error
 	}{
 		{"a draft", func() error { _, err := db.SaveRevision(ctx, w.ID, 2, def(3), person); return err }},
-		{"a publish", func() error { _, err := db.Publish(ctx, w.ID, 2, storetest.NoCheck); return err }},
+		{"a publish", func() error { _, err := db.Publish(ctx, w.ID, 2, person, storetest.NoCheck); return err }},
 		{"a new key", func() error { _, err := db.CreateKey(ctx, w.ID, "beta", mint(t), person); return err }},
 		{"a rotation", func() error { _, _, err := db.RotateKey(ctx, w.ID, key.ID, 0, mint(t), person); return err }},
 		{"a version", func() error { _, err := db.SaveUpstreamVersion(ctx, u.ID, 1, upstreamDef(2), person); return err }},
@@ -501,9 +501,9 @@ func TestArchived_RefusesChanges(t *testing.T) {
 		}
 	}
 	for _, restore := range []func() error{
-		func() error { _, err := db.RestoreWorkflow(ctx, w.ID); return err },
-		func() error { _, err := db.RestoreUpstream(ctx, u.ID); return err },
-		func() error { _, err := db.RestoreConstant(ctx, name); return err },
+		func() error { _, err := db.RestoreWorkflow(ctx, w.ID, person); return err },
+		func() error { _, err := db.RestoreUpstream(ctx, u.ID, person); return err },
+		func() error { _, err := db.RestoreConstant(ctx, name, person); return err },
 	} {
 		if err := restore(); err != nil {
 			t.Fatal(err)
@@ -557,7 +557,7 @@ func TestArchiveWorkflow_RevokesKeys(t *testing.T) {
 		t.Errorf("the keys stand %v", status)
 	}
 
-	if _, err := db.RestoreWorkflow(ctx, w.ID); err != nil {
+	if _, err := db.RestoreWorkflow(ctx, w.ID, person); err != nil {
 		t.Fatal(err)
 	}
 	if serves(t, w.Slug, activeKey) || serves(t, w.Slug, rotatedKey) {
@@ -644,7 +644,7 @@ func TestDeps_Archived(t *testing.T) {
 	if _, err := db.ArchiveUpstream(ctx, inUse.ID, person); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.RestoreUpstream(ctx, inUse.ID); err != nil {
+	if _, err := db.RestoreUpstream(ctx, inUse.ID, person); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ArchiveConstant(ctx, gone, person); err != nil {
@@ -687,7 +687,7 @@ func TestPublish_Checks(t *testing.T) {
 	wrong := errors.New("it has problems")
 	var checked *workflow.Definition
 	var deps workflow.Deps
-	_, err = db.Publish(ctx, w.ID, 1, func(d *workflow.Definition, ds workflow.Deps) error {
+	_, err = db.Publish(ctx, w.ID, 1, person, func(d *workflow.Definition, ds workflow.Deps) error {
 		checked, deps = d, ds
 		return wrong
 	})
@@ -738,7 +738,7 @@ func TestArchive_WaitsForAPublish(t *testing.T) {
 	}
 	defer conn.Close(ctx)
 	done := make(chan error, 1)
-	_, err = db.Publish(ctx, w.ID, 1, func(*workflow.Definition, workflow.Deps) error {
+	_, err = db.Publish(ctx, w.ID, 1, person, func(*workflow.Definition, workflow.Deps) error {
 		go func() {
 			_, err := db.ArchiveUpstream(context.Background(), u.ID, person)
 			done <- err

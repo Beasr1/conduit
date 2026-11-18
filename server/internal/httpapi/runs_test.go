@@ -95,7 +95,7 @@ func published(t *testing.T, base, def string) gen.WorkflowRevision {
 func publishedBefore(t *testing.T, base, def string) gen.WorkflowRevision {
 	t.Helper()
 	wr := create(t, strings.ReplaceAll(def, "BASE", base))
-	if _, err := db.Publish(t.Context(), wr.Workflow.ID, 1, storetest.NoCheck); err != nil {
+	if _, err := db.Publish(t.Context(), wr.Workflow.ID, 1, store.Provenance{Actor: "token"}, storetest.NoCheck); err != nil {
 		t.Fatal(err)
 	}
 	return wr

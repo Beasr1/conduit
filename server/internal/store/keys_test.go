@@ -170,7 +170,7 @@ func TestKeys_OnlyAnActiveKeyRotates(t *testing.T) {
 	}
 
 	revoked, _ := makeKey(t, w, "Billing")
-	if _, err := db.RevokeKey(ctx, w.ID, revoked.ID); err != nil {
+	if _, err := db.RevokeKey(ctx, w.ID, revoked.ID, person); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := db.RotateKey(ctx, w.ID, revoked.ID, time.Hour, mint(t), person); !errors.Is(err, store.ErrKeyNotActive) {
@@ -185,17 +185,17 @@ func TestKeys_RevokedStopsAtOnce(t *testing.T) {
 	ctx := t.Context()
 	w, other := create(t), create(t)
 	key, k := makeKey(t, w, "CRM sync")
-	if _, err := db.RevokeKey(ctx, other.ID, key.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := db.RevokeKey(ctx, other.ID, key.ID, person); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("revoked through another workflow: %v; want ErrNotFound", err)
 	}
-	revoked, err := db.RevokeKey(ctx, w.ID, key.ID)
+	revoked, err := db.RevokeKey(ctx, w.ID, key.ID, person)
 	if err != nil || revoked.Status != "revoked" || revoked.RevokedAt == nil {
 		t.Fatalf("RevokeKey() = %+v, %v", revoked, err)
 	}
 	if serves(t, w.Slug, k) {
 		t.Error("a revoked key serves")
 	}
-	again, err := db.RevokeKey(ctx, w.ID, key.ID)
+	again, err := db.RevokeKey(ctx, w.ID, key.ID, person)
 	if err != nil || again.RevokedAt == nil || !again.RevokedAt.Equal(*revoked.RevokedAt) {
 		t.Errorf("revoked again = %+v, %v; want it as it was", again, err)
 	}
@@ -204,7 +204,7 @@ func TestKeys_RevokedStopsAtOnce(t *testing.T) {
 	if _, _, err := db.RotateKey(ctx, w.ID, gone.ID, 0, mint(t), person); err != nil {
 		t.Fatal(err)
 	}
-	expired, err := db.RevokeKey(ctx, w.ID, gone.ID)
+	expired, err := db.RevokeKey(ctx, w.ID, gone.ID, person)
 	if err != nil || expired.Status != "expired" || expired.RevokedAt != nil {
 		t.Errorf("revoked past its expiry = %+v, %v; want it expired, as it was", expired, err)
 	}
@@ -226,7 +226,7 @@ func TestKeys_ActiveKeysHaveNamesOfTheirOwn(t *testing.T) {
 		t.Errorf("a second active CRM sync: %v; want ErrConflict", err)
 	}
 	makeKey(t, other, "CRM sync")
-	if _, err := db.RevokeKey(ctx, w.ID, key.ID); err != nil {
+	if _, err := db.RevokeKey(ctx, w.ID, key.ID, person); err != nil {
 		t.Fatal(err)
 	}
 	makeKey(t, w, "CRM sync")

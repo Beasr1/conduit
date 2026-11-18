@@ -22,6 +22,7 @@ type Workflow struct {
 	CreatedAt         time.Time   `db:"created_at"`
 	ArchivedAt        *time.Time  `db:"archived_at"` // nil unless it's archived (plan 15)
 	ArchivedBy        *Provenance `db:"archived_by"`
+	ActiveChanges     int         `db:"active_changes"` // how many of its changes are active (plan 16)
 }
 
 // Revision is one saved definition. It never changes once written.
@@ -41,7 +42,7 @@ type Provenance struct {
 }
 
 const (
-	workflowColumns = `id::text AS id, slug, name, latest_revision, published_revision, created_at, archived_at, archived_by`
+	workflowColumns = `id::text AS id, slug, name, latest_revision, published_revision, created_at, archived_at, archived_by, ` + activeChanges
 	revisionColumns = `workflow_id::text AS workflow_id, revision, definition, provenance, created_at`
 )
 
@@ -170,8 +171,9 @@ func (s *Store) SaveRevision(ctx context.Context, id string, base int, def json.
 // All of it holds lockArchive, in one transaction, so nothing check saw in
 // use is archived before the revision is live, and check, which is given
 // all it needs, waits for no connection while this one holds the lock. An
-// archived workflow is ErrArchived.
-func (s *Store) Publish(ctx context.Context, id string, revision int, check func(*workflow.Definition, workflow.Deps) error) (Workflow, error) {
+// archived workflow is ErrArchived. A revision newly served goes on the list
+// of each workflow that pins an older one (plan 16).
+func (s *Store) Publish(ctx context.Context, id string, revision int, p Provenance, check func(*workflow.Definition, workflow.Deps) error) (Workflow, error) {
 	var w Workflow
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := lockArchive(ctx, tx); err != nil {
@@ -195,6 +197,23 @@ func (s *Store) Publish(ctx context.Context, id string, revision int, check func
 		}
 		if err := check(&d, deps); err != nil {
 			return err
+		}
+		var was *int
+		if err := tx.QueryRow(ctx, `SELECT published_revision FROM workflows WHERE id = $1::uuid`, id).Scan(&was); err != nil {
+			return err
+		}
+		if was == nil || *was != revision {
+			to, err := pinners(ctx, tx, "workflow", id, revision)
+			if err != nil {
+				return err
+			}
+			var name string
+			if err := tx.QueryRow(ctx, `SELECT name FROM workflows WHERE id = $1::uuid`, id).Scan(&name); err != nil {
+				return err
+			}
+			if err := record(ctx, tx, "workflow_published", "workflow", id, ChangeDetail{Name: name, Revision: revision}, p, to...); err != nil {
+				return err
+			}
 		}
 		w, err = one[Workflow](ctx, tx, `UPDATE workflows SET published_revision = $2
 			WHERE id = $1::uuid RETURNING `+workflowColumns, id, revision)

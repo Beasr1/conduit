@@ -99,6 +99,7 @@ resolve, but their claims weren't re-read.
 | Disabling a secret apart from destroying it (plan 15): an archived secret keeps its sealed value | Vault "uses soft deletes to make data inaccessible while allowing data recovery" ✓ [120]; Google: "Destroying a secret version is a permanent action", so "try disabling it first" ✓ [121]. Destroying a value is on the README's list, as GDPR's storage limitation, personal data "kept in a form which permits identification of data subjects for no longer than is necessary" ✓ [123], doesn't fit a value kept for ever |
 | Archive and Publish take one lock of their own (plan 15) | PostgreSQL: advisory locks "can be useful for locking strategies that are an awkward fit for the MVCC model", and transaction-level ones "are automatically released at the end of the transaction, and there is no explicit unlock operation" ✓ [124] |
 | One fieldset makes a read-only panel, a tab a `div` inside it (plan 15) | HTML: `disabled` on a fieldset "causes all the form control descendants of the fieldset element" to be disabled ✓ [125]; Base UI's `nativeButton`: "Set to `false` if the rendered element is not a button (for example, `<div>`)" ✓ [126] |
+| A workflow's changes are kept for good, active until dealt with or dismissed (plan 16, 2026-11-12) | Dependabot's split: an alert is dismissed with "a reason", or `fixed` by GitHub itself, as a person can set only `dismissed` or `open` ✓ [128][129] |
 | What a field is for is a hint behind ⓘ beside its label, a line or two, rather than a sentence under it; a hint is a popover that opens on hover or a press (plan 13, 2026-11-02) | Base UI: "Popups that open when hovering an info icon should use Popover with the openOnHover prop on the trigger instead of a tooltip", as "Tooltips don't work well with touch input" and "are disabled on touch devices"; and "If the description is important to understanding the element, don't hide it behind a tooltip" ✓ [89], so a problem stays under its field |
 
 ## Contested: kept anyway, revisit if it hurts
@@ -112,6 +113,7 @@ resolve, but their claims weren't re-read.
 | gnata | created 2026-03-10 ✓, ported with AI, pre-1.0, breaking changes in 0.6.0 ✓ | the alternatives are stale (blues/jsonata-go targets JSONata 1.5.4). Pin it exact, wrap it, golden-test it |
 | No Redis in v1 | the spec lists it | nothing in v1 needs it; agreed as D7 |
 | nginx's stable branch | nginx recommends mainline: "This version is recommended for production unless your organization has strict requirements for stability" ✓ [86] | fewer changes. CI builds the images and tests nginx's config (`just images`, 2026-11-01), so following mainline is dropping one ignore rule in `dependabot.yml` |
+| History kept for good (plan 16, your call, 2026-11-05) | GitHub keeps notifications marked Done "for 3 months" ✓ [130]; Stripe's events can be retrieved "for 30 days" ✓ [131]; Kubernetes keeps events an hour, `--event-ttl` defaulting to `1h0m0s` ✓ [132] | an audit trail is the point, and the rows are small; a retention rule can come with accounts if it must |
 | Only what nothing live uses is archived (plan 15, 2026-11-06) | Stripe archives what's still in use: a price's `active` is "Whether the price can be used for new purchases" ✓ [127], so what uses it goes on | your call: archived means retired, so nothing runs on it, and the refusal names what's left to do |
 | Upstreams only: Publish refuses an HTTP step with a request of its own (plan 07, 2026-11-03) | every tool checked keeps a generic HTTP step beside its catalog: n8n's HTTP Request node "allows you to make HTTP requests to query data from any app or service with a REST API" ✓ [105]; Logic Apps: "To call an endpoint from anywhere else in your workflow, add the built-in action named HTTP" ✓ [106]; Step Functions' HTTP Task holds its URL and method itself, and shares only the credentials, through a connection that "helps you avoid hard-coding secrets, such as API keys, into your state machine definition" ✓ [107] | your call: every call, and how it's handled, in one place. Their catalogs are the vendor's, so a generic step is the only way to an API they lack; ours is the user's, and Add HTTP step makes an upstream from a call |
 | 508 for a loop (plan 06) | none of the gateways checked uses it: Fastly answers 503, Envoy 502, Tyk 500; RFC 5842 defines it for WebDAV's "Depth: infinity" ✓ [101] | it's the registered code named for a loop, and a 503 asks for a retry that never helps one (your call, with plan 06, 2026-11-02) |
@@ -305,6 +307,11 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 125. https://html.spec.whatwg.org/multipage/form-elements.html#the-fieldset-element
 126. https://base-ui.com/react/components/tabs
 127. https://docs.stripe.com/api/prices/update
+128. https://docs.github.com/en/code-security/dependabot/dependabot-alerts/viewing-and-updating-dependabot-alerts
+129. https://docs.github.com/en/rest/dependabot/alerts
+130. https://docs.github.com/en/subscriptions-and-notifications/how-tos/viewing-and-triaging-notifications/managing-notifications-from-your-inbox
+131. https://docs.stripe.com/api/events
+132. https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

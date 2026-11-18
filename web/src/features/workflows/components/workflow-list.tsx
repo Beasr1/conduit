@@ -53,6 +53,7 @@ export function WorkflowList({ archived = false }: { archived?: boolean }) {
             <TableHead>Slug</TableHead>
             <TableHead>Revision</TableHead>
             <TableHead>Published</TableHead>
+            {!archived && <TableHead>Changes</TableHead>}
             <TableHead>{archived ? "Archived" : "Created"}</TableHead>
           </TableRow>
         </TableHeader>
@@ -70,6 +71,11 @@ export function WorkflowList({ archived = false }: { archived?: boolean }) {
               <TableCell className="font-mono">{w.slug}</TableCell>
               <TableCell>{w.latest_revision}</TableCell>
               <TableCell>{w.published_revision ?? "—"}</TableCell>
+              {!archived && (
+                <TableCell>
+                  {w.active_changes > 0 ? w.active_changes : "—"}
+                </TableCell>
+              )}
               <TableCell>
                 {created.format(new Date(w.archived_at ?? w.created_at))}
               </TableCell>
