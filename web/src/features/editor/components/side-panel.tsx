@@ -7,6 +7,7 @@ import { ChangesPanel } from "@/features/editor/components/changes-panel";
 import { ConnectionForm } from "@/features/editor/components/connection-form";
 import { JsonField } from "@/features/editor/components/json-field";
 import { KeysPanel } from "@/features/editor/components/keys-panel";
+import { MaskedInput } from "@/features/editor/components/masked-input";
 import { ProblemList } from "@/features/editor/components/problem-list";
 import { ResponseForm } from "@/features/editor/components/response-form";
 import { RunList } from "@/features/editor/components/run-list";
@@ -64,6 +65,7 @@ export function SidePanel({ workflow }: { workflow: string }) {
           field="sample_input"
           description="A made-up input, as JSON, that previews read as the run's input. It's saved in every revision, so make it up or redact it. Runs ignore it."
         />
+        <MaskedInput />
       </Fields>
     );
     close = closePanel;

@@ -506,6 +506,9 @@ type ChangeDetail struct {
 	// Keys How many keys an archive revoked.
 	Keys int `json:"keys,omitempty,omitzero"`
 
+	// Masks An upstream's new version changed what it masks, which every run masks by at once, whichever version it pins (plan 17).
+	Masks bool `json:"masks,omitempty,omitzero"`
+
 	// Name The name of what it happened to.
 	Name string `json:"name,omitempty,omitzero"`
 

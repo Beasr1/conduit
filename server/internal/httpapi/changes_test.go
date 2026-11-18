@@ -78,12 +78,13 @@ func TestChanges_OverHTTP(t *testing.T) {
 }
 
 // A newer version of an upstream, and a key rotated with an hour to change
-// over, are active on the list of the workflow they touch (plan 16).
+// over, are active on the list of the workflow they touch (plan 16); the
+// version says it marks what the last didn't (plan 17).
 func TestChanges_AVersionAndAKey(t *testing.T) {
 	t.Parallel()
 	u := makeUpstream(t, usersAPI)
 	wr := create(t, `{"nodes": [{"id": "user", "kind": "http", "uses": {"upstream": "`+u.Upstream.ID+`", "version": 1}, "with": {"user_id": "'7'"}}]}`)
-	saved := strings.Replace(usersAPI, `"method": "GET"`, `"method": "GET", "query": {"fields": "all"}`, 1)
+	saved := strings.Replace(usersAPI, `{"name": "user_id"}`, `{"name": "user_id", "mask": {"end": 2}}`, 1)
 	if r := call(t, http.MethodPut, "/v1/upstreams/"+u.Upstream.ID, saved, "If-Match", `"1"`); r.status != http.StatusOK {
 		t.Fatalf("save = %d %s", r.status, r.body)
 	}
@@ -93,7 +94,7 @@ func TestChanges_AVersionAndAKey(t *testing.T) {
 	}
 	cs := changes(t, wr.Workflow.ID, false)
 	if len(cs) != 2 || cs[0].Kind != gen.ChangeKindKeyRotated || cs[0].Detail.ExpiresAt.IsZero() || cs[0].Detail.Prefix != key.Key.Prefix ||
-		cs[1].Kind != gen.ChangeKindUpstreamVersion || cs[1].Detail.Version != 2 || cs[1].SubjectID != u.Upstream.ID {
+		cs[1].Kind != gen.ChangeKindUpstreamVersion || cs[1].Detail.Version != 2 || !cs[1].Detail.Masks || cs[1].SubjectID != u.Upstream.ID {
 		t.Errorf("changes = %+v", cs)
 	}
 

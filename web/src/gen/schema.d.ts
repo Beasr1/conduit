@@ -1213,6 +1213,8 @@ export interface components {
             expires_at?: string;
             /** @description How many keys an archive revoked. */
             keys?: number;
+            /** @description An upstream's new version changed what it masks, which every run masks by at once, whichever version it pins (plan 17). */
+            masks?: boolean;
         };
         /** @description Something that happened, as recorded (plan 16). */
         ChangeRecord: {
@@ -1507,6 +1509,18 @@ export interface components {
             answers?: components["schemas"]["Answer"][];
             errors?: components["schemas"]["Errors"];
         };
+        /** @description How a marked value is kept in a run's records (plan 17), a star for each character hidden. With neither start nor end, all of it is hidden. At least half of it always is, rounded up, so a mask that would show more shows less, its start giving way first. */
+        Mask: {
+            /** @description Characters kept at its start. */
+            start?: number;
+            /** @description Characters kept at its end. */
+            end?: number;
+        };
+        MaskedField: {
+            /** @description Where its values are, as an expression reads a field, customer.emirates_id. Over an array, contacts.phone is each item's. A name of other than letters, digits and underscores is in backticks, `first-name`. A field holding an object or an array has every value in it masked. */
+            field: string;
+            mask: components["schemas"]["Mask"];
+        };
         /** @description A point on the canvas. A missing coordinate reads as 0. */
         Position: {
             /** Format: double */
@@ -1538,6 +1552,8 @@ export interface components {
             };
             /** @description A made-up run input, any JSON, that previews read. Runs ignore it. At most 64 KiB. */
             sample_input?: unknown;
+            /** @description Fields of the run's input whose values are kept masked wherever a run keeps a copy of them (plan 17). The run, and its caller, read them as they came. A served run masks by the published revision's. */
+            masked_input?: components["schemas"]["MaskedField"][];
             /** @description How the editor draws the workflow. The engine ignores it. */
             ui?: components["schemas"]["UI"];
         };
@@ -1546,6 +1562,8 @@ export interface components {
             name: string;
             /** @description A made-up value, any JSON, which the library's preview of the upstream gives the parameter; a step gives it its own. At most 64 KiB. */
             sample?: unknown;
+            /** @description With one, the value a step gives the parameter is kept masked wherever a run keeps a copy of it (plan 17). A run masks by the upstream's newest version's, whichever version its step pins. */
+            mask?: components["schemas"]["Mask"];
         };
         /** @description A saved API endpoint and how it's handled, one version of it (plan 07). Every save makes a new version, which never changes, and a step that uses the upstream pins one. Its templates and body read its parameters by name, {{ user_id }}, and each step that uses it gives them values. */
         Upstream: {
@@ -1557,6 +1575,8 @@ export interface components {
             sample?: components["schemas"]["Sample"];
             /** @description Its answers besides 2xx, as an http node's. A step that uses it has a block for each, and lines from them. */
             outputs?: components["schemas"]["Output"][];
+            /** @description Fields of its responses, at any status, whose values are kept masked wherever a run keeps a copy of them (plan 17). A run masks by the upstream's newest version's, whichever version its step pins. */
+            masked?: components["schemas"]["MaskedField"][];
         };
     };
     responses: {

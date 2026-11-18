@@ -4,6 +4,7 @@ import { afterEach, expect, test } from "vitest";
 
 import { KeysPanel } from "@/features/editor/components/keys-panel";
 import type { components } from "@/gen/schema";
+import { choose } from "@/test/choose";
 import { renderEditor } from "@/test/editor";
 import { specExample } from "@/test/fixtures";
 import { shimReactFlow } from "@/test/react-flow";
@@ -218,17 +219,6 @@ test("a copy that fails says how to copy it by hand", async () => {
     "Couldn't copy it. Select it and copy it yourself.",
   );
 });
-
-// choose opens a select from the keyboard and presses an option. Base UI
-// takes a click with no press before it only on the option highlighted.
-async function choose(label: string, option: string) {
-  const select = screen.getByRole("combobox", { name: label });
-  select.focus();
-  fireEvent.keyDown(select, { key: "ArrowDown" });
-  const choice = await screen.findByRole("option", { name: option });
-  fireEvent.pointerDown(choice);
-  fireEvent.click(choice);
-}
 
 // Rotate asks when the old key stops, and gives the new one once: it stays
 // as the list is asked again, which moves the old key, or changes it. A key

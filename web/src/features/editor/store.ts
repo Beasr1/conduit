@@ -21,13 +21,15 @@ import type { components } from "@/gen/schema";
 type Definition = components["schemas"]["Definition"];
 type Upstream = components["schemas"]["Upstream"];
 type Parameter = components["schemas"]["Parameter"];
+type MaskedField = components["schemas"]["MaskedField"];
 
 // An upstream being edited on its page (plan 07): its request, responses
 // and samples are the page's one step's in the draft, and its parameters
-// these.
+// these, and the fields of its responses it masks (plan 17).
 export interface UpstreamEdit {
   node: string;
   parameters: Parameter[];
+  masked?: MaskedField[];
 }
 
 interface Selection {

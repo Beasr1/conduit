@@ -100,7 +100,7 @@ func changeOut(c store.Change) gen.Change {
 func detailOut(d store.ChangeDetail) gen.ChangeDetail {
 	out := gen.ChangeDetail{
 		Name: d.Name, Version: d.Version, Revision: d.Revision, How: gen.ChangeDetailHow(d.How),
-		Prefix: d.Prefix, Keys: int(d.Keys),
+		Prefix: d.Prefix, Keys: int(d.Keys), Masks: d.Masks,
 	}
 	if d.ExpiresAt != nil {
 		out.ExpiresAt = d.ExpiresAt.UTC()

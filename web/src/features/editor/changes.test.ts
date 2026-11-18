@@ -64,6 +64,14 @@ test("each change is said in a line", () => {
     ],
     [
       change({
+        kind: "upstream_version",
+        state: "active",
+        detail: { name: "Users API", version: 5, masks: true },
+      }),
+      "Users API has version 5: a step uses an older one. Its new masks apply to every run now",
+    ],
+    [
+      change({
         kind: "workflow_published",
         state: "active",
         detail: { name: "Billing", revision: 5 },

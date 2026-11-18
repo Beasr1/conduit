@@ -23,6 +23,7 @@ type ChangeDetail struct {
 	Prefix    string     `json:"prefix,omitempty"`     // a key's first characters; a rotated key's old one's
 	ExpiresAt *time.Time `json:"expires_at,omitempty"` // when a rotated key's old value stops
 	Keys      int64      `json:"keys,omitempty"`       // how many keys an archive revoked
+	Masks     bool       `json:"masks,omitempty"`      // an upstream's new version changed what it masks (plan 17)
 }
 
 // ChangeRecord is something that happened, as recorded.

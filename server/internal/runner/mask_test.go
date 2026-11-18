@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,6 +16,7 @@ import (
 
 	"github.com/Beasr1/conduit/server/internal/store"
 	"github.com/Beasr1/conduit/server/internal/upstream"
+	"github.com/Beasr1/conduit/server/internal/workflow"
 )
 
 // A secret is masked wherever it's copied whole, as text, as JSON writes
@@ -226,5 +229,110 @@ func TestRun_MasksSecretsInFailures(t *testing.T) {
 		if strings.Contains(text, longValue) {
 			t.Errorf("%s hold the secret: %s", what, text)
 		}
+	}
+}
+
+// A mask keeps the characters it's asked to, a star for each one it hides,
+// and always hides at least half, its start giving way first (plan 17).
+func TestStars(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		value string
+		mask  workflow.Mask
+		want  string
+	}{
+		{"784199012345671", workflow.Mask{}, "***************"},
+		{"784199012345671", workflow.Mask{End: 4}, "***********5671"},
+		{"4111111111111111", workflow.Mask{Start: 6}, "411111**********"},
+		{"4111111111111111", workflow.Mask{Start: 6, End: 4}, "4111********1111"},
+		{"4111111111111111", workflow.Mask{Start: 2, End: 2}, "41************11"},
+		{"abcd", workflow.Mask{Start: 3}, "ab**"},
+		{"abc", workflow.Mask{End: 8}, "**c"},
+		{"x", workflow.Mask{End: 4}, "*"},
+		{"فاطمة", workflow.Mask{End: 2}, "***مة"},
+	} {
+		if got := stars(tt.value, tt.mask); got != tt.want {
+			t.Errorf("stars(%q, %+v) = %q, want %q", tt.value, tt.mask, got, tt.want)
+		}
+	}
+}
+
+// A field's values are what an expression reading it gives, over each item
+// of an array, every string and number inside one that holds more; an
+// empty string, a boolean or null is nothing to mask (plan 17).
+func TestValuesAt(t *testing.T) {
+	t.Parallel()
+	doc := []byte(`{"customer": {"emirates_id": "784199012345671", "contacts": [{"phone": "+971501234567"}, {"phone": 971501234567}, {"email": "a@b.example"}],
+	  "empty": "", "verified": true, "none": null}}`)
+	for _, tt := range []struct {
+		doc  []byte
+		path []string
+		want []string
+	}{
+		{doc, []string{"customer", "emirates_id"}, []string{"784199012345671"}},
+		{doc, []string{"customer", "contacts", "phone"}, []string{"+971501234567", "971501234567"}},
+		{doc, []string{"customer", "contacts"}, []string{"+971501234567", "971501234567", "a@b.example"}},
+		{doc, []string{"customer", "empty"}, nil},
+		{doc, []string{"customer", "verified"}, nil},
+		{doc, []string{"missing", "x"}, nil},
+		{[]byte(`[{"id": "a"}, {"id": "b"}, [{"id": "c"}]]`), []string{"id"}, []string{"a", "b", "c"}},
+		{[]byte(`not json`), []string{"id"}, nil},
+	} {
+		if got := valuesAt(decodeDoc(tt.doc), tt.path); !slices.Equal(got, tt.want) {
+			t.Errorf("valuesAt(%s, %q) = %q, want %q", tt.doc, tt.path, got, tt.want)
+		}
+	}
+}
+
+// A marked value is masked wherever a copy of it is: in a string, whole or
+// inside text, escaped in a URL, as JSON escapes it, or as a number; a
+// short one only where it's all of a string or a number. The caller's answer
+// keeps it (plan 17).
+func TestMasker_Marked(t *testing.T) {
+	t.Parallel()
+	m := newMasker([]store.Constant{{Name: "tok", Secret: true, Value: "sk_live_0123456789"}})
+	if m.count() != 0 {
+		t.Fatalf("count() = %d before anything is marked", m.count())
+	}
+	m.add(workflow.Mask{}, "784199012345671")
+	m.add(workflow.Mask{End: 4}, "784199012345671") // the same value: the mask that hides more wins
+	m.add(workflow.Mask{End: 4}, "784199012345672")
+	m.add(workflow.Mask{}, "Fatima Al Mansoori", "F", "فاطمة الزهراء")
+	m.add(workflow.Mask{Start: 4}, "971501234567")
+	if m.count() != 6 {
+		t.Errorf("count() = %d, want 6", m.count())
+	}
+	// As an API that escapes all but ASCII writes it.
+	ar := strconv.QuoteToASCII("فاطمة الزهراء")
+	if !strings.HasPrefix(ar, `"\`) {
+		t.Fatalf("QuoteToASCII() = %s, want it escaped", ar)
+	}
+	doc := `{"a": "784199012345671", "b": "784199012345672", "url": "/c?eid=784199012345672&n=Fatima+Al+Mansoori", "path": "/c/Fatima%20Al%20Mansoori",
+	  "n": 971501234567, "s": "call 971501234567", "g": "F", "word": "Fine F", "seven": 7,
+	  "ar": ` + ar + `, "tok": "sk_live_0123456789", "html": "<b>"}`
+	want := `{"a":"***************","ar":"*************","b":"***********5672","g":"*","html":"<b>","n":"9715********","path":"/c/******************",` +
+		`"s":"call 9715********","seven":7,"tok":"[secret tok]","url":"/c?eid=***********5672&n=******************","word":"Fine F"}`
+	got := m.json([]byte(doc))
+	if string(got) != want {
+		t.Errorf("json() =\n%s\nwant\n%s", got, want)
+	}
+	if !json.Valid(got) {
+		t.Errorf("masked JSON isn't JSON: %s", got)
+	}
+	for in, want := range map[string]string{
+		"eid 784199012345672 for Fatima Al Mansoori": "eid ***********5672 for ******************",
+		"F":            "*",
+		"Fine F":       "Fine F",
+		"971501234567": "9715********",
+	} {
+		if got := m.text(in); got != want {
+			t.Errorf("text(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := string(m.answer([]byte(`{"a":"784199012345671","tok":"sk_live_0123456789"}`))); got != `{"a":"784199012345671","tok":"[secret tok]"}` {
+		t.Errorf("answer() = %s; want the marked value kept and the secret masked", got)
+	}
+	if got := string(m.json([]byte(`not json 784199012345671`))); got != `not json 784199012345671` {
+		t.Errorf("json() of what isn't JSON = %s; want it as it was", got)
 	}
 }

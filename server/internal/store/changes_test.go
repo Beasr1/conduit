@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -409,5 +410,40 @@ func TestChanges_OnlyWhatCommits(t *testing.T) {
 	publish(t, billing.ID, 2)
 	if got := said(listOf(t, caller.ID, false)); got != "workflow_published active" {
 		t.Errorf("Caller's changes = %s", got)
+	}
+}
+
+// A version that changes what an upstream masks says so, as every run masks
+// by its newest version's marks at once, whichever version it pins
+// (plan 17). The same marks listed in another order change nothing.
+func TestChanges_AVersionThatChangesTheMasks(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	version := func(n int, param, masked string) json.RawMessage {
+		return json.RawMessage(fmt.Sprintf(`{"n": %d, "parameters": [{"name": "eid"%s}], "request": {"method": "GET", "url": "https://crm.example.com"}, "masked": [%s]}`, n, param, masked))
+	}
+	u, _, err := db.CreateUpstream(ctx, upstreamName(t), version(1, "", ""), person)
+	if err != nil {
+		t.Fatal(err)
+	}
+	using := saved(t, "Using", pins(u.ID, 1))
+	for i, tt := range []struct {
+		what  string
+		def   json.RawMessage
+		masks bool
+	}{
+		{"something else changed", version(2, "", ""), false},
+		{"fields marked", version(3, "", `{"field": "a", "mask": {}}, {"field": "b", "mask": {"end": 4}}`), true},
+		{"listed in another order", version(4, "", `{"field": "b", "mask": {"end": 4}}, {"field": "a", "mask": {}}`), false},
+		{"a parameter marked", version(5, `, "mask": {"end": 4}`, `{"field": "b", "mask": {"end": 4}}, {"field": "a", "mask": {}}`), true},
+		{"a mask changed", version(6, `, "mask": {"end": 4}`, `{"field": "b", "mask": {"end": 3}}, {"field": "a", "mask": {}}`), true},
+		{"a field unmarked", version(7, `, "mask": {"end": 4}`, `{"field": "a", "mask": {}}`), true},
+	} {
+		if _, err := db.SaveUpstreamVersion(ctx, u.ID, i+1, tt.def, person); err != nil {
+			t.Fatal(err)
+		}
+		if cs := listOf(t, using.ID, false); len(cs) != i+1 || cs[0].Detail.Version != i+2 || cs[0].Detail.Masks != tt.masks {
+			t.Errorf("%s: the newest change = %+v, want masks %v", tt.what, cs[0].Detail, tt.masks)
+		}
 	}
 }

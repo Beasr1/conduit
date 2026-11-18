@@ -51,7 +51,8 @@ func (ps Problems) Error() string {
 }
 
 // Validate checks a definition's structure: ids, kinds, requests, edges,
-// cycles and its response. It reports every problem at once.
+// cycles, its response and the input it masks. It reports every problem at
+// once.
 func Validate(d *Definition) Problems {
 	var v validator
 	if len(d.Nodes) > MaxNodes {
@@ -85,6 +86,7 @@ func Validate(d *Definition) Problems {
 	if len(d.SampleInput) > maxSample {
 		v.add("/sample_input", "too_large", "a sample input is at most %d KiB; this one is %d KiB", maxSample>>10, kib(len(d.SampleInput)))
 	}
+	v.checkMasked("/masked_input", d.MaskedInput)
 	return v.problems
 }
 

@@ -94,7 +94,10 @@ test("the Done flow: build the spec example, save it, run it, see what crm did, 
   let panel = await open(page, "crm");
   const upstream = await upstreamTab(panel);
   await upstream.getByRole("textbox", { name: "Add a parameter" }).fill("body");
-  await upstream.getByRole("button", { name: "Add", exact: true }).click();
+  await upstream
+    .getByRole("region", { name: "Parameters" })
+    .getByRole("button", { name: "Add", exact: true })
+    .click();
   await upstream.getByRole("tab", { name: "Body" }).click();
   await upstream.getByRole("textbox", { name: "Request body" }).fill("body");
   await upstream.getByRole("button", { name: "Save version 2" }).click();

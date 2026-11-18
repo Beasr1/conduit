@@ -5,6 +5,7 @@ type Node = Definition["nodes"][number];
 type Upstream = components["schemas"]["Upstream"];
 type Uses = components["schemas"]["Uses"];
 type Parameter = components["schemas"]["Parameter"];
+type MaskedField = components["schemas"]["MaskedField"];
 
 // versionKey names what a step pins (plan 07): a version of an upstream,
 // "id@3", or a revision of a workflow, "wf:id@3".
@@ -152,14 +153,20 @@ export function pin(n: Node, uses: Uses, u: Upstream): Node {
 }
 
 // upstreamOf is the version a filled node would save: its parameters, and
-// its request, responses and samples as they stand.
-export function upstreamOf(n: Node, parameters: Parameter[]): Upstream {
+// its request, responses and samples as they stand, and the fields it masks
+// (plan 17).
+export function upstreamOf(
+  n: Node,
+  parameters: Parameter[],
+  masked: MaskedField[] = [],
+): Upstream {
   const u: Upstream = {
     parameters,
     request: n.request ?? { method: "GET", url: "" },
   };
   if (n.outputs) u.outputs = n.outputs;
   if (n.sample) u.sample = n.sample;
+  if (masked.length > 0) u.masked = masked;
   return u;
 }
 
@@ -173,6 +180,7 @@ export function sameUpstream(built: Upstream, saved: Upstream): boolean {
   };
   if (saved.outputs) normal.outputs = saved.outputs;
   if (saved.sample) normal.sample = saved.sample;
+  if (saved.masked?.length) normal.masked = saved.masked;
   return JSON.stringify(built) === JSON.stringify(normal);
 }
 

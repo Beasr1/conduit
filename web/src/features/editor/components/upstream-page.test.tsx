@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import { UpstreamPage } from "@/features/editor/components/upstream-page";
 import type { components } from "@/gen/schema";
 import { Component as Page } from "@/routes/upstream";
+import { choose } from "@/test/choose";
 import { renderAt, renderRoutes } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -133,6 +134,117 @@ test("an upstream's page edits it, and saves its next version", async () => {
   });
 });
 
+// What a step gives a parameter, and fields of its responses, are marked to
+// be kept masked, the fields offered from its samples, each with how it's
+// kept, and saved in the version, a problem under the row it's about
+// (plan 17).
+test("its parameters and the fields of its responses are marked to be masked, and saved", async () => {
+  answerPage([
+    {
+      pointer: "/masked/0/mask/end",
+      code: "invalid_mask",
+      detail: "keep 1 to 8 characters at its end, or none",
+    },
+  ]);
+  let sent: Upstream | undefined;
+  server.use(
+    http.put<PathParams, Upstream, UpstreamVersion>(
+      "/api/v1/upstreams/u-1",
+      async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json(version(sent, 3));
+      },
+    ),
+  );
+  const sampled: Upstream = {
+    ...users,
+    sample: { body: { customer: { emirates_id: "784199012345671" } } },
+    outputs: [
+      { status: 404, sample: { body: { error: "gone", customer: null } } },
+    ],
+  };
+  renderAt(<UpstreamPage version={version(sampled, 2)} />, {
+    path: "/upstreams/u-1",
+  });
+  const masked = await screen.findByRole("region", { name: "Masked fields" });
+  expect(masked.textContent).toContain("None.");
+  expect(
+    [...document.querySelectorAll("#upstream-masked-offered option")].map((o) =>
+      o.getAttribute("value"),
+    ),
+  ).toEqual(["customer.emirates_id", "error", "customer"]);
+  fireEvent.change(
+    within(masked).getByRole("combobox", { name: "Add a masked field" }),
+    { target: { value: "customer.emirates_id" } },
+  );
+  fireEvent.click(within(masked).getByRole("button", { name: "Add" }));
+  await choose("Mask of customer.emirates_id", "Keep both ends");
+  expect(
+    await within(masked).findByText(
+      "keep 1 to 8 characters at its end, or none",
+    ),
+  ).toBeTruthy();
+
+  const parameters = screen.getByRole("region", { name: "Parameters" });
+  expect(
+    within(parameters).getByRole("combobox", {
+      name: "Mask of parameter user_id",
+    }).textContent,
+  ).toContain("Not masked");
+  await choose("Mask of parameter user_id", "Keep the end");
+  fireEvent.change(
+    within(parameters).getByRole("spinbutton", {
+      name: "Characters kept at the end of parameter user_id",
+    }),
+    { target: { value: "2" } },
+  );
+  const save = screen.getByRole("button", { name: "Save version 3" });
+  await waitFor(() => expect(save.matches(":disabled")).toBe(false));
+  fireEvent.click(save);
+  await waitFor(() => expect(sent).toBeDefined());
+  expect(sent).toEqual({
+    ...sampled,
+    parameters: [{ name: "user_id", sample: "7", mask: { end: 2 } }],
+    masked: [{ field: "customer.emirates_id", mask: { start: 4, end: 4 } }],
+  });
+
+  // Not masked again, the parameter is as it was.
+  await choose("Mask of parameter user_id", "Not masked");
+  expect(
+    within(parameters).queryByRole("spinbutton", {
+      name: "Characters kept at the end of parameter user_id",
+    }),
+  ).toBeNull();
+});
+
+// A version that masks opens unchanged, and marking a field, or no longer,
+// is a change to save on its own (plan 17).
+test("what it masks is part of the version", async () => {
+  answerPage();
+  renderAt(
+    <UpstreamPage
+      version={version({ ...users, masked: [{ field: "email", mask: {} }] }, 2)}
+    />,
+    { path: "/upstreams/u-1" },
+  );
+  const save = await screen.findByRole("button", { name: "Save version 3" });
+  const masked = screen.getByRole("region", { name: "Masked fields" });
+  expect(
+    within(masked).getByRole("textbox", { name: "Masked field email" }),
+  ).toBeTruthy();
+  expect(save.matches(":disabled")).toBe(true);
+  fireEvent.change(
+    within(masked).getByRole("combobox", { name: "Add a masked field" }),
+    { target: { value: "name" } },
+  );
+  fireEvent.click(within(masked).getByRole("button", { name: "Add" }));
+  await waitFor(() => expect(save.matches(":disabled")).toBe(false));
+  fireEvent.click(
+    within(masked).getByRole("button", { name: "Stop masking name" }),
+  );
+  await waitFor(() => expect(save.matches(":disabled")).toBe(true));
+});
+
 test("a problem the check finds shows under its field", async () => {
   answerPage([
     {
@@ -240,6 +352,11 @@ test("Archive asks again, and the page stays, read-only, until it's restored", a
   // Nothing changes it, and what's on its tabs can still be read.
   for (const name of ["Name of parameter user_id", "Add a parameter", "URL"])
     expect(screen.getByRole("textbox", { name }).matches(":disabled")).toBe(
+      true,
+    );
+  // Nor what it masks (plan 17).
+  for (const name of ["Mask of parameter user_id", "Add a masked field"])
+    expect(screen.getByRole("combobox", { name }).matches(":disabled")).toBe(
       true,
     );
   fireEvent.click(screen.getByRole("tab", { name: "404" }));

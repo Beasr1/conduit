@@ -139,6 +139,9 @@ type SentRequest struct {
 	URL    string
 	Header http.Header
 	Body   json.RawMessage
+	// Params is what a node that uses an upstream gave its parameters, by
+	// name (plan 07), which the runner masks where they're marked (plan 17).
+	Params json.RawMessage
 }
 
 // EventKind is what happened to a node.

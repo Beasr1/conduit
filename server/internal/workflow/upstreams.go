@@ -9,8 +9,9 @@ import (
 
 // ValidateUpstream checks one version of an upstream, a saved API endpoint
 // and how it's handled (plan 07): its parameters, named as ids are, once
-// each, and its request, responses and samples, as an http node's are. It
-// reports every problem at once, each pointing into the version.
+// each, and its request, responses and samples, as an http node's are, and
+// what it masks (plan 17). It reports every problem at once, each pointing
+// into the version.
 func ValidateUpstream(u *Upstream) Problems {
 	var v validator
 	seen := make(map[string]int, len(u.Parameters))
@@ -29,6 +30,9 @@ func ValidateUpstream(u *Upstream) Problems {
 		if len(p.Sample) > maxSample {
 			v.add(fmt.Sprintf("/parameters/%d/sample", k), "too_large", "a parameter's sample is at most %d KiB; this one is %d KiB", maxSample>>10, kib(len(p.Sample)))
 		}
+		if p.Mask != nil {
+			v.checkMask(fmt.Sprintf("/parameters/%d/mask", k), *p.Mask)
+		}
 	}
 	v.checkRequest("/request", &u.Request)
 	v.checkReserved("/request/headers", u.Request.Headers)
@@ -36,6 +40,7 @@ func ValidateUpstream(u *Upstream) Problems {
 		v.checkSample("/sample", u.Sample, false)
 	}
 	v.checkOutputs("/outputs", u.Outputs)
+	v.checkMasked("/masked", u.Masked)
 	return v.problems
 }
 

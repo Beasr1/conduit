@@ -23,6 +23,7 @@ lives as a row in 00-roadmap.md.
 | 14 | 14-the-response-picks.md | one exit, with nothing to add: an answer takes lines from any number of steps, and a run gives the first, top to bottom, that one reached | accepted and built 2026-11-02 |
 | 15 | 15-archive.md | nothing deleted: a workflow, an upstream or a constant nothing live uses is archived, read-only, and restored | accepted 2026-11-06, **built** 2026-11-07 |
 | 16 | 16-changes.md | a changes list on each workflow: what happens to what it uses, active until dealt with or dismissed, then kept in its history | accepted and **built** 2026-11-12 |
+| 17 | 17-masked-fields.md | masked fields: a value marked on an upstream or a workflow's input is kept as stars, all or with its start, end or both kept, wherever a run keeps it, and answered in full | accepted and **built** 2026-11-18 |
 
 ## Queue (your order, 2026-11-05)
 
@@ -41,7 +42,10 @@ Picked, each planned in its own plan when it starts:
    2026-11-12 (16).
 4. Fields marked to be masked in run records, so a person's details aren't
    kept in plain text: a mask type per field, all of it, or most of it
-   with the start kept for debugging, `784**********`.
+   with the start kept for debugging, `784**********`. Planned in 17
+   (2026-11-18), with the end, or both ends, kept as well: every
+   Emirates ID starts with 784, so its start tells records apart least.
+   Built 2026-11-18 (17).
 5. Basic tests that config engineers and QA can add (07's tests, the
    simplest kind first).
 6. The JSONata editor (10).
@@ -55,4 +59,5 @@ value; a distroless image; traces on runs. And from 07's caller keys: a
 checksum in each key, so a secret scanner can turn away a look-alike
 without asking the server, and extending a rotated key's expiry once it's
 set. And from 15: destroying an archived secret's value for good, keeping
-its record.
+its record. And from 17: masking runs kept before a field was marked,
+from their own records.

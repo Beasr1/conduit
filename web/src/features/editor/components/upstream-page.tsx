@@ -10,6 +10,7 @@ import { Link } from "react-router";
 import { useShallow } from "zustand/react/shallow";
 
 import { ArchiveDialog } from "@/components/archive-dialog";
+import { Hint } from "@/components/hint";
 import { Fields, ReadOnly, useReadOnly } from "@/components/read-only";
 import { Button } from "@/components/ui/button";
 import { SampleInput } from "@/components/upstream-samples";
@@ -17,9 +18,11 @@ import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HttpStepForm } from "@/features/editor/components/http-step-form";
+import { MaskedFields, MaskPicker } from "@/features/editor/components/masks";
 import { AddResponse } from "@/features/editor/components/step-output";
 import { StepSample } from "@/features/editor/components/step-sample";
 import { updateNode } from "@/features/editor/edits";
+import { fieldsIn } from "@/features/editor/masks";
 import {
   CheckContext,
   CheckingContext,
@@ -51,6 +54,7 @@ import type { UpstreamVersion } from "@/lib/upstreams";
 import { routes } from "@/router";
 
 type Parameter = components["schemas"]["Parameter"];
+type MaskedField = components["schemas"]["MaskedField"];
 type ProblemError = components["schemas"]["ProblemError"];
 
 // The one step the page edits the upstream as. The tabs a step has edit its
@@ -64,18 +68,26 @@ const sampleOf = (p: Parameter) => JSON.stringify(p.sample ?? null);
 const given = (parameters: Parameter[]) =>
   Object.fromEntries(parameters.map((p) => [p.name, sampleOf(p)]));
 
-// No parameters, one list, so a selector that finds none gives the same.
+// No parameters, one list, so a selector that finds none gives the same;
+// and no masked fields.
 const NONE: Parameter[] = [];
+const UNMASKED: MaskedField[] = [];
 
-// The problems a check found with the parameters, by pointer: the tabs have
-// the rest.
+// The problems a check found with the parameters, and with the masked
+// fields, by pointer: the tabs have the rest.
 const ParameterProblems = createContext<ProblemError[]>([]);
+const MaskedProblems = createContext<ProblemError[]>([]);
+
+// own says whether a problem's pointer is the page's own, not a tab's.
+const own = (p: ProblemError) =>
+  p.pointer.startsWith("/parameters") || p.pointer.startsWith("/masked");
 
 // UpstreamPage edits an upstream on its own (plan 07): its parameters, each
 // with a sample the preview gives it, then its request, responses and
-// samples in the tabs a step has, previewed and checked as they're typed.
-// Save version makes the next version; the workflows that use it are
-// offered it on their steps. An archived one opens read-only (plan 15).
+// samples in the tabs a step has, previewed and checked as they're typed,
+// and the fields it masks (plan 17). Save version makes the next version;
+// the workflows that use it are offered it on their steps. An archived one
+// opens read-only (plan 15).
 export function UpstreamPage({ version }: { version: UpstreamVersion }) {
   const [store] = useState(() => {
     const uses = { upstream: version.upstream.id, version: version.version };
@@ -85,7 +97,11 @@ export function UpstreamPage({ version }: { version: UpstreamVersion }) {
       { nodes: [{ id: STEP, kind: "http", uses, with: given(parameters) }] },
       versions,
     );
-    return createEditorStore(draft, versions, { node: STEP, parameters });
+    return createEditorStore(draft, versions, {
+      node: STEP,
+      parameters,
+      masked: version.definition.masked ?? [],
+    });
   });
   return (
     <EditorContext value={store}>
@@ -96,6 +112,7 @@ export function UpstreamPage({ version }: { version: UpstreamVersion }) {
             <UsedBy id={version.upstream.id} />
             <Fields>
               <Parameters />
+              <Masked />
               <Blocks />
             </Fields>
           </div>
@@ -111,9 +128,12 @@ export function UpstreamPage({ version }: { version: UpstreamVersion }) {
 function Checked({ children }: { children: ReactNode }) {
   const draft = useEditor((s) => s.draft);
   const parameters = useEditor((s) => s.upstreamEdit?.parameters ?? NONE);
-  const still = useStill({ draft, parameters }, PAUSE_MS);
+  const masked = useEditor((s) => s.upstreamEdit?.masked ?? UNMASKED);
+  const still = useStill({ draft, parameters, masked }, PAUSE_MS);
   const node = still.draft.nodes[0];
-  const upstream = node ? upstreamOf(node, still.parameters) : undefined;
+  const upstream = node
+    ? upstreamOf(node, still.parameters, still.masked)
+    : undefined;
   const checked = useQuery({
     queryKey: ["upstream-check", upstream],
     queryFn: ({ signal }) =>
@@ -132,7 +152,7 @@ function Checked({ children }: { children: ReactNode }) {
       problems && {
         of: still.draft,
         problems: problems
-          .filter((p) => !p.pointer.startsWith("/parameters"))
+          .filter((p) => !own(p))
           .map((p) => ({ ...p, pointer: `/nodes/0${p.pointer}` })),
       },
     [problems, still.draft],
@@ -148,11 +168,15 @@ function Checked({ children }: { children: ReactNode }) {
     () => (problems ?? []).filter((p) => p.pointer.startsWith("/parameters")),
     [problems],
   );
+  const maskedProblems = useMemo(
+    () => (problems ?? []).filter((p) => p.pointer.startsWith("/masked")),
+    [problems],
+  );
   return (
     <CheckContext value={check}>
       <CheckingContext value={status}>
         <ParameterProblems value={parameterProblems}>
-          {children}
+          <MaskedProblems value={maskedProblems}>{children}</MaskedProblems>
         </ParameterProblems>
       </CheckingContext>
     </CheckContext>
@@ -173,9 +197,10 @@ function Header({ version }: { version: UpstreamVersion }) {
   const editor = useEditorStore();
   const draft = useEditor((s) => s.draft);
   const parameters = useEditor((s) => s.upstreamEdit?.parameters ?? NONE);
+  const masked = useEditor((s) => s.upstreamEdit?.masked ?? UNMASKED);
   const save = useSaveUpstream();
   const node = draft.nodes[0];
-  const now = node ? upstreamOf(node, parameters) : undefined;
+  const now = node ? upstreamOf(node, parameters, masked) : undefined;
   const dirty = now !== undefined && !sameUpstream(now, version.definition);
 
   async function saveVersion() {
@@ -186,7 +211,11 @@ function Header({ version }: { version: UpstreamVersion }) {
       await save.mutateAsync({
         id: version.upstream.id,
         base: version.version,
-        upstream: upstreamOf(step, s.upstreamEdit?.parameters ?? []),
+        upstream: upstreamOf(
+          step,
+          s.upstreamEdit?.parameters ?? [],
+          s.upstreamEdit?.masked ?? [],
+        ),
       });
     } catch {
       // save.error says what went wrong
@@ -288,16 +317,17 @@ function UsedBy({ id }: { id: string }) {
 }
 
 // Parameters names what a step gives the upstream, each with a sample the
-// preview gives it, in rows under the two columns' names. The step's values
-// follow a rename.
+// preview gives it, and how what it's given is kept masked (plan 17), in
+// rows under the columns' names. The step's values follow a rename.
 function Parameters() {
   const parameters = useEditor((s) => s.upstreamEdit?.parameters ?? NONE);
+  const masked = useEditor((s) => s.upstreamEdit?.masked ?? UNMASKED);
   const editUpstream = useEditor((s) => s.editUpstream);
   const edit = useEditor((s) => s.edit);
   const problems = useContext(ParameterProblems);
   const [added, setAdded] = useState("");
   const set = (next: Parameter[]) => {
-    editUpstream({ node: STEP, parameters: next });
+    editUpstream({ node: STEP, parameters: next, masked });
     edit((d) => updateNode(d, 0, (n) => ({ ...n, with: given(next) })));
   };
   const taken = parameters.some((p) => p.name === added);
@@ -308,7 +338,10 @@ function Parameters() {
     ),
   );
   return (
-    <section aria-label="Parameters" className="flex flex-col gap-2 text-sm">
+    <section
+      aria-label="Parameters"
+      className="@container flex flex-col gap-2 text-sm"
+    >
       <h2 className="font-medium">Parameters</h2>
       {parameters.length === 0 && (
         <p className="text-muted-foreground">
@@ -317,8 +350,17 @@ function Parameters() {
         </p>
       )}
       {parameters.length > 0 && (
-        <div className="flex items-center gap-2 text-muted-foreground">
+        // Without room for a row's columns, its mask goes under its name, and
+        // the select says what it is.
+        <div className="hidden items-center gap-2 text-muted-foreground @md:flex">
           <span className="flex-1">Name</span>
+          <span className="flex w-76 items-center gap-1">
+            Mask
+            <Hint about="Mask">
+              What a step gives it is kept as stars wherever a run keeps it. The
+              upstream gets it as it is.
+            </Hint>
+          </span>
           <span className="w-16" />
         </div>
       )}
@@ -378,7 +420,7 @@ function Parameters() {
   );
 }
 
-// ParameterRow is a parameter's name, and its problems.
+// ParameterRow is a parameter's name and mask, and their problems.
 function ParameterRow({
   parameter,
   problems,
@@ -392,17 +434,27 @@ function ParameterRow({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Input
           aria-label={`Name of parameter ${parameter.name}`}
-          className="flex-1 font-mono"
+          className="w-full font-mono @md:w-auto @md:flex-1"
           value={parameter.name}
           onChange={(e) => onChange({ ...parameter, name: e.target.value })}
+        />
+        <MaskPicker
+          of={`parameter ${parameter.name}`}
+          mask={parameter.mask}
+          optional
+          onChange={(mask) =>
+            onChange(
+              mask ? { ...parameter, mask } : without(parameter, ["mask"]),
+            )
+          }
         />
         <Button
           variant="ghost"
           size="xs"
-          className="w-16"
+          className="ml-auto w-16"
           aria-label={`Remove the parameter ${parameter.name}`}
           onClick={onRemove}
         >
@@ -411,6 +463,60 @@ function ParameterRow({
       </div>
       <FieldError errors={problems.map((p) => ({ message: p.detail }))} />
     </div>
+  );
+}
+
+// Masked lists the fields of the upstream's responses, at any status,
+// whose values are kept masked wherever a run keeps them (plan 17),
+// offering those its samples have.
+function Masked() {
+  const parameters = useEditor((s) => s.upstreamEdit?.parameters ?? NONE);
+  const masked = useEditor((s) => s.upstreamEdit?.masked ?? UNMASKED);
+  const editUpstream = useEditor((s) => s.editUpstream);
+  const step = useEditor((s) => s.draft.nodes[0]);
+  const problems = useContext(MaskedProblems);
+  const offered = useMemo(
+    () => [
+      ...new Set([
+        ...fieldsIn(step?.sample?.body),
+        ...(step?.outputs ?? []).flatMap((o) => fieldsIn(o.sample?.body)),
+      ]),
+    ],
+    [step?.sample, step?.outputs],
+  );
+  return (
+    <section aria-label="Masked fields" className="flex flex-col gap-2 text-sm">
+      <div className="flex items-center gap-1">
+        <h2 className="font-medium">Masked fields</h2>
+        <Hint about="Masked fields">
+          Fields of its responses kept as stars wherever a run keeps them. A
+          workflow&apos;s caller still gets them as they are.
+        </Hint>
+      </div>
+      {masked.length === 0 && (
+        <p className="text-muted-foreground">
+          None. Add a field as an expression reads it, as{" "}
+          <span className="font-mono">customer.emirates_id</span>.
+        </p>
+      )}
+      <MaskedFields
+        id="upstream-masked"
+        fields={masked}
+        offered={offered}
+        problems={(k) =>
+          problems
+            .filter(
+              (p) =>
+                p.pointer.startsWith(`/masked/${k}/`) ||
+                (k === 0 && p.pointer === "/masked"),
+            )
+            .map((p) => p.detail)
+        }
+        onChange={(next) =>
+          editUpstream({ node: STEP, parameters, masked: next })
+        }
+      />
+    </section>
   );
 }
 

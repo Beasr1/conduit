@@ -209,6 +209,16 @@ server/
   ends. Header and query values with secret-looking names are stored as
   `[redacted]`, and bodies over 256 KiB as a string of their first
   256 KiB, flagged truncated.
+- A value marked to be masked (plan 17) is masked in every copy a run
+  keeps, from when the run meets it: its input's marked fields as it
+  begins, what a step gives a marked parameter, a marked field of a
+  response. Values are found in decoded JSON, so a number, or text an
+  upstream escaped, is found too, and the record is written afresh,
+  as jsonb keeps no key order anyway. What was kept before a value was
+  met is masked again as the run ends. An upstream's newest version's
+  marks apply whichever version a step pins, and a run of a workflow a
+  step uses hands its caller's run what it masked, through the context.
+  What a run answers keeps every marked value.
 - Store tests get a database per test package from `storetest.Run` in
   `TestMain`. It's created through a superuser connection and owned by the
   server's own role, so tests run with the server's privileges. With no

@@ -150,7 +150,7 @@ func (r *Runner) Start(ctx context.Context, workflowID string, revision int, inp
 	if err != nil {
 		return store.Run{}, err
 	}
-	run, err := r.begin(ctx, store.NewRun{WorkflowID: w.ID, Revision: revision, Trigger: "editor", Input: input}, pr.mask)
+	run, err := r.begin(ctx, store.NewRun{WorkflowID: w.ID, Revision: revision, Trigger: "editor", Input: input}, pr)
 	if err != nil {
 		return store.Run{}, err
 	}
@@ -183,7 +183,7 @@ func (r *Runner) Serve(ctx context.Context, slug, key string, input json.RawMess
 	if err != nil {
 		return Outcome{}, err
 	}
-	run, err := r.begin(ctx, store.NewRun{WorkflowID: w.ID, Revision: *w.PublishedRevision, Trigger: "served", Key: key, Input: input}, pr.mask)
+	run, err := r.begin(ctx, store.NewRun{WorkflowID: w.ID, Revision: *w.PublishedRevision, Trigger: "served", Key: key, Input: input}, pr)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -209,11 +209,16 @@ func (r *Runner) Call(ctx context.Context, c engine.Call, input json.RawMessage)
 	if err != nil {
 		return engine.Answer{}, refused(c, err)
 	}
-	run, err := r.begin(ctx, store.NewRun{WorkflowID: c.Workflow, Revision: c.Revision, Trigger: "workflow", Parent: store.Parent{Run: c.Run, Node: c.Node}, Input: input}, pr.mask)
+	run, err := r.begin(ctx, store.NewRun{WorkflowID: c.Workflow, Revision: c.Revision, Trigger: "workflow", Parent: store.Parent{Run: c.Run, Node: c.Node}, Input: input}, pr)
 	if err != nil {
 		return engine.Answer{}, refused(c, err)
 	}
-	return answered(r.execute(pr.bind(ctx), r.editor, pr, run))
+	out := r.execute(pr.bind(ctx), r.editor, pr, run)
+	// What it masked, its caller's run masks too (plan 17).
+	if caller := maskerFrom(ctx); caller != nil {
+		caller.adopt(pr.mask)
+	}
+	return answered(out)
 }
 
 // refused is the run of a workflow a step uses not starting, as the step's
@@ -366,11 +371,15 @@ func (r *Runner) ended(ctx context.Context, runID string) (store.Run, error) {
 // prepare compiles a revision and checks input against its input_schema.
 // prepared is a run ready to begin: its program, and the constants it
 // reads, as they were when it was prepared (plan 06), with what masks the
-// secret ones.
+// secret ones, and the values marked to be masked it meets (plan 17).
 type prepared struct {
 	p      *engine.Program
 	values map[string]string
-	mask   masker
+	mask   *masker
+	marks  marks
+	// inputKept is how many marked values the run's input was kept masked
+	// by, as it began.
+	inputKept int
 }
 
 // bind is ctx with the run's constants, which every expression under it
@@ -417,7 +426,11 @@ func (r *Runner) prepare(ctx context.Context, workflowID string, revision int, i
 	for _, c := range cs {
 		values[c.Name] = c.Value
 	}
-	return &prepared{p: p, values: values, mask: newMasker(cs)}, nil
+	newest, err := r.store.NewestUpstreams(ctx, upstreamsOf(&d))
+	if err != nil {
+		return nil, err
+	}
+	return &prepared{p: p, values: values, mask: newMasker(cs), marks: marksOf(&d, newest)}, nil
 }
 
 // traced is ctx with a trace: the caller's, or one the run starts.
@@ -430,7 +443,7 @@ func traced(ctx context.Context) context.Context {
 
 // begin takes a slot, one of the workflow's share, and records the run as
 // running, in its trace; unless the trace has gone round too often.
-func (r *Runner) begin(ctx context.Context, n store.NewRun, m masker) (store.Run, error) {
+func (r *Runner) begin(ctx context.Context, n store.NewRun, pr *prepared) (store.Run, error) {
 	t, _ := trace.From(ctx)
 	if t.Hops >= trace.MaxHops {
 		return store.Run{}, ErrLoop
@@ -449,7 +462,9 @@ func (r *Runner) begin(ctx context.Context, n store.NewRun, m masker) (store.Run
 	}
 	// Kept masked; the run itself reads the input as it came.
 	input := n.Input
-	n.TraceID, n.Input = t.ID, m.json(input)
+	pr.marks.ofInput(pr.mask, input)
+	pr.inputKept = pr.mask.count()
+	n.TraceID, n.Input = t.ID, pr.mask.json(input)
 	run, err := r.store.StartRun(ctx, n)
 	if err != nil {
 		<-r.slots
@@ -500,12 +515,15 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, pr *prepared, ru
 
 	ends := make(chan nodeEnd, p.NodeCount()) // one per node, so a send never waits
 	written := make(chan struct{})
+	kept := make(map[string]int) // by node, the marked values its record was kept masked by; the writer's until written closes
 	go func() {
 		defer close(written)
 		for n := range ends {
-			r.saveNode(rec, run.ID, n, m)
+			kept[n.result.ID] = r.saveNode(rec, run.ID, n, m)
 		}
 	}()
+	// A run of a workflow a step uses hands this run what it masks.
+	ctx = withMasker(ctx, m)
 
 	// Only the scheduler goroutine, which calls the callback, touches these.
 	started := make(map[string]time.Time)
@@ -516,6 +534,7 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, pr *prepared, ru
 			started[ev.Node] = ev.At
 		}
 		if nr := ev.Result; nr != nil {
+			pr.marks.ofNode(m, *nr)
 			ne.HTTPStatus, ne.Took = nr.HTTPStatus, tookOf(nr.Took)
 			if nr.Status == engine.StatusFailed {
 				ne.Failure = r.failure(ctx, m, run.ID, ev.Node, nr.Err)
@@ -582,9 +601,11 @@ func (r *Runner) execute(ctx context.Context, e *engine.Engine, pr *prepared, ru
 		}
 	}
 
-	// What it answers, and keeps, with no secret in it: a failure's words
-	// were masked as it was made.
-	output, out.Output = m.json(output), m.json(out.Output)
+	// What it answers, and keeps, with no secret in it, and what it keeps
+	// with no marked value in it: a failure's words were masked as they
+	// were made.
+	output, out.Output = m.json(output), m.answer(out.Output)
+	r.remask(rec, run.ID, pr, kept)
 
 	wctx, cancel := context.WithTimeout(rec, writeTimeout)
 	defer cancel()
@@ -636,7 +657,7 @@ func (r *Runner) passOn(ctx context.Context, pr *prepared, run store.Run, res *e
 // failure is err as a Failure. Our bug is logged with its stack, since the
 // client only learns that something went wrong. node is empty for the
 // output expression.
-func (r *Runner) failure(ctx context.Context, m masker, runID, node string, err error) *Failure {
+func (r *Runner) failure(ctx context.Context, m *masker, runID, node string, err error) *Failure {
 	f := &Failure{Code: engine.Classify(err), Detail: m.text(err.Error())}
 	if f.Code == CodeInternal {
 		var pe *engine.PanicError
@@ -648,10 +669,11 @@ func (r *Runner) failure(ctx context.Context, m masker, runID, node string, err 
 	return f
 }
 
-// saveNode records a node that ended, masked. A failure is logged: the run
-// goes on.
-func (r *Runner) saveNode(ctx context.Context, runID string, n nodeEnd, m masker) {
+// saveNode records a node that ended, masked, and says by how many marked
+// values. A failure is logged: the run goes on.
+func (r *Runner) saveNode(ctx context.Context, runID string, n nodeEnd, m *masker) int {
 	rec, err := nodeRecord(runID, n)
+	by := m.count() // before masking: a value met meanwhile only masks more
 	rec.Request, rec.Response, rec.Error = m.json(rec.Request), m.json(rec.Response), m.json(rec.Error)
 	if err == nil {
 		ctx, cancel := context.WithTimeout(ctx, writeTimeout)
@@ -660,6 +682,53 @@ func (r *Runner) saveNode(ctx context.Context, runID string, n nodeEnd, m masker
 	}
 	if err != nil {
 		r.log.ErrorContext(ctx, "record a node", "run", runID, "node", n.result.ID, "err", err)
+	}
+	return by
+}
+
+// remask masks again what the run kept before it met a marked value it has
+// met since (plan 17): its input, kept as it began, before a step gave an
+// ID from it to a parameter its upstream marks, say, and the records of
+// nodes that ended first. A failure is logged: the run has ended.
+func (r *Runner) remask(ctx context.Context, runID string, pr *prepared, kept map[string]int) {
+	m, all := pr.mask, pr.mask.count()
+	var stale []string
+	for node, by := range kept {
+		if by < all {
+			stale = append(stale, node)
+		}
+	}
+	if pr.inputKept == all && len(stale) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+	err := func() error {
+		var input json.RawMessage
+		if pr.inputKept < all {
+			run, err := r.store.Run(ctx, runID)
+			if err != nil {
+				return err
+			}
+			input = m.json(run.Input)
+		}
+		var nodes []store.NodeRun
+		if len(stale) > 0 {
+			ns, err := r.store.NodeRuns(ctx, runID)
+			if err != nil {
+				return err
+			}
+			for _, n := range ns {
+				if slices.Contains(stale, n.NodeID) {
+					n.Request, n.Response, n.Error = m.json(n.Request), m.json(n.Response), m.json(n.Error)
+					nodes = append(nodes, n)
+				}
+			}
+		}
+		return r.store.RemaskRun(ctx, runID, input, nodes)
+	}()
+	if err != nil {
+		r.log.ErrorContext(ctx, "mask a run's records again", "run", runID, "err", err)
 	}
 }
 

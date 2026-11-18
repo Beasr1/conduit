@@ -23,7 +23,10 @@ revoked. Plan 15 is built (2026-11-07): nothing is deleted; a workflow, an
 upstream or a constant nothing live uses is archived, read-only, its name
 kept, and restored. Plan 16 is built (2026-11-12): each workflow has a
 changes list, what happens to what it uses, active until it's dealt with
-or dismissed, and kept for good.**
+or dismissed, and kept for good. Plan 17 is built (2026-11-18): a value
+marked on an upstream's parameter or response field, or on a workflow's
+input field, is kept as stars wherever a run keeps it, all of it or with
+its start, its end or both kept, and answered as it is.**
 The web app signs in with a session cookie, which sign-out or 30 minutes
 unused ends, lists workflows and creates them, and edits, checks, saves
 and publishes one in graph mode, previewing what each step reads and sends
@@ -84,11 +87,16 @@ made, rotated or revoked, the workflow archived or restored. Each is
 recorded in the transaction that makes it, and none holds a constant's
 value. A newer version stays active until a save takes it up, a rotation
 until the old key stops, a constant's change until it's dismissed, and the
-workflow list counts each workflow's active ones. What was built, and
-why, is in docs/plans/04-graph-editor.md, 12-strengthening.md,
-13-minimal-editor.md, 14-the-response-picks.md, 06-hardening.md,
-07-tests-and-catalogue.md, 15-archive.md and 16-changes.md; the bigger
-picture is docs/plans/README.md.
+workflow list counts each workflow's active ones. An upstream's page
+marks a parameter, or a field of its responses, to be masked, and
+Workflow settings a field of the input: a run keeps every copy of a
+marked value as stars, `***********5671`, at least half of it hidden, by
+the upstream's newest version's marks whichever version a step pins, and
+answers it as it is. What was built, and why, is in
+docs/plans/04-graph-editor.md, 12-strengthening.md, 13-minimal-editor.md,
+14-the-response-picks.md, 06-hardening.md, 07-tests-and-catalogue.md,
+15-archive.md, 16-changes.md and 17-masked-fields.md; the bigger picture
+is docs/plans/README.md.
 
 ## Read before working
 
@@ -143,7 +151,7 @@ just dev-server     API server on http://127.0.0.1:8080, after db-up and migrate
 just dev-web        web app on http://127.0.0.1:5173; /api is proxied to the server
 just upstream       the test upstream on http://127.0.0.1:8090, to try runs against
 just check          the gate: format, lint, race tests, coverage floors, typecheck, the browser test on a build, stale generated code
-just e2e            the browser tests: plan 04's Done flow, plan 06's constants, plan 07's library and caller keys, plan 15's archive, plan 16's changes, in Chromium, against their own database, server and test upstream
+just e2e            the browser tests: plan 04's Done flow, plan 06's constants, plan 07's library and caller keys, plan 15's archive, plan 16's changes, plan 17's masks, in Chromium, against their own database, server and test upstream
 just fmt            apply formatting: gofumpt + goimports, Prettier
 just test           Go and web tests
 just gen            regenerate the HTTP layer, the workflow types and web/src/gen from schema/
@@ -212,6 +220,10 @@ CI (`.github/workflows/ci.yml`) runs `just setup` and `just check`, and
   same transaction, by `record` in `internal/store/changes.go`, and put on
   the list of each workflow it touches (plan 16). A new way to change a
   constant, an upstream, a published revision or a key records it there.
+- A run masks every copy of a marked value in what it keeps (plan 17),
+  through its masker (`internal/runner/mask.go`), which grows as the run
+  meets marked values. A new place a run keeps something masks it with
+  `json` or `text`; what it answers takes `answer`, secrets only.
 - A script's click reaches a disabled button, which a person's doesn't, so
   jsdom can't show a disabled control stays shut; `just e2e` can.
 - The page's CSP (nginx) refuses inline styles and eval, and jsdom has no

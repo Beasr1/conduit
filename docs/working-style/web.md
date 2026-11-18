@@ -300,6 +300,17 @@ the API is `/api` on the page's own origin.
   the step, where it's taken up. Its button counts the active ones from
   the active list, which a save, a key's change, an archive or a dismissal
   asks for again (`changeKeys`).
+- Masks (plan 17) are marked where the data's shape is known: on an
+  upstream's page, a mask on each parameter's row and a list of Masked
+  fields; in Workflow settings, Masked input fields. `MaskPicker` is a
+  mask's kind and the characters each end keeps; `MaskedFields` lists
+  fields, offering those a sample has (`fieldsIn`) through a `datalist`,
+  which makes its input a combobox to a screen reader and to a test. A
+  masked input field's problem has its place in the list (`index`), so it
+  shows under its row. A row goes by the room its list has, not the
+  screen's (`@container`, then `@md:`): the same list sits on the
+  upstream's page and in the narrow side panel. The upstream's page has two Add buttons, each in
+  its region, so a browser test scopes its click to one.
 - A dialog that shows a key once, in the Keys panel (plan 07), forgets it
   once it has closed, in `onOpenChangeComplete`, however it was closed:
   setting `open` itself, as Done does, doesn't call `onOpenChange`

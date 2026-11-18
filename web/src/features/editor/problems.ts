@@ -103,7 +103,11 @@ export type Place =
     }
   | { on: "connection"; index: number; field?: "when" | "on" | "required" }
   | { on: "response"; field: ResponseField; answer?: number; line?: number }
-  | { on: "settings"; field: "input_schema" | "sample_input" }
+  | {
+      on: "settings";
+      field: "input_schema" | "sample_input" | "masked_input";
+      index?: number;
+    }
   | { on: "workflow" };
 
 // A problem as the editor shows it: where it is in the draft as it is now,
@@ -159,6 +163,11 @@ export function placeOf(pointer: string): Place {
   }
   if (top === "input_schema" || top === "sample_input")
     return { on: "settings", field: top };
+  // A masked input field's has its place in the list (plan 17).
+  if (top === "masked_input")
+    return isIndex(i)
+      ? { on: "settings", field: top, index: Number(i) }
+      : { on: "settings", field: top };
   return { on: "workflow" };
 }
 
@@ -402,7 +411,9 @@ function partOf(d: Definition, place: Place): unknown {
       return undefined;
     }
     case "settings":
-      return d[place.field];
+      return place.index === undefined
+        ? d[place.field]
+        : d.masked_input?.[place.index];
     default:
       return d;
   }
@@ -683,7 +694,7 @@ function sentence(text: string): string {
 const order = { step: 0, connection: 1, response: 2, settings: 3, workflow: 4 };
 
 function rank(p: Place): [number, number] {
-  return [order[p.on], "index" in p ? p.index : 0];
+  return [order[p.on], "index" in p ? (p.index ?? 0) : 0];
 }
 
 // Kept per draft, so every selector reading the problems in one render

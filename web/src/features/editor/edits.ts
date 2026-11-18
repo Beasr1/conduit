@@ -634,7 +634,12 @@ export function updateEdge(
 // setField gives one of the workflow's own fields a value; undefined removes
 // it. A value it already has gives back the draft itself.
 export function setField<
-  K extends "output" | "input_schema" | "output_schema" | "sample_input",
+  K extends
+    | "output"
+    | "input_schema"
+    | "output_schema"
+    | "sample_input"
+    | "masked_input",
 >(d: Definition, key: K, value: Definition[K]): Definition {
   if (JSON.stringify(d[key]) === JSON.stringify(value)) return d;
   const next = { ...d };

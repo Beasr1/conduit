@@ -101,6 +101,8 @@ resolve, but their claims weren't re-read.
 | One fieldset makes a read-only panel, a tab a `div` inside it (plan 15) | HTML: `disabled` on a fieldset "causes all the form control descendants of the fieldset element" to be disabled ✓ [125]; Base UI's `nativeButton`: "Set to `false` if the rendered element is not a button (for example, `<div>`)" ✓ [126] |
 | A workflow's changes are kept for good, active until dealt with or dismissed (plan 16, 2026-11-12) | Dependabot's split: an alert is dismissed with "a reason", or `fixed` by GitHub itself, as a person can set only `dismissed` or `open` ✓ [128][129] |
 | What a field is for is a hint behind ⓘ beside its label, a line or two, rather than a sentence under it; a hint is a popover that opens on hover or a press (plan 13, 2026-11-02) | Base UI: "Popups that open when hovering an info icon should use Popover with the openOnHover prop on the trigger instead of a tooltip", as "Tooltips don't work well with touch input" and "are disabled on touch devices"; and "If the description is important to understanding the element, don't hide it behind a tooltip" ✓ [89], so a problem stays under its field |
+| A marked value is masked in what a run keeps, never in what it answers (plan 17, 2026-11-18) | Apigee's masks hide data "in trace and debug sessions", and "Data masking does not affect the data that gets sent to targets or client applications" ✓ [133] |
+| A mask hides all of a value, or keeps its start, its end or both, and always hides at least half (plan 17) | Datadog's partial redaction "will redact the first n or last n characters" ✓ [134][135]; card rules allow "no more than the BIN and last four digits of the PAN" ✓ [136], so the half is stricter; OWASP lists "government identifiers" among what logs should have "removed, masked, sanitized, hashed, or encrypted" ✓ [137] |
 
 ## Contested: kept anyway, revisit if it hurts
 
@@ -114,6 +116,7 @@ resolve, but their claims weren't re-read.
 | No Redis in v1 | the spec lists it | nothing in v1 needs it; agreed as D7 |
 | nginx's stable branch | nginx recommends mainline: "This version is recommended for production unless your organization has strict requirements for stability" ✓ [86] | fewer changes. CI builds the images and tests nginx's config (`just images`, 2026-11-01), so following mainline is dropping one ignore rule in `dependabot.yml` |
 | History kept for good (plan 16, your call, 2026-11-05) | GitHub keeps notifications marked Done "for 3 months" ✓ [130]; Stripe's events can be retrieved "for 30 days" ✓ [131]; Kubernetes keeps events an hour, `--event-ttl` defaulting to `1h0m0s` ✓ [132] | an audit trail is the point, and the rows are small; a retention rule can come with accounts if it must |
+| Every copy of a marked value is masked, wherever it shows up in a run (plan 17, your call, 2026-11-18) | Apigee masks a field only where a JSONPath names it: "Using JSONPath, you identify JSON properties to be filtered from request or response message payloads" ✓ [133] | an ID from the input goes on into URLs, bodies and other steps' responses; masking it only where it's named would keep every copy |
 | Only what nothing live uses is archived (plan 15, 2026-11-06) | Stripe archives what's still in use: a price's `active` is "Whether the price can be used for new purchases" ✓ [127], so what uses it goes on | your call: archived means retired, so nothing runs on it, and the refusal names what's left to do |
 | Upstreams only: Publish refuses an HTTP step with a request of its own (plan 07, 2026-11-03) | every tool checked keeps a generic HTTP step beside its catalog: n8n's HTTP Request node "allows you to make HTTP requests to query data from any app or service with a REST API" ✓ [105]; Logic Apps: "To call an endpoint from anywhere else in your workflow, add the built-in action named HTTP" ✓ [106]; Step Functions' HTTP Task holds its URL and method itself, and shares only the credentials, through a connection that "helps you avoid hard-coding secrets, such as API keys, into your state machine definition" ✓ [107] | your call: every call, and how it's handled, in one place. Their catalogs are the vendor's, so a generic step is the only way to an API they lack; ours is the user's, and Add HTTP step makes an upstream from a call |
 | 508 for a loop (plan 06) | none of the gateways checked uses it: Fastly answers 503, Envoy 502, Tyk 500; RFC 5842 defines it for WebDAV's "Depth: infinity" ✓ [101] | it's the registered code named for a loop, and a 503 asks for a retry that never helps one (your call, with plan 06, 2026-11-02) |
@@ -312,6 +315,11 @@ WCAG 2.2, a W3C Recommendation of 12 December 2024 ✓ [38].
 130. https://docs.github.com/en/subscriptions-and-notifications/how-tos/viewing-and-triaging-notifications/managing-notifications-from-your-inbox
 131. https://docs.stripe.com/api/events
 132. https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/
+133. https://docs.cloud.google.com/apigee/docs/api-platform/security/data-masking
+134. https://docs.datadoghq.com/security/sensitive_data_scanner/
+135. https://www.datadoghq.com/blog/sds-dlp-for-financial-service-companies/
+136. https://pcisecuritystandards.org/faq/articles/Frequently_Asked_Question/how-can-an-entity-meet-pci-dss-requirements-for-pan-masking-and-truncation-if-it-has-migrated-to-8-digit-bins
+137. https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
 
 Also used while designing the engine: Windmill OpenFlow
 (https://www.windmill.dev/docs/openflow), Kestra outputs

@@ -148,6 +148,7 @@ func TestUpstreams_Refusals(t *testing.T) {
 	t.Parallel()
 	id := makeUpstream(t, usersAPI).Upstream.ID
 	typo := strings.Replace(usersAPI, "{{ user_id }}", "{{ usr_id }}", 1)
+	badMask := strings.Replace(usersAPI, `{"name": "user_id"}`, `{"name": "user_id", "mask": {"end": 9}}`, 1)
 	tests := []struct {
 		name, method, path, body string
 		headers                  []string
@@ -162,6 +163,12 @@ func TestUpstreams_Refusals(t *testing.T) {
 			"a problem in a new version", http.MethodPut, "/v1/upstreams/" + id, typo,
 			[]string{"If-Match", `"1"`},
 			http.StatusUnprocessableEntity, "invalid_upstream", "/request/url unknown_parameter",
+		},
+		{
+			// Plan 17.
+			"a mask that keeps too much", http.MethodPut, "/v1/upstreams/" + id, badMask,
+			[]string{"If-Match", `"1"`},
+			http.StatusUnprocessableEntity, "invalid_upstream", "/parameters/0/mask/end invalid_mask",
 		},
 		{
 			"no name", http.MethodPost, "/v1/upstreams", `{"name": "", "definition": ` + usersAPI + `}`, nil,

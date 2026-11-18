@@ -113,9 +113,11 @@ function fieldOf(
           return undefined;
       }
     case "settings":
-      return place.field === "input_schema"
-        ? "workflow-input-schema"
-        : "workflow-sample-input";
+      return {
+        input_schema: "workflow-input-schema",
+        sample_input: "workflow-sample-input",
+        masked_input: "workflow-masked-input",
+      }[place.field];
     default:
       return undefined;
   }
@@ -326,7 +328,13 @@ export function Where({ place, draft }: { place: Place; draft: Definition }) {
       return (
         <>
           Workflow settings ·{" "}
-          {place.field === "input_schema" ? "Input schema" : "Sample input"}
+          {
+            {
+              input_schema: "Input schema",
+              sample_input: "Sample input",
+              masked_input: "Masked input fields",
+            }[place.field]
+          }
         </>
       );
     default:

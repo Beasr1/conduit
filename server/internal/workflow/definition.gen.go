@@ -98,7 +98,10 @@ type Definition struct {
 
 	// InputSchema A JSON Schema (2020-12) that run input must match. A served workflow answers input that doesn't with 400. Its $refs can only point inside it.
 	InputSchema map[string]interface{} `json:"input_schema,omitempty"`
-	Nodes       []Node                 `json:"nodes"`
+
+	// MaskedInput Fields of the run's input whose values are kept masked wherever a run keeps a copy of them (plan 17). The run, and its caller, read them as they came. A served run masks by the published revision's.
+	MaskedInput []MaskedField `json:"masked_input,omitempty"`
+	Nodes       []Node        `json:"nodes"`
 
 	// Output Kept for revisions saved with it, as response replaces it. JSONata over the finished run; such a definition answers 200 with its value. A definition has an output or a response, not both.
 	Output string `json:"output,omitempty"`
@@ -165,6 +168,24 @@ type HTTPRequest struct {
 // HTTPRequestMethod defines model for HTTPRequest.Method.
 type HTTPRequestMethod string
 
+// Mask How a marked value is kept in a run's records (plan 17), a star for each character hidden. With neither start nor end, all of it is hidden. At least half of it always is, rounded up, so a mask that would show more shows less, its start giving way first.
+type Mask struct {
+	// End Characters kept at its end.
+	End int `json:"end,omitempty"`
+
+	// Start Characters kept at its start.
+	Start int `json:"start,omitempty"`
+}
+
+// MaskedField defines model for MaskedField.
+type MaskedField struct {
+	// Field Where its values are, as an expression reads a field, customer.emirates_id. Over an array, contacts.phone is each item's. A name of other than letters, digits and underscores is in backticks, `first-name`. A field holding an object or an array has every value in it masked.
+	Field string `json:"field"`
+
+	// Mask How a marked value is kept in a run's records (plan 17), a star for each character hidden. With neither start nor end, all of it is hidden. At least half of it always is, rounded up, so a mask that would show more shows less, its start giving way first.
+	Mask Mask `json:"mask"`
+}
+
 // Node defines model for Node.
 type Node struct {
 	// Expr A transform node's JSONata. Its value becomes the node's body. A transform node has an expr or a switch.
@@ -221,6 +242,9 @@ type Output struct {
 
 // Parameter defines model for Parameter.
 type Parameter struct {
+	// Mask With one, the value a step gives the parameter is kept masked wherever a run keeps a copy of it (plan 17). A run masks by the upstream's newest version's, whichever version its step pins.
+	Mask *Mask `json:"mask,omitempty"`
+
 	// Name Unique in its upstream. Its templates read it as {{ name }}, and its body as name.
 	Name string `json:"name"`
 
@@ -277,6 +301,9 @@ type UI struct {
 
 // Upstream A saved API endpoint and how it's handled, one version of it (plan 07). Every save makes a new version, which never changes, and a step that uses the upstream pins one. Its templates and body read its parameters by name, {{ user_id }}, and each step that uses it gives them values.
 type Upstream struct {
+	// Masked Fields of its responses, at any status, whose values are kept masked wherever a run keeps a copy of them (plan 17). A run masks by the upstream's newest version's, whichever version its step pins.
+	Masked []MaskedField `json:"masked,omitempty"`
+
 	// Outputs Its answers besides 2xx, as an http node's. A step that uses it has a block for each, and lines from them.
 	Outputs []Output `json:"outputs,omitempty"`
 

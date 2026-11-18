@@ -101,6 +101,29 @@ func (s *Store) SaveNodeRun(ctx context.Context, n NodeRun) error {
 	return nil
 }
 
+// RemaskRun rewrites what a run kept, masked again (plan 17): its input,
+// unless it's nil, and each of nodes' request, response and error.
+func (s *Store) RemaskRun(ctx context.Context, runID string, input json.RawMessage, nodes []NodeRun) error {
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if input != nil {
+			if _, err := tx.Exec(ctx, `UPDATE runs SET input = $2 WHERE id = $1::uuid`, runID, input); err != nil {
+				return err
+			}
+		}
+		for _, n := range nodes {
+			if _, err := tx.Exec(ctx, `UPDATE node_runs SET request = $3, response = $4, error = $5 WHERE run_id = $1::uuid AND node_id = $2`,
+				runID, n.NodeID, orNull(n.Request), orNull(n.Response), orNull(n.Error)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("mask run %s again: %w", runID, translate(err))
+	}
+	return nil
+}
+
 // FinishRun records how a run ended, and returns it as it now stands.
 // answered is the status it answered with, or 0 for none.
 func (s *Store) FinishRun(ctx context.Context, id, status string, answered int, output json.RawMessage, truncated bool, errDoc json.RawMessage) (Run, error) {

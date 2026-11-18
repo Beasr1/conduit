@@ -43,6 +43,12 @@ components:
         sample_input:
           description: A made-up run input, any JSON, that previews read. Runs ignore it. At most 64 KiB.
           x-go-type: json.RawMessage
+        masked_input:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/MaskedField"
+          description: Fields of the run's input whose values are kept masked wherever a run keeps a copy of them (plan 17). The run, and its caller, read them as they came. A served run masks by the published revision's.
         ui:
           $ref: "#/components/schemas/UI"
           description: How the editor draws the workflow. The engine ignores it.
@@ -139,6 +145,12 @@ components:
           items:
             $ref: "#/components/schemas/Output"
           description: Its answers besides 2xx, as an http node's. A step that uses it has a block for each, and lines from them.
+        masked:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/MaskedField"
+          description: Fields of its responses, at any status, whose values are kept masked wherever a run keeps a copy of them (plan 17). A run masks by the upstream's newest version's, whichever version its step pins.
 
     Uses:
       type: object
@@ -170,6 +182,38 @@ components:
         sample:
           description: A made-up value, any JSON, which the library's preview of the upstream gives the parameter; a step gives it its own. At most 64 KiB.
           x-go-type: json.RawMessage
+        mask:
+          $ref: "#/components/schemas/Mask"
+          description: With one, the value a step gives the parameter is kept masked wherever a run keeps a copy of it (plan 17). A run masks by the upstream's newest version's, whichever version its step pins.
+          x-go-type-skip-optional-pointer: false
+
+    Mask:
+      type: object
+      additionalProperties: false
+      description: How a marked value is kept in a run's records (plan 17), a star for each character hidden. With neither start nor end, all of it is hidden. At least half of it always is, rounded up, so a mask that would show more shows less, its start giving way first.
+      properties:
+        start:
+          type: integer
+          minimum: 1
+          maximum: 8
+          description: Characters kept at its start.
+        end:
+          type: integer
+          minimum: 1
+          maximum: 8
+          description: Characters kept at its end.
+
+    MaskedField:
+      type: object
+      required: [field, mask]
+      additionalProperties: false
+      properties:
+        field:
+          type: string
+          maxLength: 256
+          description: Where its values are, as an expression reads a field, customer.emirates_id. Over an array, contacts.phone is each item's. A name of other than letters, digits and underscores is in backticks, `first-name`. A field holding an object or an array has every value in it masked.
+        mask:
+          $ref: "#/components/schemas/Mask"
 
     NodeKind:
       type: string

@@ -231,7 +231,7 @@ func (n *node) request(ctx context.Context, doc []byte, key string) (*SentReques
 		if len(errs) > 0 {
 			return req, errs
 		}
-		doc = params
+		doc, req.Params = params, params
 	}
 	var errs []partError
 	fail := func(part, pointer string, err error) {

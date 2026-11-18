@@ -30,7 +30,8 @@ export function wordsOf(c: Change): Words {
       };
     case "upstream_version":
       return {
-        text: `${d.name ?? ""} has version ${d.version ?? ""}${active ? ": a step uses an older one" : ""}`,
+        // Its masks apply to runs of every version at once (plan 17).
+        text: `${d.name ?? ""} has version ${d.version ?? ""}${active ? ": a step uses an older one" : ""}${d.masks ? ". Its new masks apply to every run now" : ""}`,
       };
     case "workflow_published":
       return {

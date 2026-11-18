@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -103,7 +105,9 @@ func (s *Store) UpstreamVersion(ctx context.Context, id string, version int) (Up
 // else saved in between, and this save would silently undo their change.
 // A def that's base's, by value, makes no version: base is the answer, as
 // it was. An archived upstream is ErrArchived. A new version goes on the list
-// of each workflow that pins an older one (plan 16).
+// of each workflow that pins an older one (plan 16), saying whether it
+// changed what the upstream masks, which runs of every version mask by at
+// once (plan 17).
 func (s *Store) SaveUpstreamVersion(ctx context.Context, id string, base int, def json.RawMessage, p Provenance) (UpstreamVersion, error) {
 	var v UpstreamVersion
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -128,6 +132,18 @@ func (s *Store) SaveUpstreamVersion(ctx context.Context, id string, base int, de
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err // nil: nothing changed
 		}
+		var was json.RawMessage
+		if err := tx.QueryRow(ctx, `SELECT definition FROM upstream_versions WHERE upstream_id = $1::uuid AND version = $2`, id, base).Scan(&was); err != nil {
+			return err
+		}
+		before, err := marksIn(was)
+		if err != nil {
+			return err
+		}
+		after, err := marksIn(def)
+		if err != nil {
+			return err
+		}
 		v, err = one[UpstreamVersion](ctx, tx, `INSERT INTO upstream_versions (upstream_id, version, definition, provenance)
 			VALUES ($1::uuid, $2, $3, $4) RETURNING `+versionColumns, id, latest+1, def, p)
 		if err != nil {
@@ -140,12 +156,64 @@ func (s *Store) SaveUpstreamVersion(ctx context.Context, id string, base int, de
 		if err != nil {
 			return err
 		}
-		return record(ctx, tx, "upstream_version", "upstream", id, ChangeDetail{Name: name, Version: latest + 1}, p, to...)
+		return record(ctx, tx, "upstream_version", "upstream", id, ChangeDetail{Name: name, Version: latest + 1, Masks: before != after}, p, to...)
 	})
 	if err != nil {
 		return UpstreamVersion{}, fmt.Errorf("save upstream %s on version %d: %w", id, base, translate(err))
 	}
 	return v, nil
+}
+
+// NewestUpstreams is the newest version of each upstream of ids there is,
+// decoded, by id: a run masks what it marks, whichever version its step
+// pins (plan 17).
+func (s *Store) NewestUpstreams(ctx context.Context, ids []string) (map[string]*workflow.Upstream, error) {
+	newest := map[string]*workflow.Upstream{}
+	if len(ids) == 0 {
+		return newest, nil
+	}
+	// As text, so an id that isn't a UUID is one the library doesn't have.
+	rows, err := s.pool.Query(ctx, `SELECT u.id::text, v.definition FROM upstreams u
+		JOIN upstream_versions v ON v.upstream_id = u.id AND v.version = u.latest_version
+		WHERE u.id::text = ANY($1::text[])`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("get the newest versions of upstreams: %w", translate(err))
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var def json.RawMessage
+		if err := rows.Scan(&id, &def); err != nil {
+			return nil, fmt.Errorf("get the newest versions of upstreams: %w", translate(err))
+		}
+		var u workflow.Upstream
+		if err := json.Unmarshal(def, &u); err != nil {
+			return nil, fmt.Errorf("decode the newest version of upstream %s: %w", id, err)
+		}
+		newest[id] = &u
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get the newest versions of upstreams: %w", translate(err))
+	}
+	return newest, nil
+}
+
+// marksIn is what an upstream's version def marks (plan 17), written the
+// same whatever order its fields are listed in.
+func marksIn(def json.RawMessage) (string, error) {
+	var u workflow.Upstream
+	if err := json.Unmarshal(def, &u); err != nil {
+		return "", fmt.Errorf("decode an upstream's version: %w", err)
+	}
+	params := map[string]workflow.Mask{}
+	for _, p := range u.Parameters {
+		if p.Mask != nil {
+			params[p.Name] = *p.Mask
+		}
+	}
+	fields := slices.SortedFunc(slices.Values(u.Masked), func(a, b workflow.MaskedField) int { return strings.Compare(a.Field, b.Field) })
+	b, err := json.Marshal(map[string]any{"parameters": params, "fields": fields})
+	return string(b), err
 }
 
 // UpstreamUse is a latest or published revision of a workflow not archived
